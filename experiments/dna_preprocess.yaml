@@ -1,0 +1,200 @@
+# Build WISDOM geometry/annotations from one already curated selection with LambdaForge 0.10.
+kind: dataset                         # Publish one immutable first-class DatasetVersion.
+schema_version: "1.0"                # LambdaForge dataset-recipe authoring schema.
+output_root: ../runs/datasets         # Stage cache, build evidence, and local publication root.
+max_parallel: 1                       # Preserve geometry → annotation ordering.
+resources: {cpus: 36, memory: 128GiB, gpus: 0, time: 24h}  # Exact shared outer reservation.
+
+dataset:                              # Immutable scientific identity published after both stages.
+  name: wisdom-dna                   # Stable Registry name consumed by WISDOM experiments.
+  version: "2"                       # Balanced release built from the fetched selection artifact.
+  target_schema:                     # Closed supervised/evaluation target contract per member.
+    type: object                     # Every targets value is a JSON object.
+    properties:                     # Exactly two currently supported target meanings.
+      dna_binding: {type: integer, enum: [0, 1]}  # Curated global binary protein label.
+      local_ground_truth: {type: boolean}  # Whether reliable surface localization GT exists.
+    required: [dna_binding, local_ground_truth]  # Both target fields must be present.
+    additionalProperties: false      # Reject accidental undeclared task labels.
+  global_assets:                    # Dataset-wide files/directories included in content identity.
+    manifest: manifest.csv           # Complete balanced train/val/test model manifest.
+    subsets: subsets                 # Curated dilution directories and portable model manifests.
+    local_manifest: local-manifest.csv  # Localization evaluation and reserve replacements.
+    catalog: catalog.csv             # Complete evidence and selected-structure audit table.
+    identifiers: identifiers.json    # Full IDs, labels, splits, clusters, tiers, and reserve flags.
+    proteins: proteins.txt           # Full IDs plus positive local-evaluation reserves.
+    train_ids: train.txt             # Complete balanced training identifiers.
+    validation_ids: val.txt          # Complete balanced validation identifiers.
+    test_ids: test.txt               # Complete balanced external-test identifiers.
+    annotation_report: annotation-report.json  # Annotation availability and subset counts.
+  metadata:                          # Human-facing Registry metadata; never a physical path.
+    description: Curated balanced DNA-binding proteins with WISDOM surfaces and nested dilution views.  # Summary.
+    structural_schema: "2.1"         # Universal NPZ scientific array contract.
+    annotation_schema: "1.1"        # DNA sidecar scientific array contract.
+    selection_schema: "1.0"         # Lightweight curation artifact contract.
+    supervision: protein-level-only  # Local targets remain evaluation-only.
+
+# Dataset descriptor option reference:
+# name/version are required and immutable. inputs=[] records managed upstream dataset selectors;
+# this recipe instead fingerprints a small ordinary Task artifact through stage inputs.
+# target_schema={} accepts arbitrary targets; global_assets={}, lineage={}, metadata={} by default.
+# loader=null by default; WISDOM's three explicit loaders select rows from a resolved manifest.
+# A content change requires a new dataset.version after version 2 has been published.
+
+stages:                               # Two heavy stages; curation is intentionally absent.
+  geometry:                          # Download selected structures and generate universal NPZ files.
+    task:                            # Embedded structural PreprocessingTask.
+      kind: task                     # Ordinary stage Task, not a separately published dataset.
+      schema_version: "1.0"          # LambdaForge Task schema.
+      name: wisdom-dna-geometry      # Stable stage-cache namespace.
+      resume: true                   # Revalidate exact existing per-protein NPZ records.
+      rerun_completed: false         # Reuse an exact completed geometry stage.
+      inputs:                        # Fetched output from experiments/dna_select.yaml.
+        protein_identifiers: ../data/dna/selection/proteins.txt  # Full selection plus reserves.
+      outputs:                       # Named geometry-stage paths.
+        downloads: raw              # Parallel RCSB coordinate cache reused by annotation.
+        processed: processed        # Validated universal NPZ archives.
+        report: preprocessing-report.json  # Exact identifier-to-NPZ audit.
+      required_artifacts:            # Complete reusable geometry products.
+        - raw                        # Exact downloaded compressed coordinate directory.
+        - processed                  # Universal archive directory.
+        - preprocessing-report.json  # Scientific report consumed by annotation.
+        - preprocessing-manifest.json  # LambdaForge record/checkpoint manifest.
+      task:                          # Framework-owned per-protein processing loop.
+        target: lambdaforge.preprocessing.PreprocessingTask  # Stable keys/workers/checkpoints.
+        params:                      # Complete geometry-stage constructor arguments.
+          source:                    # Convert the selected TXT file into stable protein records.
+            target: preprocess.ProteinSource.ProteinSource  # Strict PDB_CHAIN/path source.
+            params: {input_name: protein_identifiers}  # Named selection input.
+          transforms:               # Parse, build sparse graphs, and sample the surface.
+            - target: preprocess.PreprocessPipeline.PreprocessPipeline  # One-protein pipeline.
+              params:               # Download bindings and immutable scientific configuration.
+                identifier_input: protein_identifiers  # Declared path-security input.
+                download_output: downloads  # Named parallel RCSB cache.
+                download: true      # Retrieve cache-missing selected PDB entries.
+                config:             # Cohesive structural configuration object.
+                  target: preprocess.PreprocessConfig.PreprocessConfig  # Scientific config class.
+                  params:           # Atom selection, sparse graphs, surface, and curvature scales.
+                    model_index: 0  # Zero-based coordinate model.
+                    chains: []      # Defer chains to each PDB_CHAIN identifier.
+                    include_hydrogens: false  # Exclude hydrogens from fixed geometry.
+                    include_waters: false  # Exclude crystallographic water.
+                    include_nonpolymer: false  # Exclude non-polymer ligands.
+                    include_metals: false  # Exclude isolated metal atoms.
+                    center_coordinates: true  # Center coordinates and retain reversible origin.
+                    atom_radius: 6.0  # Atom spatial-edge cutoff in angstroms.
+                    surface_resolution: 1.0  # Target surface spacing in angstroms.
+                    probe_radius: 1.4  # Solvent-probe radius in angstroms.
+                    atom_surface_radius: 6.0  # Surface-to-atom edge cutoff in angstroms.
+                    curvature_scales: [2.5, 5.0]  # Geodesic fit radii in angstroms.
+          sink:                      # Validate and publish geometry plus download cache.
+            target: preprocess.ProteinSink.ProteinSink  # Universal NPZ sink.
+            params:                  # Named input/output contracts.
+              identifier_input: protein_identifiers  # Preserve selection order in the report.
+              dataset_output: processed  # Universal NPZ directory.
+              report_output: report  # Scientific report file.
+              download_output: downloads  # Declare raw coordinates for annotation reuse.
+          workers: 36               # One spawned CPU worker per allocated core.
+          workload: cpu             # LambdaForge process pool for CPU-bound geometry.
+          on_error: fail            # No selected balanced member may silently disappear.
+          checkpoint_interval: 1    # Persist progress after every expensive protein.
+    required: true                  # Dataset publication requires complete universal geometry.
+    reuse: auto                     # Reuse only an exact verified stage fingerprint/artifact set.
+
+    # Geometry option reference:
+    # Task defaults: resume=true, rerun_completed=false, inputs/outputs={}, required_artifacts=[].
+    # ProteinSource input_name="protein_identifiers". PreprocessPipeline defaults:
+    # config=PreprocessConfig(), identifier_input="protein_identifiers", download_output="downloads",
+    # download=true. PreprocessConfig defaults equal the selected values; curvature_scales must be a
+    # non-empty strictly increasing positive sequence and all radii/resolution must be positive
+    # (probe_radius may be zero). ProteinSink defaults: identifier_input="protein_identifiers",
+    # dataset_output="processed", report_output="report", download_output=null.
+    # PreprocessingTask defaults: workers=1, workload="auto", on_error="fail", checkpoint_interval=1,
+    # progress_interval_seconds=10.0, shard_count=1, shard_index=0, publish_dataset=false.
+
+  annotate:                          # Project DNA evaluation targets onto exact universal points.
+    needs: [geometry]                # Consume only the exact successful geometry stage.
+    bindings:                       # Reuse geometry outputs without duplicate downloads.
+      inputs.base_preprocessing_report: ${nodes.geometry.artifacts.preprocessing-report.json}  # NPZ map.
+      inputs.structure_cache: ${nodes.geometry.artifacts.raw}  # Exact compressed RCSB bytes.
+    task:                            # Embedded annotation Task selected for publication.
+      kind: task                     # Ordinary stage; recipe owns the publication boundary.
+      schema_version: "1.0"          # LambdaForge Task schema.
+      name: wisdom-dna-annotate      # Stable stage-cache namespace.
+      resume: true                   # Revalidate exact aligned sidecars before reuse.
+      rerun_completed: false         # Reuse an exact completed annotation stage.
+      inputs:                        # Selection plus validation-safe geometry fallbacks.
+        selection: ../data/dna/selection  # Complete fetched lightweight artifact.
+        dataset_catalog: ../data/dna/selection/catalog.csv  # Labels/evidence table.
+        base_preprocessing_report: ../data/dna/selection/identifiers.json  # Runtime-bound fallback.
+        structure_cache: ../data/dna/selection  # Runtime-bound fallback directory.
+      outputs:                       # Final dataset and annotation working cache.
+        annotations: annotations     # NPZ, sidecars, structures, manifests, catalog, and index.
+        annotation-report: annotations/annotation-report.json  # Audit included in publication.
+        resolved-structures: resolved-structures  # Verified uncompressed geometry cache.
+      required_artifacts:            # Final-stage completion contract.
+        - annotations                # Complete publish root containing members.jsonl.
+        - annotations/annotation-report.json  # Human/machine annotation audit.
+        - preprocessing-manifest.json  # Framework record/checkpoint manifest.
+      task:                          # Framework-owned per-protein annotation loop.
+        target: lambdaforge.preprocessing.PreprocessingTask  # Iteration and checkpoint lifecycle.
+        params:                      # Complete annotation-stage constructor arguments.
+          source:                    # Join selection, NPZ report, and shared coordinates.
+            target: wisdom.dna.DNAAnnotationSource.DNAAnnotationSource  # Strict three-input join.
+            params:                  # Named catalog/report/archive inputs.
+              catalog_input: dataset_catalog  # Curated labels/evidence.
+              base_report_input: base_preprocessing_report  # Exact geometry report.
+              structure_cache_input: structure_cache  # Geometry's compressed RCSB cache.
+          transforms:               # Compute evaluation-only point labels/sensitivity targets.
+            - target: wisdom.dna.DNAAnnotationTransform.DNAAnnotationTransform  # DNA projection.
+              params:               # Surface gap thresholds in angstroms.
+                positive_gap: 1.4   # At/below this gap is confidently positive.
+                negative_gap: 3.0   # At/above this gap is confidently negative.
+                sensitivity_gaps: [1.0, 1.4, 2.0]  # Evaluation-only positive cutoffs.
+                structure_output: resolved-structures  # Parallel verified uncompressed cache.
+          sink:                      # Join curated subsets to paths and write members.jsonl.
+            target: wisdom.dna.DNAAnnotationSink.DNAAnnotationSink  # Final dataset sink.
+            params:                  # Named outputs and portable selection input.
+              annotation_output: annotations  # Self-contained publish root.
+              report_output: annotation-report  # Nested JSON audit output.
+              selection_input: selection  # Copy catalog/IDs/subsets as audit assets.
+          workers: 36               # One spawned CPU worker per allocated core.
+          workload: cpu             # LambdaForge CPU process strategy.
+          on_error: fail            # Refuse incomplete annotation or subset joins.
+          checkpoint_interval: 1    # Persist after every annotated protein.
+    required: true                  # Final publication requires annotation/index.
+    reuse: auto                     # Reuse only exact verified annotation content.
+
+    # Annotation option reference:
+    # DNAAnnotationSource defaults: catalog_input="dataset_catalog",
+    # base_report_input="base_preprocessing_report", structure_cache_input="structure_cache".
+    # DNAAnnotationTransform defaults: positive_gap=1.4, negative_gap=3.0,
+    # sensitivity_gaps=(1.0,1.4,2.0), structure_output="resolved_structures"; gaps are positive and
+    # negative_gap must exceed positive_gap. DNAAnnotationSink defaults: annotation_output="annotations",
+    # report_output="annotation-report.json", selection_input=null. PreprocessingTask defaults are
+    # listed under geometry; intermediate task dataset publication remains disabled.
+
+# Stage option reference:
+# task is required and may be embedded or a relative Task YAML. needs=[] declares parents;
+# bindings={} replaces exact downstream paths with upstream output/artifact paths; required=true
+# blocks publication on failure; reuse="auto" reuses exact verified content and reuse="never" always
+# executes. `--force-stage geometry` invalidates both stages.
+
+publish:                              # Single atomic boundary after both required stages succeed.
+  from: annotate                     # Select the final self-contained annotation-stage output.
+  root: annotations                  # Directory staged and copied to the dataset placement.
+  index: members.jsonl               # Canonical checksummed logical-member index.
+
+# Publish option reference:
+# from has no default and must name a stage; root="." by default; index has no default and must be a
+# safe root-relative DatasetIndex. LambdaForge validates IDs, targets, assets, checksums, global
+# assets, and required stages before atomic rename and Registry registration.
+
+metadata:                             # Descriptive recipe metadata; algorithms ignore it.
+  phase: geometry-and-dna-annotation # Selection is an upstream ordinary Task artifact.
+  framework_contract: lambdaforge-0.10.0  # DatasetRecipe/Registry/resource lifecycle generation.
+
+# Recipe option reference:
+# output_root="runs/datasets" and max_parallel=1 by default. Top-level resources has no default and,
+# when present, is the exact outer reservation for canonical `lf run`. Valid fields are cpus>0,
+# memory/time unit strings, gpus>=0, and processes>0. Processes is omitted because one coordinator
+# owns both sequential 36-worker pools.

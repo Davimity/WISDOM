@@ -1,0 +1,70 @@
+kind: task
+schema_version: '1.0'
+name: wisdom-dna-select
+output_root: ../runs/tasks
+resume: true
+rerun_completed: false
+inputs:
+- name: public_sources
+  path: inputs/0-public-sources.json
+required_artifacts:
+- selection
+- selection-report
+- preprocessing-manifest.json
+task:
+  target: lambdaforge.preprocessing.PreprocessingTask
+  params:
+    source:
+      target: wisdom.dna.DNADatasetSource.DNADatasetSource
+      params:
+        mode: live
+        source_manifest_input: public_sources
+        cache_output: discovery-cache
+        positive_source: dyprol-v1
+        negative_source: btd-combo-2024
+        max_positive_candidates: 0
+        max_negative_candidates: 0
+        requests_per_second: 4.0
+        retries: 5
+    transforms:
+    - target: wisdom.dna.DNACandidateCurator.DNACandidateCurator
+      params:
+        contact_distance: 4.5
+        minimum_residues: 30
+        minimum_interface_residues: 2
+        challenge_aspect_ratio: 4.0
+        minimum_sequence_coverage: 0.8
+        maximum_resolution: 4.0
+        cache_output: discovery-cache
+        requests_per_second: 4.0
+        retries: 5
+    sink:
+      target: wisdom.dna.DNASelectionSink.DNASelectionSink
+      params:
+        dataset_output: selection
+        report_output: selection-report
+        checkpoint_output: selection-checkpoints
+        seed: 2026
+        validation_fraction: 0.2
+        reserve_fraction: 0.1
+        dilutions:
+        - 0.1
+        - 0.25
+        - 0.5
+        - 0.75
+    workers: 72
+    workload: io
+    on_error: fail
+    checkpoint_interval: 100
+extensions:
+  authoring:
+    outputs:
+      selection: selection
+      selection-report: selection-report
+      selection-checkpoints: selection-checkpoints
+      discovery-cache: discovery-cache
+    resources:
+      cpus: 36
+      memory: 64GiB
+      gpus: 0
+      time: 24h

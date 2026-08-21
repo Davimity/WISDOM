@@ -1,0 +1,38 @@
+{
+  "allocated_cpus": [
+    0
+  ],
+  "allocated_gpus": [],
+  "created_at_utc": "2026-08-14T12:38:23.174717+00:00",
+  "exit_code": 1,
+  "finished_at_utc": "2026-08-14T13:53:22.574361+00:00",
+  "heartbeat_at_utc": "2026-08-14T13:53:21.544299+00:00",
+  "job_id": "job-20260814123823-32ce362c",
+  "job_state_version": 1,
+  "message": "Scientific process exited with code 1.",
+  "observed_usage": {
+    "cpu_percent": 0.0,
+    "gpu_memory_bytes": 0,
+    "pid": 1404872,
+    "rss_bytes": 569139200,
+    "threads": 2,
+    "timestamp_utc": "2026-08-14T13:53:21.544299+00:00"
+  },
+  "process_identity": {
+    "command_sha256": "cb7f0535641dca705cda5df32fd55360872b42ff0f6b812ca688364cc8740617",
+    "create_time": 1786711104.43,
+    "job_id": "job-20260814123823-32ce362c",
+    "pid": 1404872,
+    "process_group": 1404872
+  },
+  "started_at_utc": "2026-08-14T12:38:25.181447+00:00",
+  "state": "failed",
+  "supervisor_identity": {
+    "command_sha256": "630a407c1f73ca5e4f877de0ccc6392b6429dc323bb53d1b27ee05aed96d0f15",
+    "create_time": 1786711103.43,
+    "job_id": "job-20260814123823-32ce362c",
+    "pid": 1404839,
+    "process_group": 1404839
+  },
+  "updated_at_utc": "2026-08-14T13:53:22.574376+00:00"
+}

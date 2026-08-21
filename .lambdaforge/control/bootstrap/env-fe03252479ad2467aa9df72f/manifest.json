@@ -1,0 +1,29 @@
+{
+  "dependency_policy": {
+    "pytorch": {
+      "accelerator": "cuda",
+      "architecture": "x86_64",
+      "channel": "cu128",
+      "compute_capabilities": [
+        "9.0"
+      ],
+      "driver_version": "575.51.03",
+      "index_url": "https://download.pytorch.org/whl/cu128",
+      "python_version": "3.9",
+      "reason": "Selected cu128 for NVIDIA driver 575.51.03 and compute capabilities ('9.0',); the exact wheel exists for the configured remote Python.",
+      "require_cuda": true,
+      "version": "2.8.0+cu128"
+    }
+  },
+  "environment_id": "env-fe03252479ad2467aa9df72f",
+  "environment_identity_version": 2,
+  "offline": false,
+  "python_requirement": "==3.9.*",
+  "wheels": [
+    {
+      "name": "lambdaforge-0.6.0-py3-none-any.whl",
+      "sha256": "sha256:36ef5fb6726b20eeb359efbeea1745b0441c4f29ae4b3a3be9762c6c0512829b",
+      "size_bytes": 1291857
+    }
+  ]
+}

@@ -1,0 +1,47 @@
+{
+  "dependency_policy": {
+    "python_runtime": {
+      "action": "reuse",
+      "architecture": "x86_64",
+      "executable": "/home/davidi.lubian/.lambdaforge/cache/runtimes/python-runtime-f6a8c6a74ce8f78f4efa68e9/bin/python",
+      "implementation": "CPython",
+      "managed": true,
+      "package_fingerprint": "4a5f23ca0d9836b21b49f54b43aa20b997a1cb8f1f926dfbafd8040200eb75f1",
+      "provider": "micromamba",
+      "provider_version": "2.8.1-0",
+      "ready": true,
+      "runtime_id": "python-runtime-f6a8c6a74ce8f78f4efa68e9",
+      "system": "Linux",
+      "tls_trust": {
+        "ca_file": "/etc/pki/tls/cert.pem",
+        "source": "host-python-default"
+      },
+      "version": "3.13.15"
+    },
+    "pytorch": {
+      "accelerator": "cuda",
+      "architecture": "x86_64",
+      "channel": "cu128",
+      "compute_capabilities": [
+        "9.0"
+      ],
+      "driver_version": "575.51.03",
+      "index_url": "https://download.pytorch.org/whl/cu128",
+      "python_version": "3.13",
+      "reason": "Selected cu128 for NVIDIA driver 575.51.03 and compute capabilities ('9.0',); the exact wheel exists for the configured remote Python.",
+      "require_cuda": true,
+      "version": "2.11.0+cu128"
+    }
+  },
+  "environment_id": "env-020788d506442b95ab35f398",
+  "environment_identity_version": 2,
+  "offline": false,
+  "python_requirement": "==3.13.*",
+  "wheels": [
+    {
+      "name": "lambdaforge-0.10.0-py3-none-any.whl",
+      "sha256": "sha256:377604dcf63621fe7f1298e75a6e965da8e149d98f4ec6f5b9a8c04096eba420",
+      "size_bytes": 1132079
+    }
+  ]
+}

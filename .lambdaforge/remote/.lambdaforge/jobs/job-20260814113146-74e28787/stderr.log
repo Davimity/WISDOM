@@ -1,0 +1,9 @@
+Traceback (most recent call last):
+  File "/home/david/Escritorio/WISDOM/.venv/lib/python3.14/site-packages/lambdaforge/tasks/TaskRunner.py", line 135, in run
+    output = TaskOutput.from_value(self._invoke(method, context))
+                                   ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "/home/david/Escritorio/WISDOM/.venv/lib/python3.14/site-packages/lambdaforge/tasks/TaskRunner.py", line 245, in _invoke
+    return method(context)
+  File "/home/david/Escritorio/WISDOM/.venv/lib/python3.14/site-packages/lambdaforge/preprocessing/PreprocessingTask.py", line 131, in run
+    raise ValueError(f"Duplicate preprocessing record key: {record.key!r}.")
+ValueError: Duplicate preprocessing record key: 'DyProL:v1-2026-04-13:development:7S01_D'.

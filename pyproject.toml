@@ -1,0 +1,45 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "wisdom-protein"
+version = "0.8.0"
+description = "Universal protein surfaces and weakly supervised DNA-binding WISDOM models"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+  "gemmi>=0.7,<0.8",
+  "lambdaforge[adaptive-hpo,parquet]>=0.10.0,<0.11",
+  "matplotlib>=3.7",
+  "numpy>=1.24,<2.5",
+  "scipy>=1.10",
+  "torch>=2.1",
+]
+
+[project.optional-dependencies]
+dev = ["mypy>=1.10", "pytest>=8", "ruff>=0.9"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["preprocess*", "wisdom*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
+
+[tool.mypy]
+python_version = "3.10"
+strict = true
+packages = ["preprocess", "wisdom"]
+warn_unused_ignores = false
+ignore_missing_imports = true
+warn_return_any = false
+disallow_subclassing_any = false

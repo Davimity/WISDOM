@@ -1,0 +1,12 @@
+HEADER    TINY PROTEIN DNA COMPLEX
+ATOM      1  N   ALA A   1       0.000   0.000   0.000  1.00 20.00           N
+ATOM      2  CA  ALA A   1       1.200   0.000   0.000  1.00 20.00           C
+ATOM      3  C   ALA A   1       2.200   0.000   0.000  1.00 20.00           C
+ATOM      4  O   ALA A   1       2.900   0.000   0.000  1.00 20.00           O
+TER
+ATOM      5  P    DA D   1       5.000   0.000   0.000  1.00 20.00           P
+ATOM      6  O5'  DA D   1       5.600   1.000   0.000  1.00 20.00           O
+ATOM      7  C5'  DA D   1       6.600   1.000   0.000  1.00 20.00           C
+ATOM      8  N9   DA D   1       5.000  -1.000   0.000  1.00 20.00           N
+TER
+END

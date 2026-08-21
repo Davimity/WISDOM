@@ -1,0 +1,85 @@
+# Discover and curate a compact reusable WISDOM-DNA protein selection with LambdaForge 0.10.
+kind: task                            # Run a normal resumable Task; do not publish a DatasetVersion.
+schema_version: "1.0"                 # LambdaForge Task authoring schema.
+name: wisdom-dna-select               # Stable task namespace used by results, resume, and lf top.
+output_root: ../runs/tasks            # Content-addressed local task attempts and evidence.
+resume: true                          # Revalidate and restore completed candidate checkpoints.
+rerun_completed: false                # Reuse an exact verified successful selection task.
+
+inputs:                               # Immutable definitions fingerprinted into scientific identity.
+  public_sources: ../data/dna/public-sources.json  # Pinned DyProL, BTD-Combo, and BioLiP releases.
+
+outputs:                              # Named run-relative paths resolved only through TaskContext.
+  selection: selection                # Small portable catalog, split TXT files, and dilution views.
+  selection-report: selection-report  # Exclusions, conflicts, counts, distributions, and figure.
+  selection-checkpoints: selection-checkpoints  # Per-candidate resume state; not fetched downstream.
+  discovery-cache: discovery-cache    # Large public downloads/PDB cache; not part of selection.
+
+required_artifacts:                   # Exact files/directories required for successful task reuse.
+  - selection                         # Portable artifact fetched before building the heavy dataset.
+  - selection-report                  # Human/machine audit of selection construction.
+  - preprocessing-manifest.json       # LambdaForge-owned record status and resume manifest.
+
+resources: {cpus: 36, memory: 64GiB, gpus: 0, time: 24h}  # Outer reservation for 72 I/O workers.
+
+task:                                 # Framework-owned source → transform → sink record loop.
+  target: lambdaforge.preprocessing.PreprocessingTask  # Workers, progress, failures, and checkpoints.
+  params:                             # Complete public PreprocessingTask constructor configuration.
+    source:                           # Read positive/negative candidates from pinned public releases.
+      target: wisdom.dna.DNADatasetSource.DNADatasetSource  # Candidate discovery source.
+      params:                         # Acquisition, source, and bounded-debug controls.
+        mode: live                    # Use public releases; fixture is reserved for tests/debugging.
+        source_manifest_input: public_sources  # Named checksummed source definition.
+        cache_output: discovery-cache # Reusable large downloads inside this Task attempt.
+        positive_source: dyprol-v1    # Current closed positive-source contract.
+        negative_source: btd-combo-2024  # Current closed negative-source contract.
+        max_positive_candidates: 0    # Zero means inspect the complete positive release.
+        max_negative_candidates: 0    # Zero means inspect all curated negative candidates.
+        requests_per_second: 4.0      # Shared mean request start rate; RCSB recommends a handful/s.
+        retries: 5                    # Attempts with exponential backoff for transient failures/429.
+    transforms:                       # Evidence, mapping, quality, contact, and cluster verification.
+      - target: wisdom.dna.DNACandidateCurator.DNACandidateCurator  # One candidate scientific audit.
+        params:                       # Structural and evidence acceptance thresholds.
+          contact_distance: 4.5      # Heavy-atom protein–DNA contact cutoff in angstroms.
+          minimum_residues: 30       # Shortest accepted observed protein chain.
+          minimum_interface_residues: 2  # Distinct contacting residues required for positives.
+          challenge_aspect_ratio: 4.0  # Elongation boundary for the challenge tier.
+          minimum_sequence_coverage: 0.80  # Observed/source sequence fraction required.
+          maximum_resolution: 4.0    # Worst accepted X-ray/cryo-EM resolution in angstroms.
+          cache_output: discovery-cache  # Shared API and coordinate cache.
+          requests_per_second: 4.0   # One thread-safe limiter shared by all 72 Task threads.
+          retries: 5                 # Bounded attempts with backoff for public services.
+    sink:                             # Resolve contradictions, split, balance, dilute, and report.
+      target: wisdom.dna.DNASelectionSink.DNASelectionSink  # Compact selection sink.
+      params:                         # Output, split, reserve, and dilution policy.
+        dataset_output: selection    # Portable artifact consumed by dna_preprocess.yaml.
+        report_output: selection-report  # Selection QC artifact.
+        checkpoint_output: selection-checkpoints  # Large resume evidence kept outside selection.
+        seed: 2026                   # Deterministic SHA-256 split/balance/subset ordering seed.
+        validation_fraction: 0.20    # Development clusters assigned to validation.
+        reserve_fraction: 0.10       # Positive clusters reserved for local-GT replacement.
+        dilutions: [0.10, 0.25, 0.50, 0.75]  # Nested balanced fractions of every main split.
+    workers: 72                      # Two threads per CPU overlap independent API/network waits.
+    workload: io                     # LambdaForge bounded thread pool; no spawned CPU processes.
+    on_error: fail                   # Unexpected code/network exhaustion blocks a partial selection.
+    checkpoint_interval: 100         # Persist aggregate progress every 100 candidates.
+
+# Task option reference:
+# kind="task", schema_version="1.0", and name are required. output_root="runs/tasks", resume=true,
+# rerun_completed=false, inputs={}, outputs={}, required_artifacts=[], and resources=<portable
+# framework default> when omitted. Resource fields accept cpus>0, memory/time unit strings, gpus>=0,
+# and processes>0; WISDOM omits processes because this is one coordinator with a thread pool.
+# PreprocessingTask defaults: workers=1, workload="auto", on_error="fail", checkpoint_interval=1,
+# progress_interval_seconds=10.0, shard_count=1, shard_index=0, publish_dataset=false. The selected
+# 72 workers are appropriate only for this I/O-bound Task; the 4 request/s shared limiter remains the
+# public-service bottleneck and protects RCSB/QuickGO. Increasing threads further cannot increase
+# request starts beyond that limit.
+# DNADatasetSource defaults: mode="live", source_manifest_input="public_sources",
+# fixture_input="candidate_fixtures", cache_output="discovery-cache", positive_source="dyprol-v1",
+# negative_source="btd-combo-2024", both candidate limits=0, requests_per_second=2.0, retries=4.
+# DNACandidateCurator defaults: contact_distance=4.5, minimum_residues=30,
+# minimum_interface_residues=2, challenge_aspect_ratio=4.0, minimum_sequence_coverage=0.80,
+# maximum_resolution=4.0, cache_output="discovery-cache", requests_per_second=2.0, retries=4.
+# DNASelectionSink defaults: dataset_output="dataset", report_output="dataset-report",
+# checkpoint_output="selection-checkpoints", seed=2026, validation_fraction=0.20,
+# reserve_fraction=0.10, dilutions=(0.10,0.25,0.50,0.75). Fractions must be unique values in (0,1).

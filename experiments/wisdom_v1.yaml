@@ -1,0 +1,329 @@
+# WISDOM v1 searches for one simple, stable backbone. Atom-to-surface aggregation is arithmetic
+# mean and protein-level multiple-instance pooling is MAX for every candidate.
+schema_version: "1.1"                 # LambdaForge experiment-schema version.
+
+# Schema options:
+# schema_version="1.1": current experiment schema required by post_run and adaptive HPO.
+
+experiment:                            # Run identity, seeds, reuse policy, and completion contract.
+  name: wisdom-v1-backbone-hpo         # Stable experiment suite name.
+  output_root: runs/experiments        # Parent directory for fingerprinted candidate runs.
+  seeds: [7, 17, 27]                   # Search seeds considered by adaptive seed racing.
+  resume: true                         # Resume matching incomplete training/post-run work.
+  rerun_completed: false               # Reuse identical successful runs.
+  test_after_fit: false                # Do not call Lightning test; required post_run owns test evaluation.
+  required_artifacts:                  # Files required before a run is reusable as complete.
+    - metrics.csv                      # LambdaForge epoch-level metric history.
+    - evaluation/report/evaluation_summary.json  # WISDOM final DNA evaluation report.
+
+# Experiment options used here:
+# name="wisdom-v1-backbone-hpo": free stable suite name.
+# output_root="runs/experiments": suite parent relative to the working directory.
+# seed=null: single-run seed alternative; seeds=[...] configures repeated/adaptive seeds.
+# seeds=[7,17,27]: non-empty integer/null list; adaptive HPO also configures confirmation seeds below.
+# resume=true: continue training or missing post_run actions from committed evidence.
+# rerun_completed=false: reuse verified complete runs; true repeats them.
+# test_after_fit=false: true invokes the framework test loop after fit; WISDOM uses post_run instead.
+# required_artifacts=[]: generic default; listed run-relative paths become hard completion conditions.
+# ckpt_path=null: optional initial/resume checkpoint path when deliberately supplied.
+# base_name=null and variant=null: optional naming fields normally materialized by ablations/HPO.
+
+data:                                  # Explicit train/validation/test datasets and batching policy.
+  train:                               # Training split; labels affect gradients.
+    target: wisdom.data.WisdomDataset.WisdomDataset  # Pickle-free WISDOM NPZ dataset class.
+    params:                            # WisdomDataset constructor arguments.
+      manifest: {dataset: wisdom-dna, version: "2", subpath: manifest.csv}  # Registry-pinned balanced dataset.
+      split: train                     # Retain only manifest rows explicitly assigned to train.
+  val:                                 # Validation split; drives HPO/checkpoint selection.
+    target: wisdom.data.WisdomDataset.WisdomDataset  # Same loader and schema as training.
+    params:                            # WisdomDataset constructor arguments.
+      manifest: {dataset: wisdom-dna, version: "2", subpath: manifest.csv}  # Same immutable version.
+      split: val                       # Retain only explicit validation rows.
+  test:                                # Held-out split; consumed only by final post_run evaluation.
+    target: wisdom.data.WisdomDataset.WisdomDataset  # Same strict loader.
+    params:                            # WisdomDataset constructor arguments.
+      manifest: {dataset: wisdom-dna, version: "2", subpath: manifest.csv}  # Same immutable version.
+      split: test                      # Retain only explicit test rows.
+  datamodule:                          # Framework-owned PyTorch DataLoader construction.
+    target: lambdaforge.training.data.LightningDataModule  # Public LambdaForge data module.
+    params:                            # LightningDataModule constructor arguments.
+      batch_size: 2                    # Number of variable-size protein graphs per batch.
+      num_workers: 0                   # DataLoader subprocess count per training run.
+      pin_memory: false                # Do not reserve page-locked host buffers.
+      collate_fn:                      # Domain-specific disjoint sparse-graph collation.
+        target: wisdom.data.WisdomCollator.WisdomCollator  # Offset graphs without dense padding.
+        params: {}                     # WisdomCollator has no constructor parameters.
+
+# Data options:
+# WisdomDataset manifest=<path|resolved dataset>: required CSV/Path; no default.
+# WisdomDataset split=<train|val|test>: required explicit split; no random splitting exists.
+# LightningDataModule batch_size=32, num_workers=0, pin_memory=true,
+# persistent_workers=false, prefetch_factor=2, collate_fn=null, worker_init_fn=null,
+# drop_last=false, dataloader_kwargs=null, train_dataloader_kwargs=null,
+# val_dataloader_kwargs=null, test_dataloader_kwargs=null.
+# collate_fn.params={}: fixed because WisdomCollator exposes only __call__(samples).
+
+model:                                 # WISDOM v1 neural architecture.
+  target: wisdom.models.WisdomV1.WisdomV1  # Atom-to-surface graph model with fixed MAX pooling.
+  params:                              # WisdomV1 constructor arguments.
+    hidden_dim: 128                    # Shared atomic/surface latent width.
+    embedding_dim: 32                  # Width of element and optional residue embeddings.
+    use_residue_type: true             # Concatenate learned residue identity to element identity.
+    atomic_layers: 2                   # Relation-aware atomic graph convolution count.
+    projection_depth: 1                # Atom-context plus curvature MLP depth.
+    surface_layers: 2                  # Surface graph convolution count.
+    dropout: 0.2                       # Shared dropout probability.
+    atomic_number_count: 119           # Element embedding rows for IDs 0..118.
+    residue_type_count: 21             # Residue embedding rows including unknown ID zero.
+    curvature_features: 6              # Flattened input width: 2 scales x 3 invariants.
+
+# Model options (WisdomV1 defaults):
+# hidden_dim=128: positive integer shared hidden width.
+# embedding_dim=32: positive integer categorical embedding width.
+# use_residue_type=true: Boolean optional residue-feature switch.
+# atomic_layers=2, projection_depth=1, surface_layers=2: positive integer depths.
+# dropout=0.2: float in [0,1).
+# atomic_number_count=119: positive integer greater than every input atomic number.
+# residue_type_count=21: positive integer greater than every residue category.
+# curvature_features=6: positive integer equal to 3*len(preprocess.curvature_scales).
+
+losses:                                # Differentiable training objectives summed by LambdaForge.
+  - target: lambdaforge.nn.losses.BinaryCrossEntropyWithLogitsLoss  # Binary protein loss.
+    params: {output_key: logits, target_key: target}  # Route model logits and batch labels.
+
+# Loss options:
+# BinaryCrossEntropyWithLogitsLoss defaults are output_key="logits", target_key="target",
+# weight=1.0, reduction="mean", pos_weight=null, and name="binary_cross_entropy_with_logits".
+
+train_metrics: []                      # Avoid costly/noisy training-set classification metrics.
+val_metrics:                           # Metrics used for selection; never use held-out test labels.
+  - target: lambdaforge.metrics.BinaryAUROC  # Area under ROC curve.
+    params: {pred_key: logits, target_key: target}  # Metric input routing.
+  - target: lambdaforge.metrics.BinaryAUPRC  # Area under precision-recall curve.
+    params: {pred_key: logits, target_key: target}  # val_auprc is HPO/checkpoint objective.
+test_metrics:                          # Generic global metrics if a test loop is explicitly requested.
+  - target: lambdaforge.metrics.BinaryAccuracy  # Fraction of correct thresholded predictions.
+    params: {pred_key: logits, target_key: target, threshold: 0.5}  # Probability cutoff.
+  - target: lambdaforge.metrics.BinaryBalancedAccuracy  # Mean sensitivity/specificity.
+    params: {pred_key: logits, target_key: target, threshold: 0.5}  # Input keys and cutoff.
+  - target: lambdaforge.metrics.BinaryPrecision  # Positive predictive value.
+    params: {pred_key: logits, target_key: target, threshold: 0.5}  # Input keys and cutoff.
+  - target: lambdaforge.metrics.BinaryRecall  # Sensitivity/true-positive rate.
+    params: {pred_key: logits, target_key: target, threshold: 0.5}  # Input keys and cutoff.
+  - target: lambdaforge.metrics.BinarySpecificity  # True-negative rate.
+    params: {pred_key: logits, target_key: target, threshold: 0.5}  # Input keys and cutoff.
+  - target: lambdaforge.metrics.BinaryF1  # Harmonic mean of precision and recall.
+    params: {pred_key: logits, target_key: target, threshold: 0.5}  # Input keys and cutoff.
+  - target: lambdaforge.metrics.BinaryMCC  # Matthews correlation coefficient.
+    params: {pred_key: logits, target_key: target, threshold: 0.5}  # Input keys and cutoff.
+  - target: lambdaforge.metrics.BinaryCohenKappa  # Chance-corrected agreement.
+    params: {pred_key: logits, target_key: target, threshold: 0.5}  # Input keys and cutoff.
+  - target: lambdaforge.metrics.BinaryAUROC  # Threshold-independent ROC area.
+    params: {pred_key: logits, target_key: target}  # No discrete threshold required.
+  - target: lambdaforge.metrics.BinaryAUPRC  # Threshold-independent precision-recall area.
+    params: {pred_key: logits, target_key: target}  # No discrete threshold required.
+
+# Metric options used here:
+# Every binary metric defaults pred_key="logits" and target_key="target" in this project contract.
+# Thresholded metrics use threshold=0.5 by default; AUROC/AUPRC have no threshold parameter.
+# train_metrics, val_metrics, and test_metrics accept zero or more public Metric specifications.
+
+post_run:                              # Bounded same-allocation analysis after successful training.
+  scope: confirmed_runs                # In adaptive HPO, evaluate only independently confirmed finalists.
+  actions:                             # Ordered public LambdaForge PostRunAction specifications.
+    - name: dna-evaluation             # Stable action/receipt identity.
+      target: wisdom.evaluation.WisdomDNAPostRunEvaluator.WisdomDNAPostRunEvaluator  # WISDOM action.
+      params:                          # WisdomDNAPostRunEvaluator constructor arguments.
+        threshold: 0.5                 # Global/local probability cutoff for discrete predictions.
+        batch_size: 1                  # Protein graphs per evaluation batch.
+        num_workers: 0                 # Evaluation DataLoader subprocess count.
+        device: auto                   # Select CUDA when available, otherwise CPU.
+        latent_channels: [0, 1, 2, 3]  # Learned surface channels exported to point clouds.
+        export_limit: 0                # Maximum proteins exported; zero means every test protein.
+      checkpoint: best                 # Load exactly the persisted best validation checkpoint.
+      required: true                   # Make action failure visible as overall run failure.
+      artifacts:                       # Hash and register every scientific evaluation product.
+        - {name: global-metrics, path: evaluation/metrics/global_metrics.json, kind: metrics}  # Global JSON.
+        - {name: surface-metrics, path: evaluation/metrics/surface_metrics.json, kind: metrics}  # Surface JSON.
+        - {name: per-protein-metrics, path: evaluation/metrics/per_protein_metrics.csv, kind: table}  # Row table.
+        - {name: global-predictions, path: evaluation/predictions/global_predictions.csv, kind: predictions}  # Predictions.
+        - {name: evaluation-visualizations, path: evaluation/visualizations, kind: directory}  # PLY/NPZ maps.
+        - {name: evaluation-summary-json, path: evaluation/report/evaluation_summary.json, kind: report}  # Machine report.
+        - {name: evaluation-summary-markdown, path: evaluation/report/evaluation_summary.md, kind: report}  # Human report.
+
+# Post-run options:
+# scope="confirmed_runs": allowed values are "confirmed_runs" and "all_runs".
+# action.name defaults from target/index if omitted, but an explicit stable name is recommended.
+# action.params={} by default and must match the action constructor.
+# threshold=0.5, batch_size=1, num_workers=0, device="auto", latent_channels=(),
+# export_limit=0 are WisdomDNAPostRunEvaluator defaults.
+# checkpoint="best": allowed values are "best", "last", "current", and "none"; no fallback occurs.
+# required=true: false records a warning without failing otherwise successful training.
+# artifacts=[]: declarations accept name, path, kind, media_type, and metadata.
+
+optimizer:                             # Trainable-parameter update rule.
+  ref: torch.optim.AdamW               # Public optimizer class reference.
+  params:                              # AdamW constructor overrides.
+    lr: 0.0003                         # Base learning rate searched below.
+    weight_decay: 0.0001               # Decoupled L2-style regularization searched below.
+
+# Optimizer options:
+# AdamW lr=0.001, betas=(0.9,0.999), eps=1e-8, weight_decay=0.01, amsgrad=false,
+# maximize=false, foreach=null, capturable=false, differentiable=false, fused=null.
+# This YAML deliberately exposes only lr and weight_decay to scientific HPO.
+
+task:                                  # Framework adapter connecting model, loss, metrics, and optimizer.
+  target: lambdaforge.training.LightningTask  # Public LambdaForge Lightning module.
+  params:                              # LightningTask routing/logging constructor arguments.
+    model_input_key: null              # Disable the single-tensor input route.
+    model_input_keys:                  # Map model keyword arguments to collated batch fields.
+      atomic_numbers: atomic_numbers    # Element IDs [N].
+      residue_type_ids: residue_type_ids  # Residue categories [N].
+      atom_edge_index: atom_edge_index  # Directed atomic graph [2,Ea].
+      atom_edge_types: atom_edge_types  # Atomic relation IDs [Ea].
+      surface_curvatures: surface_curvatures  # Curvature tensor [M,S,3].
+      surface_edge_index: surface_edge_index  # Directed surface graph [2,Es].
+      surface_atom_edge_index: surface_atom_edge_index  # Surface-to-atom incidence [2,Esa].
+      surface_area_weights: surface_area_weights  # Positive represented areas [M].
+      surface_batch: surface_batch      # Protein owner index for every surface point [M].
+    logging:                            # Loss/metric publication behavior.
+      log_total_loss: true              # Publish the sum of configured losses.
+      log_individual_losses: true       # Publish each named loss separately.
+      loss_on_step: true                # Record batch-level loss values.
+      loss_on_epoch: true               # Aggregate and record epoch loss values.
+      metric_prog_bar: true             # Expose validation metrics to progress reporting.
+      logger: false                     # Do not duplicate task-level logs to a separate logger route.
+
+# LightningTask options:
+# model_input_key="x", model_input_keys=null, model_output_key="logits".
+# optimizer_group_kwargs=null, scheduler_cls=null, scheduler_kwargs=null, scheduler_config=null.
+# logging=null uses TaskLoggingConfig defaults; configurable fields used above are Booleans.
+# Model, losses, metrics, optimizer class/kwargs are injected from their top-level YAML sections.
+
+trainer:                               # PyTorch Lightning execution and checkpoint policy.
+  max_epochs: 100                      # Maximum full training epochs for a confirmed run.
+  accelerator: auto                    # Select CUDA/MPS/CPU according to allocation and availability.
+  devices: 1                           # Use exactly one accelerator/device per run.
+  precision: 32-true                   # Full IEEE float32 training.
+  checkpoint_policy: last_and_best     # Persist final state and best monitored validation state.
+  checkpoint_monitor: val_auprc        # Metric used to select the best checkpoint.
+  checkpoint_mode: max                 # Larger val_auprc is better.
+  logger: csv                          # Write standard CSV training logs.
+  enable_progress_bar: false           # Suppress interactive bars in batch logs.
+  write_epoch_metrics_csv: true        # Publish normalized metrics.csv.
+  epoch_metrics_include: ["train_*", "val_*"]  # Include training/validation epoch metrics.
+  epoch_metrics_exclude: ["*_step"]    # Remove noisy step-level entries from metrics.csv.
+  trainer_kwargs:                      # Additional safe Lightning Trainer keyword arguments.
+    enable_model_summary: true         # Print architecture/parameter summary once.
+
+# Trainer options used here:
+# max_epochs=1, accelerator="auto", devices="auto", precision="32-true" are common framework/
+# Lightning defaults; WISDOM overrides epochs/devices explicitly.
+# checkpoint_policy="last_and_best": framework choices depend on public policy enum and include
+# last, best, last_and_best, and none where supported.
+# checkpoint_monitor=null, checkpoint_mode="min", logger=true, enable_progress_bar=true,
+# write_epoch_metrics_csv=false, epoch_metrics_include=["*"], epoch_metrics_exclude=[] are generic
+# defaults; trainer_kwargs={} passes additional public Lightning Trainer options.
+
+execution:                             # Concurrent-run resource controls, not model science.
+  mode: sequential                     # Execute candidate jobs through the sequential local runner.
+  cpu_threads_per_job: 4               # Cap compute-library threads per training process.
+  cpu_cores_per_job: 4                 # Reserve four logical CPU cores per candidate.
+
+# Execution options:
+# mode="sequential": other installed public modes may be available for independent jobs.
+# cpu_threads_per_job=null and cpu_cores_per_job=null are generic defaults; positive integers set caps.
+
+hpo:                                   # LambdaForge adaptive hyperparameter optimization policy.
+  enabled: true                        # Run adaptive HPO instead of one fixed experiment.
+  controller_seed: 2026                # Reproducible controller/Sobol randomness.
+  max_concurrency: 1                   # Admit only one candidate at a time on the target GPU.
+  objective: {metric: val_auprc, direction: maximize}  # Optimize held-out validation AUPRC.
+  space:                               # Only basic v1 architecture/optimizer factors vary.
+    model.params.use_residue_type: {type: bool}  # Compare element-only against element+residue input.
+    model.params.embedding_dim: {type: ordinal, choices: [16, 32, 64]}  # Embedding width choices.
+    model.params.hidden_dim: {type: ordinal, choices: [64, 128, 256]}  # Shared latent width choices.
+    model.params.atomic_layers: {type: ordinal, choices: [1, 2, 3, 4]}  # Atomic depth choices.
+    model.params.projection_depth: {type: ordinal, choices: [1, 2, 3]}  # Projection MLP depths.
+    model.params.surface_layers: {type: ordinal, choices: [1, 2, 3, 4]}  # Surface depth choices.
+    model.params.dropout: {type: float, low: 0.0, high: 0.5}  # Continuous dropout interval.
+    optimizer.params.weight_decay: {type: float, low: 0.000001, high: 0.001, scale: log}  # Log regularization.
+    optimizer.params.lr: {type: float, low: 0.00001, high: 0.003, scale: log}  # Log learning-rate interval.
+  initialization: {strategy: sobol, trials: auto}  # Space-filling initial design.
+  search: {strategy: bayesian, candidate_pool_size: 256, refresh_interval: 1}  # Surrogate search.
+  acquisition: {strategy: cost_aware_knowledge_gradient, exploration_weight: 1.0}  # Utility rule.
+  fidelity: {unit: epochs, strategy: adaptive_learning_curve, min: 5, max: 100, step: 5}  # Budgets.
+  seeds:                               # Adaptive replication and independent confirmation.
+    strategy: adaptive_racing          # Allocate more seeds only where uncertainty warrants it.
+    values: [7, 17, 27]                # Search seed pool.
+    max_search_seeds: 3                # Maximum search seeds per configuration.
+    probability_threshold: 0.9         # Confidence needed for racing decisions.
+    confirmation_values: [101, 211]    # Fresh seeds used only for finalist confirmation.
+  pruning:                             # Drop candidates with very low posterior competitiveness.
+    enabled: true                      # Permit terminal pruning after minimum evidence.
+    min_budget_before_drop: 10         # Never prune before ten cumulative epochs.
+    probability_threshold: 0.01        # Drop below one-percent competitiveness.
+    equivalence_margin: 0.002          # Treat tiny AUPRC differences as practically equivalent.
+  memory:                              # Empirical admission policy for one 4-GiB-class GPU.
+    per_job_budget: 3GiB               # Logical memory allowance per candidate.
+    headroom: 256MiB                   # Reserve memory outside the learned allocation.
+    safety_quantile: 0.99              # Conservative predictive memory quantile.
+    min_observations: 3                # Observations needed before trusting learned estimates.
+    allocator_cap: true                # Apply a defensive PyTorch allocator cap.
+    preflight: false                   # Do not run a separate memory-probe job.
+    unknown_capacity: declared_budget  # Fall back to the declared logical budget.
+    resource_features:                 # Config paths used by the memory estimator.
+      batch_size: data.datamodule.params.batch_size  # Batch-size predictor.
+      hidden_width: model.params.hidden_dim  # Model-width predictor.
+    probe_policy:                      # Conditions for optional resource probing.
+      mode: never                      # Never schedule probes in this production search.
+      relative_uncertainty_threshold: 0.25  # Probe trigger if mode permits uncertainty checks.
+      near_limit_fraction: 0.85        # Probe trigger near usable capacity.
+      oom_probability_threshold: 0.05  # Probe trigger for predicted OOM risk.
+  budget: {max_actions: 60, max_total_epochs: 2000, max_gpu_seconds: 200000}  # Hard search limits.
+  confirmation: {top_k: 3}             # Confirm the three strongest configurations.
+
+# HPO option reference:
+# enabled=false, controller_seed=0, max_concurrency=1 are generic starting values.
+# objective requires metric plus direction in {maximize,minimize}; optional risk policy is framework-defined.
+# space entries support bool, categorical, ordinal, int, and float types; numeric scale is linear or log;
+# choices enumerate discrete values; low/high bound numeric values; when adds a conditional activation.
+# initialization strategy=sobol and trials=auto|positive integer.
+# search strategy=bayesian, candidate_pool_size=256, refresh_interval=1.
+# acquisition strategy=cost_aware_knowledge_gradient, exploration_weight=1.0.
+# fidelity unit=epochs, strategy=adaptive_learning_curve, min/max/step positive ordered integers.
+# seeds strategy=adaptive_racing, values=<seed list>, max_search_seeds=len(values),
+# probability_threshold=0.9, confirmation_values=<fresh seed list>.
+# pruning enabled=true, min_budget_before_drop=10, probability_threshold=0.01,
+# equivalence_margin=0.0 unless a scientific tolerance is declared.
+# memory defaults are framework policy-specific; every field above is operational and does not alter
+# the model definition. budget limits accept positive counts/seconds. confirmation.top_k is positive.
+
+aggregation:                           # Statistical comparison policy for completed candidates.
+  comparisons:                        # Paired-comparison confidence/power settings.
+    alpha: 0.05                        # Type-I error threshold.
+    target_power: 0.80                 # Desired probability of detecting a real effect.
+    min_pairs_for_verdict: 2           # Minimum paired seeds before a categorical verdict.
+
+# Aggregation options:
+# comparisons.alpha=0.05 and target_power=0.80 are probabilities in (0,1).
+# comparisons.min_pairs_for_verdict=2 is a positive integer.
+
+extensions:                            # LambdaForge authoring metadata and portable resources.
+  wisdom_model_version: "1.1"          # WISDOM experiment-definition generation.
+  authoring:                           # Resolve portable resources and managed Registry placement.
+    resources: {cpus: 4, memory: 8GiB, gpus: 1, time: 12h}  # Per-candidate resource request.
+
+# Extension options:
+# wisdom_model_version="1.1": free WISDOM provenance string.
+# resources defaults are backend-dependent; cpus/gpus are non-negative integers and memory/time
+# are unit-bearing strings. LambdaForge 0.10 resolves managed wisdom-dna@2 placements from its
+# DatasetRegistry; no DataCatalog location map is duplicated in the experiment.
+
+metadata:                              # Human-readable scientific status; no algorithm reads it.
+  phase: v1-backbone-adaptive-hpo      # Experiment lifecycle stage.
+  supervision: binary-protein-label    # Only protein labels supervise gradients.
+  scientific_status: requires-reviewed-curated-DNA-dataset-artifact  # Prerequisite warning.
+
+# Metadata options:
+# phase, supervision, and scientific_status are free descriptive strings.

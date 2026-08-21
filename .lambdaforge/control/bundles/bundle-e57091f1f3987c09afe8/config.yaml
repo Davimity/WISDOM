@@ -1,0 +1,228 @@
+kind: dataset
+schema_version: '1.0'
+output_root: ../runs/datasets
+max_parallel: 1
+dataset:
+  name: wisdom-dna
+  version: '1'
+  target_schema:
+    type: object
+    properties:
+      dna_binding:
+        type: integer
+        enum:
+        - 0
+        - 1
+      local_ground_truth:
+        type: boolean
+    required:
+    - dna_binding
+    - local_ground_truth
+    additionalProperties: false
+  global_assets:
+    manifest: manifest.csv
+    local_manifest: local-manifest.csv
+    catalog: catalog.csv
+    annotation_report: annotation-report.json
+  metadata:
+    description: Curated DNA-binding proteins with universal WISDOM surfaces and evaluation
+      sidecars.
+    structural_schema: '2.1'
+    annotation_schema: '1.1'
+    supervision: protein-level-only
+stages:
+  curate:
+    task:
+      kind: task
+      schema_version: '1.0'
+      name: wisdom-dna-curate
+      resume: true
+      rerun_completed: false
+      inputs:
+        public_sources: ../data/dna/public-sources.json
+      outputs:
+        dataset: dataset
+        dataset-report: dataset-report
+        discovery-cache: discovery-cache
+      required_artifacts:
+      - dataset
+      - dataset-report
+      - preprocessing-manifest.json
+      resources:
+        cpus: 28
+        memory: 128GiB
+        gpus: 0
+        time: 24h
+      task:
+        target: lambdaforge.preprocessing.PreprocessingTask
+        params:
+          source:
+            target: wisdom.dna.DNADatasetSource.DNADatasetSource
+            params:
+              mode: live
+              source_manifest_input: public_sources
+              cache_output: discovery-cache
+              positive_source: dyprol-v1
+              negative_source: btd-combo-2024
+              max_positive_candidates: 0
+              max_negative_candidates: 2500
+              requests_per_second: 2.0
+              retries: 4
+          transforms:
+          - target: wisdom.dna.DNACandidateCurator.DNACandidateCurator
+            params:
+              contact_distance: 4.5
+              minimum_residues: 30
+              minimum_interface_residues: 2
+              challenge_aspect_ratio: 4.0
+              minimum_sequence_coverage: 0.8
+              maximum_resolution: 4.0
+              cache_output: discovery-cache
+              requests_per_second: 2.0
+              retries: 4
+          sink:
+            target: wisdom.dna.DNADatasetSink.DNADatasetSink
+            params:
+              dataset_output: dataset
+              report_output: dataset-report
+              seed: 2026
+              validation_fraction: 0.2
+              reserve_fraction: 0.1
+          workers: 28
+          workload: io
+          on_error: fail
+          checkpoint_interval: 25
+    required: true
+    reuse: auto
+  geometry:
+    needs:
+    - curate
+    bindings:
+      inputs.protein_identifiers: ${nodes.curate.artifacts.dataset/proteins.txt}
+    task:
+      kind: task
+      schema_version: '1.0'
+      name: wisdom-dna-geometry
+      resume: true
+      rerun_completed: false
+      inputs:
+        protein_identifiers: ../data/dna/public-sources.json
+      outputs:
+        downloads: raw
+        processed: processed
+        report: preprocessing-report.json
+      required_artifacts:
+      - processed
+      - preprocessing-report.json
+      - preprocessing-manifest.json
+      resources:
+        cpus: 28
+        memory: 120GiB
+        gpus: 0
+        time: 24h
+      task:
+        target: lambdaforge.preprocessing.PreprocessingTask
+        params:
+          source:
+            target: preprocess.ProteinSource.ProteinSource
+            params:
+              input_name: protein_identifiers
+          transforms:
+          - target: preprocess.PreprocessPipeline.PreprocessPipeline
+            params:
+              identifier_input: protein_identifiers
+              download_output: downloads
+              download: true
+              config:
+                target: preprocess.PreprocessConfig.PreprocessConfig
+                params:
+                  model_index: 0
+                  chains: []
+                  include_hydrogens: false
+                  include_waters: false
+                  include_nonpolymer: false
+                  include_metals: false
+                  center_coordinates: true
+                  atom_radius: 6.0
+                  surface_resolution: 1.0
+                  probe_radius: 1.4
+                  atom_surface_radius: 6.0
+                  curvature_scales:
+                  - 2.5
+                  - 5.0
+          sink:
+            target: preprocess.ProteinSink.ProteinSink
+            params:
+              identifier_input: protein_identifiers
+              dataset_output: processed
+              report_output: report
+          workers: 28
+          workload: cpu
+          on_error: skip
+          checkpoint_interval: 1
+    required: true
+    reuse: auto
+  annotate:
+    needs:
+    - curate
+    - geometry
+    bindings:
+      inputs.dataset_catalog: ${nodes.curate.artifacts.dataset/catalog.csv}
+      inputs.base_preprocessing_report: ${nodes.geometry.artifacts.preprocessing-report.json}
+    task:
+      kind: task
+      schema_version: '1.0'
+      name: wisdom-dna-annotate
+      resume: true
+      rerun_completed: false
+      inputs:
+        dataset_catalog: ../data/dna/public-sources.json
+        base_preprocessing_report: ../data/dna/public-sources.json
+      outputs:
+        annotations: annotations
+        annotation-report: annotations/annotation-report.json
+      required_artifacts:
+      - annotations
+      - annotations/annotation-report.json
+      - preprocessing-manifest.json
+      resources:
+        cpus: 28
+        memory: 120GiB
+        gpus: 0
+        time: 12h
+      task:
+        target: lambdaforge.preprocessing.PreprocessingTask
+        params:
+          source:
+            target: wisdom.dna.DNAAnnotationSource.DNAAnnotationSource
+            params:
+              catalog_input: dataset_catalog
+              base_report_input: base_preprocessing_report
+          transforms:
+          - target: wisdom.dna.DNAAnnotationTransform.DNAAnnotationTransform
+            params:
+              positive_gap: 1.4
+              negative_gap: 3.0
+              sensitivity_gaps:
+              - 1.0
+              - 1.4
+              - 2.0
+          sink:
+            target: wisdom.dna.DNAAnnotationSink.DNAAnnotationSink
+            params:
+              annotation_output: annotations
+              report_output: annotation-report
+              catalog_input: dataset_catalog
+          workers: 28
+          workload: cpu
+          on_error: fail
+          checkpoint_interval: 1
+    required: true
+    reuse: auto
+publish:
+  from: annotate
+  root: annotations
+  index: members.jsonl
+metadata:
+  phase: complete-dna-preprocessing
+  framework_contract: lambdaforge-0.7

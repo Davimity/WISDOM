@@ -1,0 +1,183 @@
+{
+  "kind": "dataset-build",
+  "build_id": "sha256:bd590d7d994260fc746a1f82357bdba6769568b652eb47a84c2bb78fbb7fbb1b",
+  "dataset": "wisdom-dna@1",
+  "status": "failed",
+  "stages": {
+    "curate": {
+      "status": "ok",
+      "outputs": {
+        "preprocessing_manifest": "preprocessing-manifest.json"
+      },
+      "metrics": {
+        "records_selected": 3778,
+        "records_processed": 3778,
+        "records_resumed": 0,
+        "records_failed": 0
+      },
+      "artifacts": [
+        {
+          "path": "dataset",
+          "kind": "dataset",
+          "sha256": "1bbdb8d6a3ef7a15fde021616a8e84978172ed98103c9cdd8c6f74b63bda5725",
+          "size_bytes": 1754980567,
+          "metadata": {}
+        },
+        {
+          "path": "dataset-report",
+          "kind": "report",
+          "sha256": "616621e436bc8067b21909d1c2a348944d76c272ea5578c553e7807be01295ef",
+          "size_bytes": 2357315,
+          "metadata": {}
+        },
+        {
+          "path": "dataset/catalog.csv",
+          "kind": "table",
+          "sha256": "4cf8c92dc5454574b45a5f718eeef43538e427ee1ad3882c93b56241e52853b0",
+          "size_bytes": 2186061,
+          "metadata": {},
+          "media_type": "text/csv"
+        },
+        {
+          "path": "dataset/proteins.txt",
+          "kind": "file",
+          "sha256": "c460d935674a7cdd4c5fd9dd2250fa687ab99c3c97b811bea85136b4c994e4cd",
+          "size_bytes": 8960,
+          "metadata": {},
+          "media_type": "text/plain"
+        },
+        {
+          "path": "dataset-report/distributions.png",
+          "kind": "figure",
+          "sha256": "78268e2c12c035a351ac67b124a8aacbccba098608a8586f7aa84b2fa9940517",
+          "size_bytes": 81496,
+          "metadata": {},
+          "media_type": "image/png"
+        },
+        {
+          "path": "preprocessing-manifest.json",
+          "kind": "report",
+          "sha256": "2c0e1d227441939cc902f271e7e8d8455d4c9df45fb9ae3878819ae46307b464",
+          "size_bytes": 600227,
+          "metadata": {},
+          "media_type": "application/json"
+        }
+      ],
+      "result": {
+        "result_version": 1,
+        "kind": "task",
+        "name": "wisdom-dna-curate",
+        "run_dir": "/home/david/Escritorio/WISDOM/runs/datasets/.stage-cache/curate/wisdom-dna-curate/1171a3cb78b503a7",
+        "variant": null,
+        "seed": null,
+        "status": "ok",
+        "outputs": {
+          "preprocessing_manifest": "preprocessing-manifest.json"
+        },
+        "metrics": {
+          "records_selected": 3778,
+          "records_processed": 3778,
+          "records_resumed": 0,
+          "records_failed": 0
+        },
+        "final_metrics": {
+          "records_selected": 3778,
+          "records_processed": 3778,
+          "records_resumed": 0,
+          "records_failed": 0
+        },
+        "artifacts": [
+          {
+            "path": "dataset",
+            "kind": "dataset",
+            "sha256": "1bbdb8d6a3ef7a15fde021616a8e84978172ed98103c9cdd8c6f74b63bda5725",
+            "size_bytes": 1754980567,
+            "metadata": {}
+          },
+          {
+            "path": "dataset-report",
+            "kind": "report",
+            "sha256": "616621e436bc8067b21909d1c2a348944d76c272ea5578c553e7807be01295ef",
+            "size_bytes": 2357315,
+            "metadata": {}
+          },
+          {
+            "path": "dataset/catalog.csv",
+            "kind": "table",
+            "sha256": "4cf8c92dc5454574b45a5f718eeef43538e427ee1ad3882c93b56241e52853b0",
+            "size_bytes": 2186061,
+            "metadata": {},
+            "media_type": "text/csv"
+          },
+          {
+            "path": "dataset/proteins.txt",
+            "kind": "file",
+            "sha256": "c460d935674a7cdd4c5fd9dd2250fa687ab99c3c97b811bea85136b4c994e4cd",
+            "size_bytes": 8960,
+            "metadata": {},
+            "media_type": "text/plain"
+          },
+          {
+            "path": "dataset-report/distributions.png",
+            "kind": "figure",
+            "sha256": "78268e2c12c035a351ac67b124a8aacbccba098608a8586f7aa84b2fa9940517",
+            "size_bytes": 81496,
+            "metadata": {},
+            "media_type": "image/png"
+          },
+          {
+            "path": "preprocessing-manifest.json",
+            "kind": "report",
+            "sha256": "2c0e1d227441939cc902f271e7e8d8455d4c9df45fb9ae3878819ae46307b464",
+            "size_bytes": 600227,
+            "metadata": {},
+            "media_type": "application/json"
+          }
+        ],
+        "metadata": {
+          "shard_count": 1,
+          "shard_index": 0,
+          "on_error": "fail",
+          "workers": 8,
+          "workload": "io",
+          "inputs": [
+            {
+              "name": "public_sources",
+              "path": "../data/dna/public-sources.json",
+              "resolved_path": "/home/david/Escritorio/WISDOM/data/dna/public-sources.json",
+              "sha256": "5edca7c55bafecf198715534499a408d2348ca0158c0e911d742ba5fce0de770",
+              "size_bytes": 944,
+              "identity": {
+                "provider": "strict",
+                "value": "5edca7c55bafecf198715534499a408d2348ca0158c0e911d742ba5fce0de770",
+                "digest": "sha256:718cf5eae3a06c154a2551eac3455233cc5c1fc7d525e9575bb0a53e4f3d3bbe"
+              },
+              "dataset_reference": null
+            }
+          ]
+        },
+        "skipped_existing": false,
+        "seconds": 4493.054229128,
+        "attempt_id": "20260814T123828143944Z-1171a3cb78b5-f296d995",
+        "config_fingerprint": "sha256:1171a3cb78b503a7bfebbc99e8aa1e1f2d026a140cf07e1bc1c6f56f5442697c",
+        "started_at_utc": "2026-08-14T12:38:28.143944+00:00",
+        "finished_at_utc": "2026-08-14T13:53:21.254445+00:00"
+      }
+    },
+    "geometry": {
+      "status": "failed",
+      "error": {
+        "type": "BrokenProcessPool",
+        "message": "A process in the process pool was terminated abruptly while the future was running or pending."
+      }
+    },
+    "annotate": {
+      "status": "blocked",
+      "blocked_by": [
+        "geometry"
+      ]
+    }
+  },
+  "record": null,
+  "error": "Required dataset stage(s) failed: geometry, annotate"
+}

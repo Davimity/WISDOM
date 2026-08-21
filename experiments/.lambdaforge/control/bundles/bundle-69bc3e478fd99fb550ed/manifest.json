@@ -1,0 +1,162 @@
+{
+  "bundle_version": 2,
+  "cluster": "citius-ctgpgpu12",
+  "config": {
+    "extensions": {
+      "authoring": {
+        "outputs": {
+          "discovery-cache": "discovery-cache",
+          "selection": "selection",
+          "selection-checkpoints": "selection-checkpoints",
+          "selection-report": "selection-report"
+        },
+        "resources": {
+          "cpus": 36,
+          "gpus": 0,
+          "memory": "64GiB",
+          "time": "24h"
+        }
+      }
+    },
+    "inputs": [
+      {
+        "name": "public_sources",
+        "path": "inputs/0-public-sources.json"
+      }
+    ],
+    "kind": "task",
+    "name": "wisdom-dna-select",
+    "output_root": "../runs/tasks",
+    "required_artifacts": [
+      "selection",
+      "selection-report",
+      "preprocessing-manifest.json"
+    ],
+    "rerun_completed": false,
+    "resume": true,
+    "schema_version": "1.0",
+    "task": {
+      "params": {
+        "checkpoint_interval": 100,
+        "on_error": "fail",
+        "sink": {
+          "params": {
+            "checkpoint_output": "selection-checkpoints",
+            "dataset_output": "selection",
+            "dilutions": [
+              0.1,
+              0.25,
+              0.5,
+              0.75
+            ],
+            "report_output": "selection-report",
+            "reserve_fraction": 0.1,
+            "seed": 2026,
+            "validation_fraction": 0.2
+          },
+          "target": "wisdom.dna.DNASelectionSink.DNASelectionSink"
+        },
+        "source": {
+          "params": {
+            "cache_output": "discovery-cache",
+            "max_negative_candidates": 0,
+            "max_positive_candidates": 0,
+            "mode": "live",
+            "negative_source": "btd-combo-2024",
+            "positive_source": "dyprol-v1",
+            "requests_per_second": 4.0,
+            "retries": 5,
+            "source_manifest_input": "public_sources"
+          },
+          "target": "wisdom.dna.DNADatasetSource.DNADatasetSource"
+        },
+        "transforms": [
+          {
+            "params": {
+              "cache_output": "discovery-cache",
+              "challenge_aspect_ratio": 4.0,
+              "contact_distance": 4.5,
+              "maximum_resolution": 4.0,
+              "minimum_interface_residues": 2,
+              "minimum_residues": 30,
+              "minimum_sequence_coverage": 0.8,
+              "requests_per_second": 4.0,
+              "retries": 5
+            },
+            "target": "wisdom.dna.DNACandidateCurator.DNACandidateCurator"
+          }
+        ],
+        "workers": 72,
+        "workload": "io"
+      },
+      "target": "lambdaforge.preprocessing.PreprocessingTask"
+    }
+  },
+  "environment": {
+    "dependency_policy": {
+      "python_runtime": {
+        "action": "reuse",
+        "architecture": "x86_64",
+        "executable": "/home/davidi.lubian/.lambdaforge/cache/runtimes/python-runtime-681998052d0b4de62d411168/bin/python",
+        "implementation": "CPython",
+        "managed": true,
+        "package_fingerprint": "efea3fa8588f8987da3aa5591ab847a7bfddd7f7b55644cd4105882842a4a56e",
+        "provider": "micromamba",
+        "provider_version": "2.8.1-0",
+        "ready": true,
+        "runtime_id": "python-runtime-681998052d0b4de62d411168",
+        "system": "Linux",
+        "tls_trust": {
+          "ca_file": "/etc/pki/tls/cert.pem",
+          "source": "host-python-default"
+        },
+        "version": "3.13.15"
+      },
+      "pytorch": {
+        "accelerator": "cuda",
+        "architecture": "x86_64",
+        "channel": "cu128",
+        "compute_capabilities": [
+          "9.0"
+        ],
+        "driver_version": "575.51.03",
+        "index_url": "https://download.pytorch.org/whl/cu128",
+        "python_version": "3.13",
+        "reason": "Selected cu128 for NVIDIA driver 575.51.03 and compute capabilities ('9.0',); the exact wheel exists for the configured remote Python.",
+        "require_cuda": true,
+        "version": "2.11.0+cu128"
+      }
+    },
+    "environment_id": "env-6e54cbc83d12e1a8d58dda3d",
+    "environment_identity_version": 2,
+    "offline": false,
+    "python_requirement": "==3.13.*",
+    "wheels": [
+      {
+        "name": "lambdaforge-0.10.1-py3-none-any.whl",
+        "sha256": "sha256:e0bd6b3fbf6643c4ff46b954c3d60fe0d27bd19b32e168da67a2343e8537bfd4",
+        "size_bytes": 1141608
+      },
+      {
+        "name": "wisdom_protein-0.8.0-py3-none-any.whl",
+        "sha256": "sha256:aef61a9722f920e9bc7557e6ff8c03254680518f997198d5cc94a3f65098a93c",
+        "size_bytes": 201597
+      }
+    ]
+  },
+  "lambdaforge_version": "0.10.1",
+  "staged": [
+    [
+      "inputs/0-public-sources.json",
+      "sha256:21eb224a9fd27d03d858791282f7a4ef306d724accf806d88b4c55de29bb757a"
+    ],
+    [
+      "packages/lambdaforge-0.10.1-py3-none-any.whl",
+      "sha256:e0bd6b3fbf6643c4ff46b954c3d60fe0d27bd19b32e168da67a2343e8537bfd4"
+    ],
+    [
+      "packages/wisdom_protein-0.8.0-py3-none-any.whl",
+      "sha256:aef61a9722f920e9bc7557e6ff8c03254680518f997198d5cc94a3f65098a93c"
+    ]
+  ]
+}
