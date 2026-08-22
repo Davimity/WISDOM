@@ -82,7 +82,10 @@ project contract, not optional style suggestions.
   static data are accepted exceptions.
 - Keep at most one class in each Python file. Name a class file exactly like its class, using the
   existing PascalCase convention even though it differs from standard Python module naming.
-- Do not add free module-level functions in `src/`.
+- Use ordinary typed functions for the three LambdaForge 0.11 public actions:
+  `select_dna`, `preprocess_dna`, and `train_wisdom`. Keep other cohesive stateful/scientific
+  concepts as classes; private module helpers are allowed only beside those entry points when they
+  keep the public action readable.
 - Prefer a small number of meaningful domain and service classes. Do not introduce factories,
   adapters, managers, builders, DTOs, wrappers, or interfaces unless they remove real complexity.
 - Preserve the ownership hierarchy `Protein -> Chain -> Residue -> Atom`. Do not duplicate atoms or
@@ -90,15 +93,20 @@ project contract, not optional style suggestions.
   domain entities.
 - Use enums instead of magic strings or unscoped numeric categories whenever the values form a
   closed semantic set.
-- Build dataset preprocessing with LambdaForge's public `PreprocessingTask` source, ordered
-  transforms, and sink contracts. LambdaForge must own record iteration, stable keys, sharding,
-  worker/process selection, failure policy, checkpoints, preprocessing manifests, partial resume,
-  and content-derived dataset artifacts; do not recreate those mechanisms inside WISDOM.
-- Build WISDOM-DNA in two explicit executions. First run the ordinary LambdaForge selection Task,
-  which publishes only evidence tables, homology-safe balanced split lists, deterministic diluted
-  views, reports, and resume evidence. Then fetch that small artifact and let one LambdaForge 0.10
-  `kind: dataset` recipe generate universal geometry and DNA annotations. Only the recipe's final
-  self-contained root with a checksummed `DatasetIndex` may become a `DatasetVersion`.
+- Author every user-facing LambdaForge 0.11 YAML with the function-first `name`, `run`, `with`, and
+  `resources` vocabulary. Do not expose legacy `kind`, `schema_version`, `inputs`, object graphs,
+  DatasetRecipe stages, or model/loss/optimizer construction trees in project YAML.
+- Internally, use LambdaForge's public `PreprocessingTask` where record-level work needs stable keys,
+  worker selection, failure policy, checkpoints, preprocessing manifests, partial resume, and
+  aggregate progress. Do not recreate those mechanisms inside WISDOM.
+- Build WISDOM-DNA through two public actions. `select_dna` publishes only evidence tables,
+  homology-safe balanced split lists, deterministic diluted views, reports, and resume evidence.
+  After that small artifact is fetched, `preprocess_dna` generates geometry and annotations once
+  and publishes the final checksummed members through LambdaForge 0.11 `lf.publish_dataset`.
+- Keep all code under one top-level `wisdom` package. Put the two action modules under
+  `wisdom.preprocessing`, structural internals under `wisdom.preprocessing.structure`, DNA-specific
+  internals under `wisdom.preprocessing.dna`, and trainable data/models/evaluation in their named
+  sibling packages. Do not restore parallel top-level packages with cross-cutting imports.
 - Treat dilution membership as a selection concern, not a geometry or annotation concern. Select
   deterministic nested prefixes independently within each split and class, maximize early coverage
   of external sequence clusters, and preprocess the union only once. Materialize each dilution as
@@ -131,12 +139,13 @@ project contract, not optional style suggestions.
   isolates a genuinely complex algorithm, is reused, or materially improves the readable flow.
 - Do not add learned features, model-specific preprocessing, neural-network code, or redundant graph
   representations to the structural preprocessing phase.
-- Keep trainable WISDOM code equally small and conceptual: one dataset for validated NPZ ingestion,
-  one graph collator for domain-specific disjoint batching, and one model class for the
-  atom-to-surface computation unless a later requirement demonstrates another cohesive concept.
-- Use the installed local LambdaForge public API for training loops, data modules, graph layers,
-  scatter operations, losses, metrics, optimizers, checkpoints, seeds, aggregation, and checkpoint
-  loading. Do not copy or wrap framework functionality inside WISDOM.
+- Keep trainable WISDOM code small and conceptual: one dataset for validated `index.jsonl`/NPZ
+  ingestion, one graph collator for domain-specific disjoint batching, the two explicitly requested
+  model generations, and one function-first training action.
+- Let the LambdaForge 0.11 callable runtime resolve datasets, expand seeds/search, reserve resources,
+  capture metrics/artifacts, and compare objectives. The public Python function owns its readable
+  PyTorch loop and uses LambdaForge public graph layers, scatter operations, pooling, and metrics;
+  do not reconstruct framework scheduling, Registry, results, or HPO infrastructure.
 - Prefer LambdaForge result indexing/plotting and generic safe artifact inspection, validation,
   export, and explicit-role visualization over project-local equivalents. Retain a WISDOM-specific
   tool only when it enforces domain semantics that the generic API cannot express at equal quality,
@@ -155,11 +164,10 @@ project contract, not optional style suggestions.
   match the immutable universal NPZ. Never rewrite the base archive to add a task label. Exclude the
   surface target from losses, gradients, HPO objectives, and checkpoint selection unless a future
   request explicitly changes the weak-supervision protocol.
-- Run final scientific evaluation through LambdaForge's public `post_run` contract and select the
-  checkpoint role explicitly. Respect its actual scope: successful completed and trainer-early-
-  stopped runs may be evaluated; paused, pruned, cancelled, failed, and cooperatively interrupted
-  training runs are not post-run states. Preserve mathematically undefined metrics as unavailable
-  values with counts rather than replacing them with zero.
+- Select checkpoints only by explicit validation metrics and evaluate the test partition afterwards
+  in the same callable Work. Preserve mathematically undefined metrics as unavailable values with
+  counts rather than replacing them with zero; never use test/local targets in HPO or checkpoint
+  selection.
 - Implement only the requested model version. Roadmap descriptions are not authorization to add
   later architectures, features, heads, or training objectives.
 - When a model version is intended to test one scientific factor, keep every other component fixed
@@ -199,7 +207,7 @@ project contract, not optional style suggestions.
   long distance, and do not create extreme spacing because one identifier is unusually long.
 - Keep nested expressions readable. Prefer a descriptive intermediate variable and a visually
   separated block over dense nesting.
-- Do not run an automatic formatter over manually aligned `src/preprocess` code if it would remove
+- Do not run an automatic formatter over manually aligned `src/wisdom/preprocessing` code if it would remove
   this required alignment. Continue running Ruff linting. Autoformat tests or other unaffected files
   separately when useful.
 
@@ -253,20 +261,23 @@ project contract, not optional style suggestions.
 
   ```bash
   ruff check .
-  mypy src/preprocess src/wisdom
+  mypy src/wisdom
   pytest -q
   lambdaforge validate experiments/dna_select.yaml
-  lambdaforge validate experiments/dna_preprocess.yaml
+  lambdaforge inspect experiments/dna_select.yaml --resolved
   lambdaforge run experiments/dna_select.yaml --dry-run
-  lambdaforge datasets plan experiments/dna_preprocess.yaml --verbose
+  lambdaforge validate experiments/dna_preprocess.yaml
   lambdaforge run experiments/dna_preprocess.yaml --dry-run
+  lambdaforge validate experiments/wisdom_v1.yaml
+  lambdaforge validate experiments/wisdom_v2.yaml
   ```
 
 - Also run relevant focused tests while iterating. Multiprocessing tests may require execution
   outside a restricted sandbox because Python's process server creates local IPC resources.
-- Validate every changed LambdaForge YAML, not only `experiments/dna_preprocess.yaml`. For preprocessing
-  migrations, exercise bounded `lambdaforge debug ... --records N` so source and transforms are
-  tested independently of production sink publication.
+- Validate every changed LambdaForge YAML. When an authored file deliberately references a not-yet
+  published selection or DatasetVersion, validate an equivalent temporary fixture binding and
+  report that the production selector cannot resolve until its upstream action has run. Never
+  publish fake data just to satisfy validation.
 - Verify both README language versions whenever documentation or scientific behavior changes.
 - A task is complete only when implementation, English code documentation, bilingual public
   documentation, tests, configuration, and stated mathematical behavior agree.

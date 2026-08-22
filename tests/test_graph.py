@@ -3,18 +3,18 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from preprocess.AtomicStructureBuilder import AtomicStructureBuilder
-from preprocess.dataclasses.Atom import Atom
-from preprocess.dataclasses.Chain import Chain
-from preprocess.dataclasses.Protein import Protein
-from preprocess.dataclasses.Residue import Residue
-from preprocess.enums.BondType import BondType
-from preprocess.enums.ConnectionType import ConnectionType
-from preprocess.enums.Relation import Relation
-from preprocess.PreprocessConfig import PreprocessConfig
-from preprocess.ProteinReader import ProteinReader
-from preprocess.StructureCache import StructureCache
-from preprocess.SurfaceBuilder import SurfaceBuilder
+from wisdom.preprocessing.structure.AtomicStructureBuilder import AtomicStructureBuilder
+from wisdom.preprocessing.structure.dataclasses.Atom import Atom
+from wisdom.preprocessing.structure.dataclasses.Chain import Chain
+from wisdom.preprocessing.structure.dataclasses.Protein import Protein
+from wisdom.preprocessing.structure.dataclasses.Residue import Residue
+from wisdom.preprocessing.structure.enums.BondType import BondType
+from wisdom.preprocessing.structure.enums.ConnectionType import ConnectionType
+from wisdom.preprocessing.structure.enums.Relation import Relation
+from wisdom.preprocessing.structure.PreprocessConfig import PreprocessConfig
+from wisdom.preprocessing.structure.ProteinReader import ProteinReader
+from wisdom.preprocessing.structure.StructureCache import StructureCache
+from wisdom.preprocessing.structure.SurfaceBuilder import SurfaceBuilder
 
 
 def _atom(index: int, x: float, name: str = "X") -> Atom:

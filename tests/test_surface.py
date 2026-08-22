@@ -1,6 +1,6 @@
 import numpy as np
 
-from preprocess.SurfaceBuilder import SurfaceBuilder
+from wisdom.preprocessing.structure.SurfaceBuilder import SurfaceBuilder
 
 
 def test_sphere_normals_curvature_connectivity_and_weights() -> None:

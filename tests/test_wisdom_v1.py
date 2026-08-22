@@ -6,15 +6,16 @@ from pathlib import Path
 import numpy as np
 import pytest
 import torch
+from lambdaforge.data import DatasetAsset, DatasetIndex, DatasetMember
 from lambdaforge.preprocessing import PreprocessingRecord
 from lambdaforge.tasks import TaskContext
 from torch import Tensor
 
-from preprocess.PreprocessConfig import PreprocessConfig
-from preprocess.PreprocessPipeline import PreprocessPipeline
 from wisdom.data.WisdomCollator import WisdomCollator
 from wisdom.data.WisdomDataset import WisdomDataset
 from wisdom.models.WisdomV1 import WisdomV1
+from wisdom.preprocessing.structure.PreprocessConfig import PreprocessConfig
+from wisdom.preprocessing.structure.PreprocessPipeline import PreprocessPipeline
 
 
 def _sample(atom_count: int, surface_count: int, target: float) -> dict[str, Tensor]:
@@ -94,6 +95,41 @@ def test_dataset_loads_explicit_split_dtypes_and_relation_mapping(tmp_path: Path
     assert loaded["surface_curvatures"].dtype == torch.float32
     assert loaded["target"].shape == () and loaded["target"].item() == 1.0
     assert torch.equal(loaded["atom_edge_types"], first["atom_edge_types"])
+
+
+def test_dataset_reads_managed_index_partitions_targets_and_dilutions(tmp_path: Path) -> None:
+    first  = _sample(3, 2, 1.0)
+    second = _sample(2, 3, 0.0)
+    _write_npz(tmp_path / "first.npz", first)
+    _write_npz(tmp_path / "second.npz", second)
+    DatasetIndex.write(
+        tmp_path / "index.jsonl",
+        (
+            DatasetMember(
+                member_id="FIRST_A",
+                partitions={"split": "train", "tier": "core"},
+                targets={"dna_binding": 1},
+                metadata={"dilutions": ["10pct", "25pct"]},
+                assets={"universal_npz": DatasetAsset(path="first.npz")},
+            ),
+            DatasetMember(
+                member_id="SECOND_A",
+                partitions={"split": "train", "tier": "challenge"},
+                targets={"dna_binding": 0},
+                metadata={"dilutions": ["25pct"]},
+                assets={"universal_npz": DatasetAsset(path="second.npz")},
+            ),
+        ),
+    )
+
+    full  = WisdomDataset(tmp_path, "train")
+    small = WisdomDataset(tmp_path, "train", subset="10pct")
+
+    assert len(full) == 2
+    assert len(small) == 1
+    assert small[0]["identifier"] == "FIRST_A"
+    assert small[0]["tier"] == "core"
+    assert small[0]["target"].item() == 1.0
 
 
 def test_dataset_rejects_corrupt_relation_semantics(tmp_path: Path) -> None:

@@ -9,13 +9,13 @@ import pytest
 from lambdaforge.preprocessing import PreprocessingDebugService, PreprocessingTask
 from lambdaforge.tasks import TaskContext
 
-from preprocess.DatasetValidator import DatasetValidator
-from preprocess.PreprocessConfig import PreprocessConfig
-from preprocess.PreprocessPipeline import PreprocessPipeline
-from preprocess.ProteinSink import ProteinSink
-from preprocess.ProteinSource import ProteinSource
-from preprocess.ProteinVisualizer import ProteinVisualizer
-from preprocess.StorageManager import StorageManager
+from wisdom.preprocessing.structure.DatasetValidator import DatasetValidator
+from wisdom.preprocessing.structure.PreprocessConfig import PreprocessConfig
+from wisdom.preprocessing.structure.PreprocessPipeline import PreprocessPipeline
+from wisdom.preprocessing.structure.ProteinSink import ProteinSink
+from wisdom.preprocessing.structure.ProteinSource import ProteinSource
+from wisdom.preprocessing.structure.ProteinVisualizer import ProteinVisualizer
+from wisdom.preprocessing.structure.StorageManager import StorageManager
 
 
 def _context(run_dir: Path, id_file: Path, config: PreprocessConfig) -> TaskContext:
@@ -136,16 +136,16 @@ task:
   target: lambdaforge.preprocessing.PreprocessingTask
   params:
     source:
-      target: preprocess.ProteinSource.ProteinSource
+      target: wisdom.preprocessing.structure.ProteinSource.ProteinSource
     transforms:
-      - target: preprocess.PreprocessPipeline.PreprocessPipeline
+      - target: wisdom.preprocessing.structure.PreprocessPipeline.PreprocessPipeline
         params:
           download: false
           config:
-            target: preprocess.PreprocessConfig.PreprocessConfig
+            target: wisdom.preprocessing.structure.PreprocessConfig.PreprocessConfig
             params: {{surface_resolution: 1.2}}
     sink:
-      target: preprocess.ProteinSink.ProteinSink
+      target: wisdom.preprocessing.structure.ProteinSink.ProteinSink
     workers: 1
     workload: cpu
 """,

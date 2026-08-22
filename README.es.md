@@ -27,7 +27,7 @@ dMaSIF, contraste o modelos de lenguaje.
   - [2.1. Requisitos](#21-requisitos)
   - [2.2. Instalación de desarrollo](#22-instalación-de-desarrollo)
 - [3. Benchmark DNA-binding y anotaciones](#3-benchmark-dna-binding-y-anotaciones)
-  - [3.1. Task de selección y receta de dataset](#31-task-de-selección-y-receta-de-dataset)
+  - [3.1. Acciones de selección y preprocesado](#31-acciones-de-selección-y-preprocesado)
   - [3.2. Evidencia, contactos, conflictos y splits](#32-evidencia-contactos-conflictos-y-splits)
   - [3.3. Ground truth superficial y contrato del sidecar](#33-ground-truth-superficial-y-contrato-del-sidecar)
 - [4. Preprocesado estructural](#4-preprocesado-estructural)
@@ -41,19 +41,19 @@ dMaSIF, contraste o modelos de lenguaje.
   - [4.8. Arquitectura del código y tests](#48-arquitectura-del-código-y-tests)
   - [4.9. Limitaciones científicas](#49-limitaciones-científicas)
 - [5. Modelos entrenables de WISDOM](#5-modelos-entrenables-de-wisdom)
-  - [5.1. Manifiesto de etiquetas y batching de grafos](#51-manifiesto-de-etiquetas-y-batching-de-grafos)
+  - [5.1. Índice del dataset y batching de grafos](#51-índice-del-dataset-y-batching-de-grafos)
   - [5.2. Modelos, ecuaciones y formas tensoriales de WISDOMv1](#52-modelos-ecuaciones-y-formas-tensoriales-de-wisdomv1)
   - [5.3. Pooling y diagnósticos de localización de WISDOMv2](#53-pooling-y-diagnósticos-de-localización-de-wisdomv2)
-  - [5.4. Entrenamiento, evaluación post-run y artefactos 3D](#54-entrenamiento-evaluación-post-run-y-artefactos-3d)
+  - [5.4. Entrenamiento, evaluación y artefactos](#54-entrenamiento-evaluación-y-artefactos)
 - [6. Bibliografía](#6-bibliografía)
 
 ## 1. Inicio rápido
 
 El recorrido de producción tiene dos ejecuciones deliberadamente separadas. Primero,
-[`experiments/dna_select.yaml`](experiments/dna_select.yaml) es una Task ordinaria y reanudable que
+[`experiments/dna_select.yaml`](experiments/dna_select.yaml) invoca una acción Python reanudable que
 descubre candidatos públicos, verifica etiquetas y estructuras, asigna splits balanceados sin fuga
 homóloga y emite una selección pequeña y portable. Después,
-[`experiments/dna_preprocess.yaml`](experiments/dna_preprocess.yaml) consume esa selección congelada,
+[`experiments/dna_preprocess.yaml`](experiments/dna_preprocess.yaml) invoca la acción pesada completa, consume esa selección congelada,
 construye una sola vez las superficies estructurales costosas, proyecta los sidecars de evaluación
 de DNA y publica el dataset inmutable de LambdaForge. El archivo `data/dna/public-sources.json`
 contiene solo procedencia fijada, no ejemplos proteicos. Una selección real es una operación pública
@@ -75,17 +75,17 @@ lf run experiments/dna_select.yaml --dry-run
 
 # Tras la Task de selección real, descarga su artefacto pequeño como explica la Sección 3.1.
 lf validate experiments/dna_preprocess.yaml
-lf datasets plan experiments/dna_preprocess.yaml --verbose
+lf inspect experiments/dna_preprocess.yaml --resolved
 lf run experiments/dna_preprocess.yaml --dry-run
 lf validate experiments/wisdom_v1.yaml
 lf run experiments/wisdom_v1.yaml --dry-run
 lf validate experiments/wisdom_v2.yaml
 ```
 
-`validate` comprueba una Task o la receta y cada Task embebida. `datasets plan` indica si cada etapa
-pesada se ejecutará o reutilizará un resultado verificado por contenido. `run` ejecuta la
-configuración seleccionada y, para la receta, solo publica una ubicación inmutable cuando todas las
-etapas obligatorias y el índice canónico son válidos. `lf` y `lambdaforge` son comandos equivalentes.
+`validate` comprueba el YAML compacto, la firma de la función, imports y argumentos resolubles.
+`inspect --resolved` muestra el Work interno exacto generado por LambdaForge 0.11. `run` ejecuta la
+función seleccionada, que solo publica una ubicación inmutable cuando todos los miembros y el índice
+canónico son válidos. `lf` y `lambdaforge` son comandos equivalentes.
 Una publicación local tiene esta forma:
 
 ```text
@@ -93,26 +93,16 @@ runs/datasets/published/wisdom-dna/2/<content-id-prefix>/
 ├── base/<structure-hash>.npz
 ├── structures/<source-structure-hash>.cif
 ├── <protein>.dna.npz
-├── manifest.csv
-├── local-manifest.csv
-├── catalog.csv
-├── {train,val,test}.txt
-├── identifiers.json
-├── subsets/{10pct,25pct,50pct,75pct}/
-│   ├── {train,val,test,proteins}.txt
-│   ├── labels.csv
-│   ├── identifiers.json
-│   └── manifest.csv
-├── annotation-report.json
-├── members.jsonl
+├── index.jsonl
 ├── dataset-artifact.json
 └── ...
 ```
 
-`members.jsonl` es el índice streaming autoritativo: cada línea identifica una proteína, split,
+`index.jsonl` es el índice streaming autoritativo: cada línea identifica una proteína, split,
 tier, etiqueta DNA global, disponibilidad de ground truth local y assets base/sidecar con checksum.
-`dataset-artifact.json` guarda el ID de contenido independiente de rutas y la procedencia del build
-por separado. La representación se abre sin pickle así; 4.2 explica cómo descubrir la ubicación
+La pertenencia a diluciones es metadata del miembro, así que una vista pequeña reutiliza los mismos
+arrays. La selección TXT/JSON/CSV portable sigue como artefacto `selection` separado. El
+`dataset-artifact.json` guarda el ID de contenido y la procedencia. La representación se abre sin pickle así; 4.2 explica cómo descubrir la ubicación
 real en Registry y 4.4–4.6 define cada array:
 
 ```python
@@ -133,13 +123,13 @@ with np.load("runs/datasets/published/wisdom-dna/2/<content-id-prefix>/base/<has
 ### 2.1. Requisitos
 
 - Python 3.10 o posterior;
-- LambdaForge `>=0.10.0,<0.11`, normalmente instalado desde su checkout local;
+- LambdaForge `>=0.11.0,<0.12`, normalmente instalado desde su checkout local;
 - un entorno CPU con NumPy, SciPy y Gemmi;
 - acceso a Internet únicamente si una entrada PDB remota no está ya en la caché raw.
 
-WISDOM está adaptado a LambdaForge `0.10.0`. LambdaForge es la fuente de verdad para materializar
-Tasks, resolver entradas/salidas, iterar y reanudar el preprocesado, definir recetas, indexar
-miembros, publicar versiones inmutables atómicamente, registrar placements, eventos, recursos y
+WISDOM está adaptado a LambdaForge `0.11.0`. LambdaForge es la fuente de verdad para materializar
+funciones, resolver argumentos file/dataset, iterar y reanudar el preprocesado, indexar miembros,
+publicar versiones inmutables por streaming, registrar placements, eventos, recursos y
 ejecuciones. WISDOM conserva la interpretación proteica, la geometría científica, la validación
 exacta de NPZ/sidecars y la visualización específica.
 
@@ -161,14 +151,15 @@ python -m pip install -e ".[dev]"
 python -m pip check
 ```
 
-`PreprocessingTask` de LambdaForge ejecuta cada flujo fuente→transformación→destino. Una
-`DatasetRecipe` compila esas Tasks en un grafo de dependencias, reutiliza etapas exactas y publica
-solo la raíz final seleccionada. WISDOM no implementa otro planificador, grupo de procesos, caché de
-etapas, Registry ni publicador. La sección 4.7 explica esta frontera.
+LambdaForge 0.11 convierte cada YAML corto `name/run/with/resources` en un Work invocable. Dentro de
+las dos funciones de preprocesado, su `PreprocessingTask` público todavía ejecuta el bucle por
+registro con workers, checkpoints, progreso y reanudación. La función pesada publica después los
+miembros validados mediante `lf.publish_dataset`. WISDOM no implementa otro runner, Registry ni
+publicador. La sección 4.7 explica esta frontera.
 
 ## 3. Benchmark DNA-binding y anotaciones
 
-### 3.1. Task de selección y receta de dataset
+### 3.1. Acciones de selección y preprocesado
 
 La pregunta científica es si una cadena proteica seleccionada une DNA. Un archivo de coordenadas no
 puede responderla por sí solo: una estructura depositada describe un experimento bajo condiciones
@@ -177,20 +168,19 @@ la selección de evidencia de la geometría universal y de los targets de evalua
 también es operativa: el descubrimiento público puede tardar horas, mientras que su resultado útil
 es un contrato pequeño de miembros que debe poder reutilizarse de forma independiente.
 
-[`experiments/dna_select.yaml`](experiments/dna_select.yaml) es por ello una Task ordinaria y
-reanudable. Descubre positivos y negativos públicos, verifica evidencia y la estructura mínima
+[`experiments/dna_select.yaml`](experiments/dna_select.yaml) llama por ello a una acción reanudable.
+Descubre positivos y negativos públicos, verifica evidencia y la estructura mínima
 necesaria, aísla contradicciones, asigna clústeres externos completos a splits, balancea cada split
 principal y emite un artefacto compacto `selection`. No crea superficies ni NPZ universales.
 
-[`experiments/dna_preprocess.yaml`](experiments/dna_preprocess.yaml) consume después ese artefacto
-congelado. Su etapa `geometry` crea NPZ estructurales universales sin etiqueta desde
-`selection/proteins.txt`. `annotate` une el catálogo congelado con el informe geométrico exacto,
-reutiliza la caché de coordenadas de geometría, crea sidecars DNA alineados y escribe
-`members.jsonl`. Solo esta receta publica `wisdom-dna@2`; un build fallido no publica ninguna
-`DatasetVersion`.
+[`experiments/dna_preprocess.yaml`](experiments/dna_preprocess.yaml) llama después a la segunda
+acción. La función crea primero NPZ universales sin etiqueta desde `selection/proteins.txt`; une
+después el catálogo congelado con ese informe geométrico exacto, reutiliza la caché de coordenadas y
+crea sidecars DNA alineados. Finalmente, `lf.publish_dataset` transmite los miembros validados a
+`index.jsonl`. Solo esta acción publica `wisdom-dna@2`; un run fallido no publica ninguna versión.
 
-Así se separan cuatro conceptos de LambdaForge 0.10.0. Una **receta** dice cómo reconstruir los datos;
-un **build** es una ejecución con huellas y procedencia; una **versión** es el contenido lógico
+Así se separan cuatro conceptos de LambdaForge 0.11. Un **Work** es una llamada configurada a una
+función Python; un **run** es una ejecución con huellas y procedencia; una **versión** es el contenido lógico
 inmutable `wisdom-dna@2`; un **placement** es una copia física local o en un clúster. Copiar bytes
 verificados añade un placement, no otra versión científica. **DatasetRegistry** es la autoridad de
 placements gestionados. **DataCatalog** queda para aliases, datos externos, loaders u overrides
@@ -208,9 +198,9 @@ lf run experiments/dna_select.yaml --on citius-ctgpgpu12
 lf artifact list JOB_ID
 lf artifact fetch JOB_ID selection --output data/dna
 
-# Después planificar y ejecutar el costoso dataset inmutable.
+# Después inspeccionar y ejecutar el costoso dataset inmutable.
 lf validate experiments/dna_preprocess.yaml
-lf datasets plan experiments/dna_preprocess.yaml --verbose
+lf inspect experiments/dna_preprocess.yaml --resolved
 lf run experiments/dna_preprocess.yaml --dry-run
 lf run experiments/dna_preprocess.yaml --on citius-ctgpgpu12
 
@@ -225,23 +215,25 @@ lf datasets members wisdom-dna@2 --partition split=train --limit 20
 lf datasets verify wisdom-dna@2
 ```
 
-LambdaForge 0.10 hace de `lf run` la entrada canónica para Tasks y recetas de dataset. El bloque
-`resources` superior de la receta solicita exactamente 36 CPU, 128 GiB, ninguna GPU y 24 horas; no
-hace falta repetir esos recursos por CLI. `lf datasets build` permanece como alias compatible.
+LambdaForge 0.11 hace de `lf run` la entrada canónica. El bloque YAML `resources` solicita 36 CPU,
+128 GiB y 24 horas para la función pesada; su argumento `workers: 36` controla el pool de registros.
+La reserva de recursos y la concurrencia científica son conceptos distintos.
 
 `lf artifact fetch` materializa el directorio nombrado como `data/dna/selection/`. Contiene
-`catalog.csv`, `identifiers.json`, `proteins.txt`, listas TXT principales/de reserva, etiquetas y
-vistas diluidas. Los checkpoints de candidatos y las descargas de descubrimiento son outputs de Task
-separados y deliberadamente no se descargan. La receta incorpora la selección a la huella de entrada:
-unos miembros distintos invalidan geometría y anotación, mientras una selección idéntica permite a
-`reuse: auto` reutilizar ambas etapas verificadas. Nunca confía en un output solo porque exista un
-directorio.
+`catalog.csv`, `identifiers.json`, `proteins.txt`, listas TXT principales/de reserva, etiquetas,
+vistas diluidas y auditorías autocontenidas JSON/Markdown/estadísticas/gráficas para la selección
+completa y cada dilución. Los checkpoints de candidatos y las descargas de descubrimiento son evidencia del
+run y deliberadamente no se descargan. LambdaForge incorpora el directorio a la huella de entrada:
+unos miembros distintos crean otra identidad, mientras los checkpoints de un run interrumpido
+compatible permiten reanudar registros exactos. Nunca confía en un output solo porque exista.
 
 `train.txt`, `val.txt` y `test.txt` son miembros lógicos con balance exacto de clases;
 `proteins.txt` añade reservas para evaluación local. `identifiers.json` une cada ID con etiqueta,
-split, clúster al 30 %, tier y marca de miembro lógico. La etapa final copia estos contratos al
-dataset publicado. Geometría declara su caché paralela `raw` como binding de artefacto para
-anotación, por lo que las estructuras elegidas no se descargan dos veces.
+split, clúster al 30 %, tier y marca de miembro lógico. `labels.csv` es la vista compacta para hoja
+de cálculo; un `splits.csv` separado la duplicaría y por ello no se genera. El `README.md` de la
+selección explica cada fichero y `audit.md` interpreta las métricas y advertencias observadas. La
+etapa final copia estos contratos al dataset publicado. Geometría declara su caché paralela `raw`
+como binding de artefacto para anotación, por lo que las estructuras elegidas no se descargan dos veces.
 
 Para disponer del mismo dataset válido en otro clúster se copia la versión inmutable, sin repetir
 descubrimiento, mapeo, geometría ni anotación:
@@ -278,7 +270,7 @@ No se debe ejecutar primero `datasets remove`: solo olvida metadata del Registry
 deliberadamente los bytes en disco, dificultando su borrado gestionado seguro. Son instrucciones;
 WISDOM no elimina automáticamente datasets durante una migración.
 
-LambdaForge 0.10.0 escribe el progreso de preprocesado en stderr, que pasa a ser el log durable del
+LambdaForge 0.11 escribe el progreso de preprocesado en stderr, que pasa a ser el log durable del
 job. Una línea inicial muestra shard, número de workers y workload; después, líneas de checkpoint
 del coordinador informan de los totales `records`, `ok` y `failed`. El límite por defecto de diez
 segundos evita ruido y solo el coordinador escribe estos resúmenes, de modo que los workers paralelos
@@ -380,12 +372,14 @@ El radio de giro describe compactación global; no es una feature aprendida. Est
 alargadas pasan al tier `challenge` en vez de desaparecer silenciosamente; `core` representa la
 distribución ordinaria.
 
-Secuencias idénticas y homólogos no deben cruzar splits. WISDOM usa grupos RCSB MMseqs2 al 30 % y no
-ejecuta un alineador masivo propio. Los registros test publicados por DyProL/BTD permanecen en
-`test`: nunca pasan a train/validation. Clusters completos del development se reparten
-aproximadamente 80/20 mediante orden SHA-256 con seed. Si un cluster development solapa el test
-externo, solo permanecen sus registros externos. También se separan clusters positivos en
-`validation_reserve` y `test_reserve`; las reservas nunca entrenan.
+Secuencias idénticas, homólogos y cadenas de una misma deposición experimental no deben cruzar
+splits. WISDOM usa grupos RCSB MMseqs2 al 30 % y no ejecuta un alineador masivo propio. Une las filas
+en componentes transitivos: dos filas se conectan si comparten clúster de secuencia o deposición PDB
+de cuatro caracteres, y la relación se propaga mediante filas intermedias. Un componente completo
+entra en un único split. Los registros test publicados por DyProL/BTD permanecen en `test`; si su
+componente toca development, solo permanecen las filas de test externo. Los componentes development
+se reparten aproximadamente 80/20 mediante orden SHA-256 con seed. También se separan componentes
+positivos en `validation_reserve` y `test_reserve`; las reservas nunca entrenan.
 
 Intercalar fuentes no equivale a equilibrar clases: la mayoría de secuencias negativas BTD no tiene
 una cadena experimental RCSB exacta y aceptable, mientras que muchos positivos DyProL ya nombran
@@ -402,17 +396,22 @@ m_s=\min(n_{s,0},n_{s,1}).
 Un orden SHA-256 con seed selecciona el prefijo de la clase mayoritaria, de forma independiente al
 orden en que acaben los workers y repetible entre clústeres. Cada split principal contiene así
 exactamente (m_s) negativos y (m_s) positivos; si falta una clase, la publicación falla. Esto
-garantiza paridad binaria, no equidad demográfica, taxonómica ni estructural, cuyas distribuciones
-siguen en el informe. Geometría y anotación usan además `on_error: fail`, por lo que ningún miembro
-seleccionado puede desaparecer silenciosamente y romper la paridad posterior.
+garantiza paridad binaria, no equidad demográfica, taxonómica, funcional ni estructural, cuyas
+distribuciones siguen en el informe. En particular, los positivos y negativos actuales proceden de
+fuentes disjuntas. Esa asociación fuente/etiqueta es una advertencia científica porque un modelo
+podría explotar sesgos de selección propios de la fuente. Geometría y anotación usan además
+`on_error: fail`, por lo que ningún miembro seleccionado puede desaparecer silenciosamente y romper
+la paridad posterior.
 
 `catalog.csv` y `catalog.parquet` contienen etiqueta/split, UniProt/PDB/cadena, versión/URL/checksum
 y registro fuente, longitud y grupos 30/90 %, método/resolución/taxonomía, filtros negativos,
-`local_gt_expected`, complejo/cadenas DNA e índices residuales cuando aplican. Los TXT train,
-validation, test, reservas y `proteins.txt` solo contienen selectores `PDBID_CHAINS`.
+`local_gt_expected`, complejo/cadenas DNA e índices residuales cuando aplican. Los TXT `train`,
+`val`, `test`, reservas y `proteins.txt` solo contienen selectores `PDBID_CHAINS`.
 `identifiers.json` añade etiqueta, split, clúster, tier y estado explícito de miembro/reserva. El
-JSON informa candidatos/aceptados/rechazados por clase, motivos —incluido el submuestreo de la
-mayoría—, fallos PDB, balance exacto, clusters, fuentes y distribuciones estructurales.
+dataset completo y cada vista diluida incluyen `audit.json`, un `audit.md` explicado,
+`statistics.csv` ordenado y `distributions.png`. Verifican acuerdo entre ficheros, balance exacto,
+fugas de ID/secuencia/familia/PDB/coordenadas, evaluación fija, entrenamiento anidado, amplitud de
+familias, tiers geométricos, fuentes y distribuciones estructurales.
 
 ### 3.3. Ground truth superficial y contrato del sidecar
 
@@ -472,29 +471,29 @@ Elegibilidad global y local son conceptos distintos. Un positivo fiable puede en
 al menos un punto positivo. Si produce cero, conserva `label=1`, invalida todos sus puntos locales,
 registra `zero_positive_surface_points` y queda fuera de métricas de localización; nunca se convierte
 en superficie all-negative. `manifest.csv` mantiene train/validation/test globales. Las reservas no
-aparecen en él ni en `members.jsonl`; sus ficheros existen solo para sustitución local auditada.
+aparecen en él ni en el `index.jsonl` publicado; sus ficheros existen solo para sustitución local auditada.
 `local-manifest.csv` contiene validation/test evaluables y sustituciones deterministas de la reserva
 correspondiente; `annotation-report.json` registra original, motivo y sustituto. Los informes global
 y local indican por separado sus números de proteínas.
 
 Para curvas de aprendizaje, la Task de selección crea cada fracción indicada en `dilutions` —ahora
-10 %, 25 %, 50 % y 75 %— bajo `subsets/<fracción>/`. Si el split (s) contiene (N_{sc}) ejemplos de
-la clase (c), la fracción (f) conserva
+10 %, 25 %, 50 % y 75 %— bajo `subsets/<fracción>/`. Validación y test permanecen idénticos a los de
+la selección completa en todas las vistas. Si el train completo contiene (N_{train,c}) ejemplos de
+la clase (c), la fracción (f) conserva únicamente en entrenamiento
 
 \[
-n_{sc}(f)=\max\left(1,\left\lfloor fN_{sc}\right\rfloor\right).
+n_{train,c}(f)=\max\left(1,\left\lfloor fN_{train,c}\right\rfloor\right).
 \]
 
-independientemente para cada clase. Los splits completos ya están balanceados, así que cada vista
-conserva el balance. Las filas se ordenan por amplitud entre clústeres externos al 30 %: se visita un
-miembro de cada clúster antes de que alguno aporte un segundo. El orden con semilla hace las vistas
-deterministas y anidadas: 10 % está contenido en 25 %, después en 50 %, 75 % y la selección completa.
-Nunca se cambia el split original, por lo que permanece la barrera homóloga entre splits. La receta
-pesada preprocesa la unión una sola vez; su sink de anotación convierte cada
-`subsets/<fracción>/identifiers.json` en un `subsets/<fracción>/manifest.csv` ligero que referencia
-los NPZ/sidecars compartidos. Para usar una vista se cambia el `subpath` de los tres loaders, por
-ejemplo a `subsets/25pct/manifest.csv`; sus parámetros `split` siguen eligiendo train, validation y
-test.
+Ambas clases de train usan el mismo número y cada vista sigue balanceada. Las filas de train se
+ordenan por amplitud entre clústeres externos al 30 %: se visita un miembro de cada clúster antes de
+que alguno aporte un segundo. El orden con semilla hace los trains deterministas y anidados: 10 %
+está contenido en 25 %, después en 50 %, 75 % y el train completo. Mantener validación y test fijos
+hace que una curva de aprendizaje mida cantidad de entrenamiento, no un cambio en las preguntas de
+evaluación. Nunca se cambia el split original, por lo que permanece la barrera de familia/PDB entre
+splits. La acción pesada preprocesa la unión una sola vez y guarda los nombres de vistas de cada
+miembro en la metadata de `index.jsonl`. Para usar una vista se fija `subset: 25pct` en el YAML del
+modelo; todas las vistas referencian los mismos NPZ y sidecars.
 
 Con pesos de área representada (w_i>0), se guardan
 
@@ -520,12 +519,12 @@ fuente. Los manifests de `annotations/` usan rutas relativas y unen `file`, `ann
 global, split, identificador y tier, por lo que el dataset puede cambiar de montaje. `WisdomDataset`
 vuelve a verificar la huella al cargarlo.
 
-El `members.jsonl` final expresa la misma colección de splits principales con el modelo canónico de
+El `index.jsonl` final expresa la misma colección de splits principales con el modelo canónico de
 LambdaForge. Cada proteína de train/validation/test es un miembro con particiones `split` y `tier`;
 targets `dna_binding` y
 `local_ground_truth`; estadísticas científicas de superficie; y assets `universal_npz`,
-`dna_annotation` y `source_structure` con checksum. `catalog.csv`, todos los manifests, los TXT de
-split, `identifiers.json` y el informe son assets globales verificados. Por ello el content ID
+`dna_annotation` y `source_structure` con checksum. El artefacto compacto de selección conserva por
+separado `catalog.csv`, manifests, TXT, `identifiers.json` e informe. Por ello el content ID gestionado
 depende de miembros y bytes científicos, no de
 la ruta en equipo o clúster. Los intermedios de selección/geometría pueden salir después de sus cachés
 sin dejar incompleta la versión publicada: contiene las estructuras a las que apunta el catálogo,
@@ -675,23 +674,20 @@ trayectorias y contenedores de archivos quedan fuera del contrato actual.
 
 **Configuración y ejecución.**
 
-La etapa `geometry` de
 [`experiments/dna_preprocess.yaml`](experiments/dna_preprocess.yaml) es la descripción estructural
-editable. Esta Task embebida selecciona el manifiesto enlazado, directorios, parámetros científicos
-y política de ejecución. LambdaForge la materializa como una etapa de receta direccionada por
-contenido.
+editable. Su YAML corto de LambdaForge 0.11 elige el directorio `selection`, los parámetros
+científicos, workers, identidad del dataset y recursos, y llama a una única acción Python completa.
 
 ```bash
 lf validate experiments/dna_preprocess.yaml
-lf datasets plan experiments/dna_preprocess.yaml --verbose
+lf inspect experiments/dna_preprocess.yaml --resolved
 lf run experiments/dna_preprocess.yaml --dry-run
 lf run experiments/dna_preprocess.yaml
 ```
 
-`validate` detecta errores de receta/etapa y clases Python no disponibles. El plan verbose muestra
-`EXECUTE`, `REUSE` o `MISSING` por etapa y `PUBLISH` o `NOOP` en la frontera final. `--dry-run` no
-envía jobs ni transforma proteínas. El último comando realiza el recorrido completo de 4.1 y solo
-publica después de validar el índice final.
+`validate` detecta argumentos incorrectos, inputs preparados ausentes y callables no disponibles.
+`inspect --resolved` muestra el Work interno sin exponerlo en el YAML escrito. `--dry-run` no envía
+jobs ni transforma proteínas. El último comando realiza 4.1 y solo publica tras validar el índice.
 
 Los tres conceptos de preprocesado tienen papeles acotados. `ProteinSource` lee la entrada nombrada
 `protein_identifiers` y asigna una clave estable a cada línea TXT única. `PreprocessPipeline` es la
@@ -704,18 +700,17 @@ clases con iteración, procesos, checkpoints, errores, manifiestos e identidad f
 
 | Parámetro | Default | Significado |
 |---|---:|---|
-| `geometry.inputs.protein_identifiers` | `data/dna/selection/proteins.txt` | Manifiesto exacto descargado de la Task de selección independiente. |
-| `outputs.downloads` | `raw` | Caché nombrada y relativa al run para los `cif.gz` descargados. |
-| `outputs.processed` | `processed` | Directorio nombrado del dataset NPZ. |
-| `outputs.report` | `preprocessing-report.json` | Informe científico/de compatibilidad propio de WISDOM. |
-| `task.params.workers` | `36` | Un worker CPU concurrente por núcleo solicitado por el comando de producción `lf run`. |
-| `task.params.workload` | `cpu` | Procesos creados para transformaciones CPU; el padre escribe destino y manifiesto. |
-| `task.params.on_error` | `fail` | Se detiene si un miembro balanceado elegido no produce su representación pesada. |
-| `task.params.checkpoint_interval` | `1` | Persiste el progreso por registro tras cada proteína terminada. |
-| `task.params.progress_interval_seconds` | `10.0` (default del framework) | Emite desde el coordinador una línea agregada de progreso en checkpoints elegibles aproximadamente cada diez segundos. |
-| `transform.download` | `true` | Permite descargar de RCSB si falta una entrada remota en la caché nombrada. |
-| `resources` de receta | `36 CPU, 128 GiB, 24 h` | Asignación exterior exacta compartida secuencialmente por geometría y anotación. |
-| `model_index` | `0` | Modelo estructural, indexado desde cero. |
+| `selection` | sin default | Directorio exacto descargado del Work de selección independiente. |
+| `dataset_name` | `wisdom-dna` | Nombre gestionado estable pasado a `lf.publish_dataset`. |
+| `dataset_version` | `2` | Release inmutable; cambiar bytes intencionadamente exige otro valor. |
+| `workers` | `36` | Procesos creados por registro, normalmente uno por CPU solicitada. |
+| workload interno | `cpu` | Usa procesos para geometría/anotación y serializa sinks en el padre. |
+| política interna de fallos | `fail` | Se detiene si un miembro balanceado no produce su representación. |
+| intervalo interno de checkpoint | `1` | Persiste el progreso tras cada proteína terminada. |
+| intervalo interno de progreso | `10 s` | Emite una línea agregada del coordinador sin carreras entre workers. |
+| política interna de descarga | `true` | Descarga de RCSB solo si falta la entrada remota en la caché del run. |
+| `resources` | `36 CPU, 128 GiB, 24 h` | Asignación exterior compartida secuencialmente por geometría y anotación. |
+| interno `model_index` | `0` | Modelo estructural, indexado desde cero. |
 | `chains` | `[]` | Filtro global de cadenas, sustituido por un selector remoto. |
 | `include_hydrogens` | `false` | Conserva hidrógenos explícitos; nunca los inventa. |
 | `include_waters` | `false` | Conserva residuos de agua cristalográfica. |
@@ -785,7 +780,7 @@ with np.load("protein.npz", allow_pickle=False) as archive:
     print(json.loads(str(archive["metadata_json"].item())))
 ```
 
-LambdaForge 0.10.0 puede inspeccionar, restringir y dibujar arrays explícitos de forma segura sin
+LambdaForge 0.11 puede inspeccionar, restringir y dibujar arrays explícitos de forma segura sin
 código de depuración propio de WISDOM. Por ejemplo:
 
 ```bash
@@ -1521,19 +1516,17 @@ válido. Se escribe un temporal único, se sincroniza, se reabre con `allow_pick
 los bytes almacenados. Desactivar pickle impide ejecutar objetos Python serializados al cargar el
 NPZ. `os.replace` lo publica atómicamente; un proceso fallido no deja un NPZ aparentemente válido.
 
-**Reutilización de etapas y receta completa.** Una segunda invocación normal de la misma receta es
-`NOOP`, no otro preprocesado. En cada etapa LambdaForge exige la misma huella de Task, resultado
-correcto, rutas obligatorias y digests actuales iguales a los registrados. WISDOM revalida además
-los registros moleculares reanudados en las fronteras de sus sinks. Por ello
+**Reutilización de run y registros.** Un run interrumpido compatible se reanuda desde checkpoints de
+registros de LambdaForge, no desde nombres de fichero. WISDOM revalida además los registros en las
+fronteras de sus sinks. La llamada resuelta se inspecciona sin iniciar trabajo con
 
 ```bash
-lf datasets plan experiments/dna_preprocess.yaml --verbose
+lf inspect experiments/dna_preprocess.yaml --resolved
 ```
 
-muestra `REUSE` en todas las etapas y `NOOP` al publicar cuando nada relevante cambia. LambdaForge
-no descarga ni reconstruye superficies. Cambiar bytes, identidad del código o un ajuste científico
-invalida esa etapa y sus descendientes. Cambiar contenido científico publicado exige además una
-versión explícita nueva, pues un `name@version` existente es inmutable.
+Cambiar bytes de selección, identidad del código o un ajuste científico crea otra identidad de Work.
+Un `name@version` publicado permanece inmutable, así que un cambio intencionado necesita una versión
+nueva en lugar de sobrescribir un placement anterior.
 
 **Reanudación por proteína.** LambdaForge registra clave estable, estado, intentos, duración y error
 de cada registro en `preprocessing-manifest.json`. Tras una interrupción ofrece las claves terminadas
@@ -1604,22 +1597,20 @@ recomienda comenzar con solo unas pocas peticiones API por segundo y retroceder 
 que añadir más hilos no elevaría la tasa segura. Inspeccionar decenas de miles de candidatos todavía
 puede requerir horas porque la latencia y límites del servicio remoto —no la CPU— fijan el mínimo.
 
-La receta pesada utiliza en cambio 36 procesos creados, uno por CPU solicitada, tanto para geometría
+La acción pesada utiliza en cambio 36 procesos creados, uno por CPU solicitada, tanto para geometría
 como para anotación. Geometría descarga en paralelo diferentes entradas PDB elegidas y realiza las
 costosas superficies; anotación consume el artefacto de coordenadas ya descargado. Por tanto, no
 repite las descargas públicas de estructuras.
 
-En LambdaForge 0.10.0, el bloque `resources` de la receta determina la reserva exterior real:
+En LambdaForge 0.11, el bloque `resources` del Work determina la reserva exterior real:
 
 ```bash
 lf run experiments/dna_preprocess.yaml --on citius-ctgpgpu12
 ```
 
-El dry-run verificado informa `CPU=36`, 128 GiB, ninguna GPU y 24 horas. `processes: 1` en ese plan no
-es el número de workers de proteínas ni limita el cálculo a un núcleo: significa un coordinador
-exterior del build, no varios ranks distribuidos. Dentro de ese coordinador, cada
-`PreprocessingTask` crea su pool configurado de 36 procesos. Las dos etapas de la receta son
-secuenciales y reutilizan la misma reserva de 36 núcleos, no requieren 72. No conviene usar 72
+El Work resuelto informa `cpu: 36`, 128 GiB y 24 horas. Dentro de su coordinador, cada
+`PreprocessingTask` crea su pool configurado de 36 procesos. Geometría y anotación son secuenciales
+y reutilizan la misma reserva de 36 núcleos, no requieren 72. No conviene usar 72
 procesos CPU-bound con 36 CPU; la sobresuscripción suele aumentar cambios de contexto y memoria, no
 rendimiento. Los 72 workers de selección son hilos y solo son apropiados porque esa Task separada
 pasa la mayor parte del tiempo esperando E/S.
@@ -1635,8 +1626,8 @@ habría más hilos activos que CPUs asignadas: **sobresuscripción**. WISDOM fij
 `MKL_NUM_THREADS`, `OPENBLAS_NUM_THREADS` y `NUMEXPR_NUM_THREADS` a uno antes de importar cálculo en
 los procesos.
 
-En YAML de Task, Experiment y recetas de dataset LambdaForge 0.10, el bloque superior `resources`
-solicita CPU, RAM, GPU, ranks de proceso y tiempo de forma portable. Tras registrar un perfil como
+En los Works de LambdaForge 0.11, el bloque superior `resources` solicita CPU, RAM, GPU y tiempo de
+forma portable. Tras registrar un perfil como
 `atlas`, el runner gestionado prepara el build y expone resultados sin un script SLURM propio:
 
 ```bash
@@ -1645,7 +1636,7 @@ lf jobs show latest
 lf datasets show wisdom-dna@2
 ```
 
-Con LambdaForge 0.10.0, cada perfil de clúster con `environment: managed` normalmente debe dejar
+Con LambdaForge 0.11, cada perfil de clúster con `environment: managed` normalmente debe dejar
 automática la selección de PyTorch:
 
 ```yaml
@@ -1675,12 +1666,11 @@ externos, loaders y pins institucionales explícitos.
 
 **Arquitectura del código.**
 
-El código refleja el recorrido y evita una función monolítica. LambdaForge posee la envoltura
-genérica de la tarea; `PreprocessPipeline` se lee como la transformación de una proteína descrita en
-3.1 y cada clase periférica encapsula un tipo cohesivo de complejidad:
-
-`src/preprocess` usa una clase por archivo de clase y ninguna función libre. Las tablas químicas
-estáticas permanecen en `chemical_data.py` sin envolverlas en estado artificial.
+Todo el código de ejecución vive ahora bajo un único paquete `src/wisdom`. Solo hay tres módulos de
+acciones públicas que el usuario necesita reconocer: `Selection.py`, `Preprocessing.py` y
+`Training.py`. Sus funciones se leen como orquestación; los detalles científicos cohesivos quedan
+en `preprocessing/dna`, `preprocessing/structure`, `data`, `models` y `evaluation`.
+`PreprocessPipeline` sigue leyendo como la transformación de una proteína descrita en 4.1:
 
 ```text
 LambdaForge PreprocessingTask
@@ -1708,10 +1698,12 @@ de aceptar strings arbitrarios.
 
 ```bash
 ruff check .
-mypy src/preprocess
 mypy src/wisdom
 pytest -q
+lf validate experiments/dna_select.yaml
 lf validate experiments/dna_preprocess.yaml
+lf validate experiments/wisdom_v1.yaml
+lf validate experiments/wisdom_v2.yaml
 ```
 
 Los tests offline cubren PDB/mmCIF/gzip, gramática, errores de modelo/cadena, filtros, altLoc, orden
@@ -1764,23 +1756,19 @@ exponer una puntuación por punto superficial? La etiqueta `0` o `1` pertenece a
 átomo o punto. Por eso las puntuaciones locales tienen **supervisión débil**: solo aprenden mediante
 la etiqueta global y no deben interpretarse como sitios de unión confirmados experimentalmente.
 
-### 5.1. Manifiesto de etiquetas y batching de grafos
+### 5.1. Índice del dataset y batching de grafos
 
-El preprocesado desconoce las etiquetas experimentales y la pertenencia a train/validation/test. El
-entrenamiento las añade mediante el contrato CSV explícito mínimo:
+La geometría universal no contiene por sí misma una etiqueta experimental. El flujo de
+selección/anotación añade esos significados al publicar el dataset gestionado. En LambdaForge 0.11,
+`WisdomDataset` lee el `index.jsonl` canónico: cada miembro aporta una partición `split` explícita,
+un target binario `dna_binding`, assets `universal_npz` y `dna_annotation`, y nombres opcionales de
+dilución como `25pct`. Ningún nombre de archivo se interpreta como etiqueta ni se inventa un split
+aleatorio. El CSV antiguo `file,label,split` solo se conserva para tests pequeños y uso local
+retrocompatible.
 
-```csv
-file,label,split
-processed/protein_1.npz,1,train
-processed/protein_2.npz,0,val
-processed/protein_3.npz,1,test
-```
-
-`file` es una ruta NPZ relativa al manifiesto, `label` vale exactamente `0` o `1` y `split` es
-`train`, `val` o `test`. Los splits explícitos evitan filtrar una misma proteína entre entrenamiento
-y evaluación. `WisdomDataset` abre cada NPZ con `allow_pickle=False`, comprueba arrays y rangos de
-grafo necesarios y convierte solo esos arrays en tensores. No desplaza puntos, recalcula aristas ni
-modifica el resultado del preprocesado.
+Después de filtrar split/vista, `WisdomDataset` abre cada NPZ con `allow_pickle=False`, comprueba los
+arrays y rangos de grafo necesarios y convierte solo esos arrays en tensores. No desplaza puntos,
+recalcula aristas ni modifica el resultado del preprocesado.
 
 Las proteínas tienen distinto número de átomos y puntos, de modo que no pueden apilarse como un
 rectángulo sin padding. `WisdomCollator` construye una **unión disjunta**: concatena nodos y desplaza
@@ -1985,36 +1973,29 @@ pooling. Estos diagnósticos del entrenamiento no consumen etiquetas puntuales. 
 separado contrasta el mapa con sidecars DNA inmutables tras seleccionar el modelo; esa comparación
 posterior nunca modifica loss ni el objetivo HPO.
 
-### 5.4. Entrenamiento, evaluación post-run y artefactos 3D
+### 5.4. Entrenamiento, evaluación y artefactos
 
-WISDOM no contiene scheduler de HPO, bucle de pruning, gestor de semillas, selector de GPU ni base
-de datos de estudios. LambdaForge controla materialización, inicialización Sobol, búsqueda bayesiana,
-knowledge gradient consciente del coste, fidelidad por épocas acumuladas, curvas de aprendizaje,
-pruning, carrera adaptativa de semillas, confirmación, checkpoints, admisión de memoria, persistencia,
-reanudación, agregación, informes e indexado. WISDOM aporta dataset, collator, modelos, espacios
-científicos y la semántica regional.
+LambdaForge 0.11 resuelve el dataset inmutable, expande valores HPO y semillas, reserva la GPU,
+captura métricas/artefactos y ordena Works por el objetivo de validación. La única función pública
+`train_wisdom` posee el bucle PyTorch transparente: crea loaders explícitos train/validation/test,
+aplica `WisdomCollator`, entrena con AdamW y entropía cruzada binaria, y conserva el checkpoint con
+mayor AUPRC de validación. El test solo se lee después de esa elección.
 
 | Configuración | Responsabilidad |
 |---|---|
-| `wisdom_v1.yaml` | Modelo, entrenamiento y HPO adaptativo completos de v1, con media átomo→superficie y MAX fijos. |
-| `wisdom_v2.yaml` | Modelo v2 completo, valores del backbone v1 seleccionado y HPO condicional exclusivamente de pooling. |
+| `wisdom_v1.yaml` | Cuarenta candidatos muestreados de capacidad, profundidad, dropout, learning rate y weight decay; MAX permanece fijo. |
+| `wisdom_v2.yaml` | Ablación exhaustiva de seis poolings con todos los valores de backbone y entrenamiento fijos. |
 
-V1 optimiza AUPRC de validación, nunca test. Sobol con `trials:auto` deriva el diseño inicial de la
-dimensión efectiva; después actúa la búsqueda bayesiana con knowledge gradient consciente del coste.
-Cada candidato empieza con cinco épocas y puede reanudarse en incrementos de cinco hasta 100. El
-pruning posterior comienza tras diez. Las semillas `[7,17,27]` compiten adaptativamente y tres
-finalistas usan semillas nuevas `[101,211]`. Los límites duros son 60 acciones, 2.000 épocas y
-200.000 segundos GPU: limitan gasto, no obligan a agotarlo.
+V1 optimiza AUPRC de validación, nunca test. Sus 40 candidatos muestreados se repiten con semillas
+`[7,17,27]`; `max_parallel: 1` garantiza un único entrenamiento de una GPU a la vez. V2 expande MAX,
+mean, attention, top-k mean, local-mean/global-MAX y log-sum-exp normalizado una vez por semilla. La
+fracción top-k, anchura de atención, profundidad regional y temperatura log-sum-exp son controles
+fijos en esta primera comparación, no más dimensiones de búsqueda confundentes.
 
-V2 usa un único HPO condicional. Compara MAX, mean, attention, cinco fracciones top-k, de uno a tres
-niveles regionales y log-sum-exp. La fracción solo existe para `topk`, los niveles para
-`local_mean_max`, la anchura de atención para `attention` y beta para log-sum-exp. Features, anchuras,
-profundidades, dropout, learning rate y weight decay están ausentes: se copian de la selección robusta
-de v1 y permanecen como constantes controladas.
-
-Los tres loaders usan `{dataset: wisdom-dna, version: "2", subpath: manifest.csv}`, no una ruta
-absoluta de máquina. LambdaForge resuelve `wisdom-dna@2` mediante DatasetRegistry y registra en la
-evidencia materializada identidad exacta de contenido/build y placement elegido. Un equipo local y
+El callable recibe `{dataset: wisdom-dna@2}`, no una ruta absoluta de máquina. LambdaForge resuelve
+el selector a la raíz gestionada; `WisdomDataset` lee `index.jsonl`, filtra la partición explícita
+`split`, el target de etiqueta y la metadata de dilución solicitada, y registra identidad exacta de
+contenido/build y placement elegido. Un equipo local y
 un clúster pueden guardar copias verificadas en rutas distintas sin editar parámetros ni cambiar la
 identidad científica. Construye o materializa la versión antes del HPO; la ausencia de datos nunca
 se convierte silenciosamente en split aleatorio ni etiquetas sintéticas.
@@ -2035,7 +2016,6 @@ lf datasets list --all
 lf datasets show wisdom-dna@2
 lf datasets locations wisdom-dna@2
 lf validate experiments/wisdom_v1.yaml
-lf compose experiments/wisdom_v1.yaml
 lf inspect experiments/wisdom_v1.yaml --resolved
 lf run experiments/wisdom_v1.yaml --dry-run
 
@@ -2044,86 +2024,36 @@ lf inspect experiments/wisdom_v2.yaml --resolved
 lf run experiments/wisdom_v2.yaml --dry-run
 ```
 
-Instala el extra `adaptive-hpo` de LambdaForge para la búsqueda bayesiana. El comando normal inicia
-v1; repetirlo reanuda el estudio duradero desde `.lambdaforge/adaptive/<study-id>/`. `--restart`
-descarta explícitamente el progreso. No edites a mano `state.json`, los eventos append-only ni
-`summary.json`.
+El comando normal inicia v1; repetir la configuración permite a LambdaForge reutilizar o reanudar su
+propia evidencia durable de Works. No edites a mano estados ni archivos de eventos del framework.
 
 ```bash
-lambdaforge run experiments/wisdom_v1.yaml
-lambdaforge run experiments/wisdom_v1.yaml
-lambdaforge results audit experiments/wisdom_v1.yaml --no-archived --write-index \
-  --fail-on-ambiguous
-lambdaforge aggregate experiments/wisdom_v1.yaml
+lf run experiments/wisdom_v1.yaml
+lf results audit experiments/wisdom_v1.yaml --no-archived
 ```
 
-Revisa medias y dispersión de confirmación, curvas, límites sospechosos y simplicidad; no copies el
-mayor decimal sin más. Copia entonces los valores de backbone y optimizador seleccionados en los
-bloques fijos claramente indicados de `wisdom_v2.yaml` y ejecuta su HPO de pooling:
+Revisa dispersión entre semillas, curvas, límites sospechosos y simplicidad; no copies el mayor
+decimal sin más. Copia entonces los valores de backbone y optimizador v1 seleccionados en el bloque
+fijo de `wisdom_v2.yaml` y ejecuta su comparación controlada de pooling:
 
 ```bash
-lambdaforge run experiments/wisdom_v2.yaml
-lambdaforge aggregate experiments/wisdom_v2.yaml
+lf run experiments/wisdom_v2.yaml
+lf results audit experiments/wisdom_v2.yaml --no-archived
 ```
 
-El YAML v2 conserva una advertencia en `scientific_status` hasta completar esa copia manual. El
-equipo comprobado tiene una GPU de 4 GB, por eso la concurrencia HPO es uno y LambdaForge reserva 3
-GiB más margen con límite defensivo del asignador. Son ajustes operativos, no científicos; un destino
-gestionado puede sustituir recursos sin cambiar la identidad del candidato. La inspección genérica
-de arrays NPZ y visualización 3D con roles explícitos de LambdaForge siguen documentadas en 4.2.
-WISDOM solo conserva validación que una herramienta genérica no puede inferir: topología proteica,
-gaps con signo, orientación de normales e identidades de curvatura.
-
-El análisis DNA final es una acción `post_run` obligatoria de LambdaForge que se ejecuta en la misma
-asignación de recursos después de confirmar correctamente el entrenamiento. En estos YAML
-adaptativos, `scope: confirmed_runs` restringe las costosas métricas de test y exportaciones 3D a las
-configuraciones finalistas reentrenadas con semillas de confirmación independientes. En un
-experimento no adaptativo, la misma acción se ejecutaría tras una finalización normal o un early
-stopping del entrenador. Los trials de búsqueda pausados, descartados por pruning, cancelados,
-fallidos o interrumpidos cooperativamente no ejecutan acciones post-run. `scope: all_runs` puede
-incluir todos los runs terminales correctos de la búsqueda, pero no convierte ninguno de esos
-estados excluidos en un estado post-run.
-
-El YAML solicita explícitamente `checkpoint: best`; LambdaForge no lo sustituye silenciosamente por
-`last`. Si no existe un checkpoint best inequívoco, la acción obligatoria falla de forma visible,
-mientras el checkpoint de entrenamiento ya confirmado queda disponible para diagnosticar y
-reintentar solo el post-run. La acción usa el SHA-256 del checkpoint persistido, su propia identidad
-de configuración y los hashes de los artefactos declarados para escribir un recibo duradero. Al
-repetir un run idéntico terminado se reutiliza un recibo verificado; cambiar la política de
-evaluación o perder un artefacto repite solo la acción afectada, no el entrenamiento neuronal. El
-ground truth superficial nunca entra en loss, gradientes, AUPRC de validación, política HPO ni
-selección de modelo.
-
-El informe global usa accuracy, balanced accuracy, precision, recall, specificity, F1, MCC, kappa de
-Cohen, AUROC y AUPRC de LambdaForge. El superficial aplica la misma familia a puntos con
-`surface_valid_mask` verdadero. Las probabilidades son
-(\sigma(\ell_i)=1/(1+e^{-\ell_i})), con logit local (ell_i) y threshold discreto 0.5. Micro
-concatena puntos válidos; macro calcula primero por proteína y promedia solo valores definidos. El
-informe separa el resumen global de la localización primaria sobre positivos y recalcula métricas
-positivas para cada umbral de sensibilidad DNA guardado, sin reentrenar. Se conservan conteos de
-proteínas y métricas indefinidas: denominador inválido es `null`, nunca cero.
-Los positivos añaden Dice e IoU; los negativos curados informan fracción de área positiva predicha,
-probabilidad máxima, número de hotspots espurios conectados y tamaño del mayor.
-
-Los artefactos post-run permanecen dentro del run de entrenamiento:
+Cada Work escribe dos artefactos explícitos junto a la evidencia normal de LambdaForge:
 
 ```text
-evaluation/
-├── metrics/global_metrics.json
-├── metrics/surface_metrics.json
-├── metrics/per_protein_metrics.csv
-├── predictions/global_predictions.csv
-├── visualizations/<protein>.ply
-├── visualizations/<protein>.npz
-└── report/evaluation_summary.{json,md}
+best-model.pt
+evaluation.json
 ```
 
-PLY es un formato estándar de nube de puntos. Cada vértice conserva el mismo `(x,y,z)` y puede
-exponer normales, área, curvaturas, target hard/soft, validez, distancia al DNA, logit y probabilidad
-como escalares seleccionables. El NPZ compañero mantiene esos canales sin pérdida textual. Las
-dimensiones aprendidas se llaman `latent_chemical_channel_N`, no carga electrostática ni otra
-propiedad física que no representen. Solo se exportan índices explícitos; no se aplica PCA
-silenciosamente y la visualización nunca cambia valores usados por las métricas.
+`best-model.pt` contiene los pesos de mejor validación y los parámetros exactos del modelo.
+`evaluation.json` contiene tamaños de split, época elegida, AUPRC de validación y métricas binarias
+de test. `BinaryMetricSuite` de LambdaForge conserva métricas matemáticamente indefinidas como
+`null`; nunca las sustituye por cero. Los sidecars superficiales quedan fuera de losses, gradientes,
+HPO y selección de checkpoint. La inspección NPZ/3D genérica sigue disponible como describe 4.2,
+independientemente del entrenamiento.
 
 V1 y v2 omiten distancias de arista atómica, coordenadas absolutas, normales como features
 neuronales, heads de residuo, kernels cuasi-geodésicos, actualizaciones equivariantes de coordenadas,

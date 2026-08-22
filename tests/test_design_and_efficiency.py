@@ -7,20 +7,25 @@ from pathlib import Path
 
 import numpy as np
 import pytest
-from lambdaforge import Experiment
-from lambdaforge.data import DatasetRecipeConfig, DatasetRegistry
+from lambdaforge.configuration import AuthoringConfig
+from lambdaforge.data import DatasetRegistry
 from lambdaforge.preprocessing import PreprocessingTask
 from lambdaforge.tasks import TaskConfig, TaskContext
 
-from preprocess.PreprocessConfig import PreprocessConfig
-from preprocess.PreprocessPipeline import PreprocessPipeline
-from preprocess.ProteinReader import ProteinReader
-from preprocess.ProteinSink import ProteinSink
-from preprocess.ProteinSource import ProteinSource
+from wisdom.preprocessing.structure.PreprocessConfig import PreprocessConfig
+from wisdom.preprocessing.structure.PreprocessPipeline import PreprocessPipeline
+from wisdom.preprocessing.structure.ProteinReader import ProteinReader
+from wisdom.preprocessing.structure.ProteinSink import ProteinSink
+from wisdom.preprocessing.structure.ProteinSource import ProteinSource
 
 
 def test_one_class_per_source_file_and_reader_public_api() -> None:
     source_dir = Path(__file__).parents[1] / "src"
+    entrypoints = {
+        source_dir / "wisdom" / "Training.py",
+        source_dir / "wisdom" / "preprocessing" / "Selection.py",
+        source_dir / "wisdom" / "preprocessing" / "Preprocessing.py",
+    }
     for path in source_dir.rglob("*.py"):
         tree = ast.parse(path.read_text(encoding="utf-8"))
         classes = [node for node in tree.body if isinstance(node, ast.ClassDef)]
@@ -28,7 +33,8 @@ def test_one_class_per_source_file_and_reader_public_api() -> None:
             node for node in tree.body if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
         ]
         assert len(classes) <= 1, f"{path.name} contains {len(classes)} classes"
-        assert not functions, f"{path.name} contains free module functions"
+        if functions:
+            assert path in entrypoints, f"{path.name} contains unexpected free module functions"
         if classes and path.name != "__init__.py":
             assert classes[0].name == path.stem
     public_methods = [
@@ -212,48 +218,22 @@ def test_npz_schema_is_sparse_compact_and_has_no_learned_features(
 
 def test_lambdaforge_owns_preprocessing_workers_resources_and_resume() -> None:
     project_root = Path(__file__).parents[1]
-    selection    = TaskConfig.from_yaml(project_root / "experiments" / "dna_select.yaml")
-    recipe       = DatasetRecipeConfig.from_yaml(
-        project_root / "experiments" / "dna_preprocess.yaml"
-    )
-    stage_configs = {
-        stage.name: TaskConfig(
-            stage.task,
-            source=project_root / "experiments" / f".embedded-{stage.name}.yaml",
-        )
-        for stage in recipe.stages
-        if not isinstance(stage.task, Path)
-    }
-    geometry     = next(stage for stage in recipe.stages if stage.name == "geometry")
-    assert not isinstance(geometry.task, Path)
-    config       = stage_configs["geometry"]
-    task_params  = config["task"]["params"]
+    selection = AuthoringConfig.from_yaml(project_root / "experiments" / "dna_select.yaml")
+    preprocess = AuthoringConfig.from_yaml(project_root / "experiments" / "dna_preprocess.yaml")
+    selection_values = selection.values
+    preprocess_values = preprocess.values
 
-    assert recipe.selector == "wisdom-dna@2"
-    assert selection.resources.cpu_cores == 36
-    assert selection.resources.ram_bytes == 64 * 1024**3
-    assert selection.resources.gpu_count == 0
-    assert selection.resources.runtime_seconds == 24 * 60 * 60
-    selection_params = selection["task"]["params"]
-    assert selection_params["workers"] == 72
-    assert selection_params["workload"] == "io"
-    assert selection_params["sink"]["params"]["dilutions"] == [0.10, 0.25, 0.50, 0.75]
-    assert recipe.resource_override == {
-        "cpus": 36,
+    assert selection_values["run"] == "wisdom.preprocessing.Selection.select_dna"
+    assert selection_values["resources"] == {"cpu": 36, "memory": "64GiB", "time": "24h"}
+    assert selection_values["with"]["workers"] == 72
+    assert selection_values["with"]["dilutions"] == [0.10, 0.25, 0.50, 0.75]
+    assert preprocess_values["run"] == "wisdom.preprocessing.Preprocessing.preprocess_dna"
+    assert preprocess_values["resources"] == {
+        "cpu": 36,
         "memory": "128GiB",
-        "gpus": 0,
         "time": "24h",
     }
-    assert [stage.name for stage in recipe.stages] == ["geometry", "annotate"]
-    assert {
-        name: stage_config["task"]["params"]["workers"]
-        for name, stage_config in stage_configs.items()
-    } == {"geometry": 36, "annotate": 36}
-    assert config.resume and not config.rerun_completed
-    assert task_params["workers"] == 36
-    assert task_params["workload"] == "cpu"
-    assert task_params["on_error"] == "fail"
-    assert "progress_interval_seconds" not in task_params
+    assert preprocess_values["with"]["workers"] == 36
     assert inspect.signature(PreprocessingTask).parameters[
         "progress_interval_seconds"
     ].default == 10.0
@@ -281,21 +261,23 @@ def test_training_catalog_resolves_before_every_dry_run(
     )
     if local is None:
         pytest.skip("wisdom-dna@2 has no local placement")
-    experiment = Experiment.from_yaml(project_root / "experiments" / filename)
-    expected   = (Path(local.root) / "manifest.csv").resolve()
+    authoring = AuthoringConfig.from_yaml(project_root / "experiments" / filename)
+    expected  = Path(local.root).resolve()
+    materialized = authoring.materialize()
 
-    # Every expanded seed/ablation must receive the same logical dataset at its real local mount.
-    expanded = experiment.expand()
-    assert len(expanded) == 3
-    for run in expanded:
-        manifest = Path(run["data"]["train"]["params"]["manifest"])
-        assert manifest == expected
-
-    # Exercise the runner's second configuration materialization without launching optimization.
-    results = experiment.run(dry_run=True)
-    plan = results.values
-    assert plan["mode"] == "adaptive_hpo"
-    assert plan["objective"]["metric"] == "val_auprc"
+    # Every expanded Work receives the same resolved immutable DatasetVersion root.
+    nodes = materialized.values["nodes"]
+    assert len(nodes) == (120 if filename == "wisdom_v1.yaml" else 18)
+    for node in nodes.values():
+        config = TaskConfig(
+            node["config"],
+            source=project_root / "experiments" / filename,
+        )
+        assert config.resolved_inputs[0].resolved_path == expected
+    assert materialized.values["metadata"]["objective"] == {
+        "metric": "val_auprc",
+        "mode": "max",
+    }
 
 
 @pytest.mark.parametrize("scales", [(), (2.5, 2.5), (2.5, 0.0), (2.5, -1.0)])

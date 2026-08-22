@@ -5,12 +5,12 @@ import gemmi
 import numpy as np
 import pytest
 
-from preprocess.AtomicStructureBuilder import AtomicStructureBuilder
-from preprocess.enums.AtomRole import AtomRole
-from preprocess.enums.BondType import BondType
-from preprocess.PreprocessConfig import PreprocessConfig
-from preprocess.ProteinReader import ProteinReader
-from preprocess.StructureCache import StructureCache
+from wisdom.preprocessing.structure.AtomicStructureBuilder import AtomicStructureBuilder
+from wisdom.preprocessing.structure.enums.AtomRole import AtomRole
+from wisdom.preprocessing.structure.enums.BondType import BondType
+from wisdom.preprocessing.structure.PreprocessConfig import PreprocessConfig
+from wisdom.preprocessing.structure.ProteinReader import ProteinReader
+from wisdom.preprocessing.structure.StructureCache import StructureCache
 
 
 def _read(path: Path, config: PreprocessConfig | None = None):
