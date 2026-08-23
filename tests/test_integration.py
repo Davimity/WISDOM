@@ -2,13 +2,15 @@ from __future__ import annotations
 
 import json
 import shutil
+from concurrent.futures import ThreadPoolExecutor
+from functools import partial
 from pathlib import Path
 
 import numpy as np
 import pytest
-from lambdaforge.preprocessing import PreprocessingDebugService, PreprocessingTask
-from lambdaforge.tasks import TaskContext
 
+from wisdom.preprocessing.ProcessingRecord import ProcessingRecord
+from wisdom.preprocessing.ProcessingWorkspace import ProcessingWorkspace
 from wisdom.preprocessing.structure.DatasetValidator import DatasetValidator
 from wisdom.preprocessing.structure.PreprocessConfig import PreprocessConfig
 from wisdom.preprocessing.structure.PreprocessPipeline import PreprocessPipeline
@@ -18,35 +20,26 @@ from wisdom.preprocessing.structure.ProteinVisualizer import ProteinVisualizer
 from wisdom.preprocessing.structure.StorageManager import StorageManager
 
 
-def _context(run_dir: Path, id_file: Path, config: PreprocessConfig) -> TaskContext:
+def _context(run_dir: Path, id_file: Path, config: PreprocessConfig) -> ProcessingWorkspace:
+    """Create explicit paths for one local scientific integration fixture.
+
+    Args:
+        run_dir: Temporary root receiving coordinate, NPZ, and report outputs.
+        id_file: Manifest containing the fixture structure paths.
+        config: Scientific configuration retained for signature parity with callers.
+
+    Returns:
+        Path-only preprocessing workspace; LambdaForge runtime behavior is tested upstream.
+    """
+    del config
     run_dir.mkdir(parents=True, exist_ok=True)
-    return TaskContext(
-        name="test",
-        run_dir=run_dir,
-        source_dir=id_file.parent,
-        attempt_id="test-attempt",
-        config_fingerprint=StorageManager(config).config_hash,
-        resume=True,
-        inputs=(
-            {
-                "name": "protein_identifiers",
-                "path": str(id_file),
-                "resolved_path": str(id_file),
-                "sha256": "test-identifiers",
-                "size_bytes": id_file.stat().st_size,
-            },
-            {
-                "name": "local_structures",
-                "path": str(id_file.parent),
-                "resolved_path": str(id_file.parent),
-                "sha256": "test-structures",
-                "size_bytes": 0,
-            },
-        ),
+    return ProcessingWorkspace(
+        run_dir,
+        inputs={"protein_identifiers": id_file},
         outputs={
-            "downloads": "raw",
-            "processed": "processed",
-            "report": "preprocessing-report.json",
+            "downloads": run_dir / "raw",
+            "processed": run_dir / "processed",
+            "report": run_dir / "preprocessing-report.json",
         },
     )
 
@@ -60,17 +53,20 @@ def _run(
     chains: tuple[str, ...] = (),
 ) -> dict:
     config = PreprocessConfig(chains=chains, surface_resolution=resolution)
-    task   = PreprocessingTask(
-        source=ProteinSource(),
-        transforms=(PreprocessPipeline(config, download=False),),
-        sink=ProteinSink(),
-        workers=workers,
-        workload="cpu",
-        on_error="skip",
-        checkpoint_interval=1,
-        dataset_name="test-proteins",
-    )
-    task.run(_context(run_dir, id_file, config))
+    context  = _context(run_dir, id_file, config)
+    records  = tuple(ProteinSource().records(context))
+    pipeline = PreprocessPipeline(config, download=False)
+    operation = partial(pipeline.process, context=context)
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        results = tuple(pool.map(operation, records))
+
+    sink = ProteinSink()
+    sink.records = {
+        record.key: dict(record.value)
+        for value in results
+        for record in (ProcessingRecord.restore(value),)
+    }
+    sink.finalize(context)
     return json.loads((run_dir / "preprocessing-report.json").read_text(encoding="utf-8"))
 
 
@@ -99,65 +95,12 @@ def test_txt_to_valid_pickle_free_npz_roundtrip(tmp_path: Path, pdb_path: Path) 
     assert metadata["selected_chains"] == ["A"]
     assert metadata["surface_point_count"] > 0
 
-    dataset_artifact = json.loads(
-        (tmp_path / "run" / "dataset-artifact.json").read_text(encoding="utf-8")
-    )
-    assert dataset_artifact["sample_count"] == 1
-    assert dataset_artifact["name"] == "test-proteins"
-    assert dataset_artifact["dataset_id"].startswith("sha256:")
-
     visualizer = ProteinVisualizer(["tiny"], max_surface_points=50)
     diagnostics = visualizer.visualize(npz_path, tmp_path / "tiny.html", "tiny")
     html = (tmp_path / "tiny.html").read_text(encoding="utf-8")
     assert diagnostics["status"] == "PASS"
     assert "surface_positions" in html
     assert "C-alpha backbone cartoon" in html
-
-
-def test_lambdaforge_debugs_one_protein_without_calling_the_sink(
-    tmp_path: Path,
-    pdb_path: Path,
-) -> None:
-    source = tmp_path / "tiny.pdb"
-    shutil.copyfile(pdb_path, source)
-    identifiers = tmp_path / "proteins.txt"
-    identifiers.write_text(f"{source}\n", encoding="utf-8")
-    config = tmp_path / "debug.yaml"
-    config.write_text(
-        f"""name: wisdom-debug-test
-inputs:
-  protein_identifiers: {identifiers}
-  local_structures: {tmp_path}
-outputs:
-  downloads: raw
-  processed: processed
-  report: preprocessing-report.json
-task:
-  target: lambdaforge.preprocessing.PreprocessingTask
-  params:
-    source:
-      target: wisdom.preprocessing.structure.ProteinSource.ProteinSource
-    transforms:
-      - target: wisdom.preprocessing.structure.PreprocessPipeline.PreprocessPipeline
-        params:
-          download: false
-          config:
-            target: wisdom.preprocessing.structure.PreprocessConfig.PreprocessConfig
-            params: {{surface_resolution: 1.2}}
-    sink:
-      target: wisdom.preprocessing.structure.ProteinSink.ProteinSink
-    workers: 1
-    workload: cpu
-""",
-        encoding="utf-8",
-    )
-
-    result = PreprocessingDebugService().debug(config, records=1)
-
-    assert result.ok
-    assert result.records[0]["source_key"] == str(source)
-    assert len(result.records[0]["transform_stages"]) == 1
-    assert not (tmp_path / "processed").exists()
 
 
 def test_parallel_and_single_worker_arrays_are_equivalent(tmp_path: Path, pdb_path: Path) -> None:
@@ -195,18 +138,13 @@ def test_resume_config_and_source_invalidation(tmp_path: Path, pdb_path: Path) -
     assert _run(run_dir, id_file, workers=1, resolution=1.1)["processed"] == 1
 
 
-def test_failure_is_reported_without_losing_successes(tmp_path: Path, pdb_path: Path) -> None:
+def test_missing_geometry_input_fails_the_complete_dataset(tmp_path: Path, pdb_path: Path) -> None:
     source = tmp_path / "tiny.pdb"
     shutil.copyfile(pdb_path, source)
     id_file = tmp_path / "proteins.txt"
     id_file.write_text(f"{tmp_path / 'missing.pdb'}\n{source}\n", encoding="utf-8")
-    outputs = _run(tmp_path / "run", id_file, workers=1)
-    assert outputs["processed"] == 1
-    assert outputs["failed"] == 1
-    report = json.loads((tmp_path / "run" / "preprocessing-report.json").read_text())
-    failure = next(record for record in report["records"] if record["status"] == "failed")
-    assert failure["error_type"] == "FileNotFoundError"
-    assert "missing.pdb" in failure["message"]
+    with pytest.raises(FileNotFoundError, match=r"missing\.pdb"):
+        _run(tmp_path / "run", id_file, workers=1)
 
 
 def test_pipeline_rejects_a_dataset_with_no_usable_proteins(tmp_path: Path) -> None:
@@ -214,13 +152,8 @@ def test_pipeline_rejects_a_dataset_with_no_usable_proteins(tmp_path: Path) -> N
     id_file.write_text(f"{tmp_path / 'missing.pdb'}\n", encoding="utf-8")
     run_dir = tmp_path / "run"
 
-    with pytest.raises(RuntimeError, match="no usable proteins"):
+    with pytest.raises(FileNotFoundError, match=r"missing\.pdb"):
         _run(run_dir, id_file, workers=1)
-
-    report = json.loads((run_dir / "preprocessing-report.json").read_text())
-    assert report["processed"] == 0
-    assert report["skipped"] == 0
-    assert report["failed"] == 1
 
 
 def test_dataset_validator_audits_coverage_arrays_metadata_and_report(

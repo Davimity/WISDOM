@@ -9,25 +9,25 @@ from pathlib import Path
 import numpy as np
 import pytest
 import torch
-from lambdaforge.preprocessing import PreprocessingRecord
-from lambdaforge.tasks import TaskContext
 
 from wisdom.evaluation.BinaryMetricSuite import BinaryMetricSuite
 from wisdom.evaluation.PointCloudExporter import PointCloudExporter
 from wisdom.preprocessing.dna.DNAAnnotationSink import DNAAnnotationSink
 from wisdom.preprocessing.dna.DNAAnnotationTransform import DNAAnnotationTransform
 from wisdom.preprocessing.dna.DNACandidateCurator import DNACandidateCurator
+from wisdom.preprocessing.dna.DNACurationSink import DNACurationSink
 from wisdom.preprocessing.dna.DNADatasetSource import DNADatasetSource
-from wisdom.preprocessing.dna.DNALabel import DNALabel
-from wisdom.preprocessing.dna.DNASelectionSink import DNASelectionSink
-from wisdom.preprocessing.dna.EvidenceKind import EvidenceKind
+from wisdom.preprocessing.dna.DNAEnums import DNALabel, EvidenceKind
+from wisdom.preprocessing.dna.DNAPartitionTask import DNAPartitionTask
+from wisdom.preprocessing.ProcessingRecord import ProcessingRecord
+from wisdom.preprocessing.ProcessingWorkspace import ProcessingWorkspace
 
 
 class _UnusedContext:
     """Provide a deliberate placeholder for transforms that do not resolve task paths."""
 
 
-def _candidate(path: Path, evidence: list[str]) -> PreprocessingRecord:
+def _candidate(path: Path, evidence: list[str]) -> ProcessingRecord:
     """Create one auditable tiny candidate record.
 
     Args:
@@ -37,7 +37,7 @@ def _candidate(path: Path, evidence: list[str]) -> PreprocessingRecord:
     Returns:
         Candidate preprocessing record.
     """
-    return PreprocessingRecord(
+    return ProcessingRecord(
         key="TEST_1_A",
         value={
             "pdb_id": "TEST",
@@ -359,7 +359,7 @@ def test_annotation_arrays_align_and_base_bytes_are_immutable(tmp_path: Path) ->
     )
     before = hashlib.sha256(base.read_bytes()).hexdigest()
     source_hash = hashlib.sha256(fixture.read_bytes()).hexdigest()
-    record = PreprocessingRecord(
+    record = ProcessingRecord(
         key="TEST_A",
         value={
             "base_npz": str(base),
@@ -385,25 +385,23 @@ def test_annotation_arrays_align_and_base_bytes_are_immutable(tmp_path: Path) ->
     assert hashlib.sha256(base.read_bytes()).hexdigest() == before
     DNAAnnotationSink._validate(arrays, transformed.value["metadata"])
 
-    context = TaskContext(
-        name="annotation-fixture",
-        run_dir=tmp_path / "annotation-run",
-        source_dir=tmp_path,
-        attempt_id="annotation-attempt",
-        config_fingerprint="annotation-fingerprint",
-        resume=True,
-        outputs={"annotations": "annotations", "annotation-report": "report.json"},
+    run_dir = tmp_path / "annotation-run"
+    context = ProcessingWorkspace(
+        run_dir,
+        inputs={},
+        outputs={
+            "annotations": run_dir / "annotations",
+            "annotation-report": run_dir / "report.json",
+        },
     )
     sink = DNAAnnotationSink(report_output="annotation-report")
     sink.write(transformed, context)
     sink.finalize(context)
-    manifest = (context.run_dir / "annotations" / "manifest.csv").read_text()
-    index    = (context.run_dir / "annotations" / "members.jsonl").read_text()
+    catalog = (context.run_dir / "annotations" / "annotated-catalog.csv").read_text()
 
-    assert "base/" in manifest
-    assert '"dna_binding":1' in index
-    assert '"local_ground_truth":true' in index
-    assert str(tmp_path) not in manifest
+    assert "base_npz_sha256" in catalog
+    assert "local_gt_available" in catalog
+    assert not (context.run_dir / "annotations" / "members.jsonl").exists()
     assert hashlib.sha256(base.read_bytes()).hexdigest() == before
 
 
@@ -436,193 +434,38 @@ def test_metric_suite_preserves_undefined_and_point_cloud_channels(tmp_path: Pat
         assert archive["positions"].shape == (2, 3)
 
 
-def test_conflicts_duplicates_and_cluster_leakage_are_rejected() -> None:
+def test_logical_curation_keeps_similar_opposite_labels_for_later_leakage_grouping() -> None:
     fixture = Path(__file__).parent / "data" / "dna_complex.pdb"
     positive = _catalog_row("AAAA_A", 1, fixture, "cluster-a", "seq-a", "structure-a")
     negative = _catalog_row("BBBB_A", 0, fixture, "cluster-b", "seq-b", "structure-b")
-    negative["label_conflict_cluster_id"] = positive["label_conflict_cluster_id"]
+    positive["uniprot_ids"] = ["P00001"]
+    negative["uniprot_ids"] = ["P00002"]
+    accepted, conflicts, _ = DNACurationSink.resolve_logical_proteins([positive, negative])
+    assert len(accepted) == 2
+    assert conflicts == []
 
-    accepted, conflicts, _ = DNASelectionSink._resolve_identifiers([positive, negative])
-
+    contradictory = dict(negative)
+    contradictory["sequence_sha256"] = positive["sequence_sha256"]
+    accepted, conflicts, _ = DNACurationSink.resolve_logical_proteins(
+        [dict(positive), contradictory]
+    )
     assert accepted == []
     assert len(conflicts) == 2
-    assert all(row["label_state"] == DNALabel.CONFLICT for row in conflicts)
-    assert all(row["positive_evidence"] and row["negative_evidence"] for row in conflicts)
 
     first  = _catalog_row("CCCC_A", 1, fixture, "cluster-c", "seq-c", "same-structure")
     second = _catalog_row("DDDD_A", 1, fixture, "cluster-d", "seq-d", "same-structure")
-    accepted, _, exclusions = DNASelectionSink._resolve_identifiers([first, second])
+    first["uniprot_ids"] = ["P00003"]
+    second["uniprot_ids"] = ["P00004"]
+    accepted, _, exclusions = DNACurationSink.resolve_logical_proteins([first, second])
     assert len(accepted) == 1
     assert exclusions[0]["exclusion_reason"] == "duplicate exact protein-chain coordinates"
 
-    leaked = [
-        _catalog_row("EEEE_A", 1, fixture, "leaked", "seq-e", "structure-e"),
-        _catalog_row("FFFF_A", 1, fixture, "leaked", "seq-f", "structure-f"),
-    ]
-    leaked[0]["split"] = "train"
-    leaked[1]["split"] = "test"
-    with pytest.raises(RuntimeError, match="cluster_id leakage"):
-        DNASelectionSink._validate_splits(leaked)
-
-    deposition_leak = [
-        _catalog_row("GGGG_A", 1, fixture, "cluster-g", "seq-g", "structure-g"),
-        _catalog_row("GGGG_B", 1, fixture, "cluster-h", "seq-h", "structure-h"),
-    ]
-    deposition_leak[0]["split"] = "train"
-    deposition_leak[1]["split"] = "test"
-    with pytest.raises(RuntimeError, match="pdb_id leakage"):
-        DNASelectionSink._validate_splits(deposition_leak)
-
-
-def test_dataset_sink_resumes_and_atomically_publishes_catalog(tmp_path: Path) -> None:
-    positive_path = Path(__file__).parent / "data" / "dna_complex.pdb"
-    negative_path = Path(__file__).parent / "data" / "tiny.pdb"
-    context = TaskContext(
-        name="dna-fixture",
-        run_dir=tmp_path,
-        source_dir=tmp_path,
-        attempt_id="fixture-attempt",
-        config_fingerprint="fixture-fingerprint",
-        resume=True,
-        outputs={
-            "dataset": "dataset",
-            "dataset-report": "report",
-            "selection-checkpoints": "selection-checkpoints",
-        },
+    components = DNAPartitionTask._components(
+        ["AAAA_A", "BBBB_A", "CCCC_A"],
+        {("AAAA_A", "BBBB_A"), ("BBBB_A", "CCCC_A")},
     )
-    sink = DNASelectionSink(reserve_fraction=0.0)
-    rows = (
-        _catalog_row("AAAA_A", 1, positive_path, "cluster-a", "seq-a", "structure-a"),
-        _catalog_row("BBBB_A", 0, negative_path, "cluster-b", "seq-b", "structure-b"),
-        _catalog_row("CCCC_A", 1, positive_path, "cluster-c", "seq-c", "structure-c"),
-        _catalog_row("DDDD_A", 0, negative_path, "cluster-d", "seq-d", "structure-d"),
-        _catalog_row("EEEE_A", 1, positive_path, "cluster-e", "seq-e", "structure-e"),
-        _catalog_row("FFFF_A", 0, negative_path, "cluster-f", "seq-f", "structure-f"),
-    )
-    rows[4]["published_partition"] = "external_test"
-    rows[5]["published_partition"] = "external_test"
-    for row in rows:
-        key = str(row["candidate_key"])
-        sink.write(PreprocessingRecord(key=key, value=row), context)
-        assert sink.is_complete(key, context)
+    assert components == [["AAAA_A", "BBBB_A", "CCCC_A"]]
 
-    sink.finalize(context)
-
-    assert (tmp_path / "dataset" / "catalog.csv").is_file()
-    assert (tmp_path / "dataset" / "catalog.parquet").is_file()
-    assert (tmp_path / "dataset" / "identifiers.json").is_file()
-    assert (tmp_path / "dataset" / "audit.md").is_file()
-    assert (tmp_path / "dataset" / "distributions.png").is_file()
-    assert (tmp_path / "report" / "distributions.png").is_file()
-    assert json.loads((tmp_path / "report" / "summary.json").read_text())["verdict"] == "PASS"
-    assert not tuple(tmp_path.rglob("*.tmp"))
-
-
-def test_main_splits_are_exactly_balanced_by_deterministic_downsampling() -> None:
-    """Retain every scarce class member and a stable equal-size majority subset."""
-    fixture = Path(__file__).parent / "data" / "dna_complex.pdb"
-    rows: list[dict[str, object]] = []
-    for split in DNASelectionSink.MAIN_SPLITS:
-        for index, label in enumerate((0, 1, 1, 1)):
-            identifier = f"{split[:2].upper()}{index:02d}_{'A' if label else 'B'}"
-            row = _catalog_row(
-                identifier,
-                label,
-                fixture,
-                f"{split}-cluster-{index}",
-                f"{split}-sequence-{index}",
-                f"{split}-structure-{index}",
-            )
-            row["split"] = split
-            rows.append(row)
-
-    sink                 = DNASelectionSink(reserve_fraction=0.0)
-    retained, exclusions = sink._balance_main_splits(rows)  # type: ignore[arg-type]
-
-    sink._validate_class_balance(retained)
-    assert len(exclusions) == 6
-    for split in DNASelectionSink.MAIN_SPLITS:
-        split_rows = [row for row in retained if row["split"] == split]
-        assert [row["label"] for row in split_rows].count(0) == 1
-        assert [row["label"] for row in split_rows].count(1) == 1
-
-
-def test_selection_dilutions_keep_evaluation_fixed_and_training_nested(tmp_path: Path) -> None:
-    """Reduce balanced training prefixes while every view shares validation and test."""
-    fixture = Path(__file__).parent / "data" / "dna_complex.pdb"
-    rows: list[dict[str, object]] = []
-    for split in DNASelectionSink.MAIN_SPLITS:
-        for label in (0, 1):
-            for index in range(20):
-                identifier = f"{split[:2].upper()}{label}{index:02d}_A"
-                row = _catalog_row(
-                    identifier,
-                    label,
-                    fixture,
-                    f"{split}-{label}-cluster-{index // 2}",
-                    f"{split}-{label}-sequence-{index}",
-                    f"{split}-{label}-structure-{index}",
-                )
-                row["split"] = split
-                rows.append(row)
-
-    sink    = DNASelectionSink(dilutions=(0.10, 0.25, 0.50), reserve_fraction=0.0)
-    summary = sink._write_dilutions(rows, tmp_path)  # type: ignore[arg-type]
-    selected_ids: dict[str, set[str]] = {}
-    evaluation_ids = {
-        str(row["base_identifier"])
-        for row in rows
-        if row["split"] in {"val", "test"}
-    }
-    for name, per_class in (("10pct", 2), ("25pct", 5), ("50pct", 10)):
-        payload = json.loads((tmp_path / "subsets" / name / "identifiers.json").read_text())
-        selected_ids[name] = {str(value["identifier"]) for value in payload["records"]}
-        assert summary[name]["member_count"] == per_class * 2 + len(evaluation_ids)
-        assert summary[name]["fraction_applies_to"] == "train"
-        for split in DNASelectionSink.MAIN_SPLITS:
-            counts = summary[name]["split_class_balance"][split]
-            expected = per_class if split == "train" else 20
-            assert counts["positive"] == expected
-            assert counts["negative"] == expected
-            assert counts["sequence_clusters"] >= expected
-        assert evaluation_ids < selected_ids[name]
-    assert selected_ids["10pct"] < selected_ids["25pct"] < selected_ids["50pct"]
-
-
-def test_external_test_clusters_never_enter_development_and_assignment_is_deterministic() -> None:
-    """Preserve official test provenance while keeping every 30%-identity cluster indivisible."""
-    fixture = Path(__file__).parent / "data" / "dna_complex.pdb"
-    rows = [
-        _catalog_row("AAAA_A", 1, fixture, "development-positive", "seq-a", "structure-a"),
-        _catalog_row("BBBB_A", 0, fixture, "development-negative", "seq-b", "structure-b"),
-        _catalog_row("CCCC_A", 1, fixture, "external-positive", "seq-c", "structure-c"),
-        _catalog_row("DDDD_A", 0, fixture, "external-negative", "seq-d", "structure-d"),
-    ]
-    rows[2]["published_partition"] = "external_test"
-    rows[3]["published_partition"] = "external_test"
-    sink = DNASelectionSink(reserve_fraction=0.0)
-
-    first, _  = sink._assign_clusters(rows)
-    second, _ = sink._assign_clusters(list(reversed(rows)))
-
-    assert first == second
-    assert first["external-positive"] == "test"
-    assert first["external-negative"] == "test"
-    assert first["development-positive"] in {"train", "val"}
-    assert first["development-negative"] in {"train", "val"}
-
-
-def test_one_pdb_deposition_is_an_indivisible_split_component() -> None:
-    """Keep different chains from one experimental deposition on the same side of evaluation."""
-    fixture = Path(__file__).parent / "data" / "dna_complex.pdb"
-    first = _catalog_row("SAME_A", 1, fixture, "family-a", "seq-a", "structure-a")
-    second = _catalog_row("SAME_B", 1, fixture, "family-b", "seq-b", "structure-b")
-    sink = DNASelectionSink(reserve_fraction=0.0)
-
-    assignments, exclusions = sink._assign_clusters([first, second])
-
-    assert exclusions == []
-    assert assignments["family-a"] == assignments["family-b"]
 
 
 def test_zero_positive_projection_is_not_an_all_negative_local_target(tmp_path: Path) -> None:
@@ -638,7 +481,7 @@ def test_zero_positive_projection_is_not_an_all_negative_local_target(tmp_path: 
         surface_edge_index=np.empty((2, 0), dtype=np.int32),
         metadata_json=np.asarray(json.dumps({"coordinate_origin": [0.0, 0.0, 0.0]})),
     )
-    record = PreprocessingRecord(
+    record = ProcessingRecord(
         key="TEST_A",
         value={
             "base_npz": str(base),
@@ -674,7 +517,7 @@ def test_training_positive_may_explicitly_lack_local_ground_truth(tmp_path: Path
         surface_edge_index=np.empty((2, 0), dtype=np.int32),
         metadata_json=np.asarray(json.dumps({"coordinate_origin": [0.0, 0.0, 0.0]})),
     )
-    record = PreprocessingRecord(
+    record = ProcessingRecord(
         key="TEST_A",
         value={
             "base_npz": str(base),

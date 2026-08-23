@@ -1,29 +1,67 @@
-# Build the complete WISDOM-DNA dataset from one frozen protein selection.
-name: wisdom-dna-preprocess                         # Stable LambdaForge Work name.
-run: wisdom.preprocessing.Preprocessing.preprocess_dna  # Complete dataset action.
-output_root: ../runs/tasks                          # Store evidence outside experiments/.
+# Curate, preprocess, validate, and publish WISDOM-DNA with LambdaForge 0.12 Works.
+name: wisdom-dna-preprocess                           # Stable identity of the complete two-Work execution.
 
-with:                                               # Arguments for preprocess_dna(...).
-  selection:                                        # Artifact fetched from dna_select.yaml.
-    file: ../data/dna/selection                     # Complete frozen selection directory.
-  workers: 36                                       # CPU processes used by both record pipelines.
+steps:                                                # Run curation first, then pass its named artifact directly.
+  - name: curate                                      # Split-free public-evidence and structure-selection Work.
+    run: wisdom.preprocessing.Selection.Selection     # Direct LambdaForge Work subclass; no function/task graph.
+    with:                                             # Keyword arguments passed to Selection.run(...).
+      public_sources:                                 # Fingerprint and stage the pinned source definition.
+        file: ../data/dna/public-sources.json         # DyProL, BTD-Combo, and BioLiP release/checksum contract.
+      workers: 72                                     # I/O threads; two per CPU overlap bounded network latency.
+      requests_per_second: 4.0                        # Aggregate public-service request-start ceiling.
+    resources:                                        # Absolute scheduler reservation for this Work.
+      cpu: 36                                         # Reserve 36 CPU cores for parsing and I/O orchestration.
+      memory: 64GiB                                   # Host-memory ceiling for concurrent curation records.
+      time: 24h                                       # Maximum scheduler wall time for public curation.
 
-# preprocess_dna option reference:
-# selection has no default and must point to the complete fetched selection directory.
-# dataset_name="wisdom-dna" and dataset_version="2" identify the immutable published dataset.
-# workers=36 must be positive and normally matches the reserved CPU count.
-# surface_resolution=1.0, probe_radius=1.4, atom_radius=6.0, and
-# atom_surface_radius=6.0 are positive distances in ångströms.
-# curvature_scales=(2.5,5.0) must be a strictly increasing sequence of positive ångström radii.
-# positive_gap=1.4, negative_gap=3.0, and sensitivity_gaps=(1.0,1.4,2.0) are DNA-to-surface
-# distances in ångströms; negative_gap must exceed positive_gap and the sequence cannot be empty.
-# Add any of those names below `with` only when overriding its displayed constructor default.
+    # Selection.run option reference:
+    # public_sources has no default and must be a LambdaForge {file: ...} marker.
+    # workers=72, requests_per_second=4.0, and retries=5 are positive; candidate caps default to
+    # zero (complete releases). contact_distance=4.5 Å, minimum_residues=30,
+    # minimum_interface_residues=2, minimum_sequence_coverage=0.80, maximum_resolution=4.0 Å, and
+    # challenge_aspect_ratio=4.0 are the true Work defaults. This step publishes only named
+    # curation/report artifacts; it creates no split and no DatasetVersion.
 
-resources:                                          # One allocation for the complete callable Work.
-  cpu: 36                                           # CPUs reserved by LambdaForge or the scheduler.
-  memory: 128GiB                                    # Peak host-memory reservation.
-  time: 24h                                         # Scheduler wall-time limit.
+  - name: preprocess                                  # Geometry, annotation, partition, validation, publication.
+    run: wisdom.preprocessing.Preprocessing.Preprocessing # Direct LambdaForge Work subclass.
+    with:                                             # Keyword arguments passed to Preprocessing.run(...).
+      curation:                                       # Consume the exact successful upstream artifact.
+        from: curate.curation                         # LambdaForge resolves this to a typed immutable Path.
+      dataset_name: wisdom-dna                        # Stable Registry family name.
+      dataset_version: "3"                            # Immutable release; change when intended content changes.
+      workers: 36                                     # Spawn one CPU process per reserved core for protein records.
+      threads: 36                                     # Threads granted to each dataset-level specialist tool.
+      sequence_identity: 0.30                         # MMseqs2 identity threshold for a leakage edge.
+      sequence_coverage: 0.80                         # Require at least 80% bilateral aligned coverage.
+      structure_probability: 0.50                     # Foldseek homology-probability threshold for an edge.
+      train_fraction: 0.70                            # Target fraction; leakage groups remain indivisible.
+      validation_fraction: 0.15                       # Target model-development fraction.
+      test_fraction: 0.15                             # Target untouched final-evaluation fraction.
+      dilution_sizes: [400, 200, 100, 75, 50, 25]    # Nested absolute training views; val/test never change.
+    resources:                                        # Absolute scheduler reservation for this Work.
+      cpu: 36                                         # Make all 36 requested CPU cores available to workers/tools.
+      memory: 128GiB                                  # Peak host memory for surfaces and specialist pair search.
+      time: 24h                                       # Maximum scheduler wall time for dataset construction.
 
-# output_root defaults to runs/tasks relative to this YAML; WISDOM selects ../runs/tasks.
-# LambdaForge 0.11 resource options are cpu>=1, gpu>=0, memory=<size>, and time=<duration>.
-# Resource requests reserve capacity; `workers` independently controls record concurrency.
+    # Preprocessing.run geometry/annotation option reference:
+    # curation has no default and is supplied by {from: curate.curation}. dataset_name="wisdom-dna"
+    # and dataset_version="3" are selected here; workers=36 and threads=36 are positive integers.
+    # surface_resolution=1.0 Å, probe_radius=1.4 Å, atom_radius=6.0 Å,
+    # atom_surface_radius=6.0 Å, curvature_scales=(2.5,5.0), positive_gap=1.4 Å,
+    # negative_gap=3.0 Å, and sensitivity_gaps=(1.0,1.4,2.0) are true Work defaults.
+    #
+    # Preprocessing.run leakage/partition option reference:
+    # sequence_identity=0.30, sequence_coverage=0.80, sequence_evalue=1e-3,
+    # structure_probability=0.50, and structure_evalue=1e-3 define retained specialist edges.
+    # train/validation/test fractions default to 0.70/0.15/0.15 and must sum to one.
+    # phenotype_min_cluster_size=15, phenotype_min_samples=5, and
+    # phenotype_stability_minimum=0.60 control HDBSCAN stability. dilution_sizes defaults to
+    # (400,200,100,75,50,25); partition_seed=2026 fixes deterministic ties.
+    # mmseqs_executable="mmseqs" and foldseek_executable="foldseek" must resolve to the documented
+    # specialist binaries.
+
+# LambdaForge 0.12 step documents accept name, run, with, resources, seeds, search, and objective.
+# Levels are sequential unless an explicit parallel group is used. Named output references require
+# one unambiguous upstream Run. Work/Attempt paths, checkpoints, and caches are framework-owned;
+# output_root, kind, task, inputs, outputs, max_parallel, and DatasetRecipe stages do not exist.
+# Resource fields are cpu, memory, gpu, gpu_memory, time, storage, and processes<=cpu.

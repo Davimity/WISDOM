@@ -1,11 +1,10 @@
 # Keep the v1 backbone fixed and compare only WISDOM v2 protein-level pooling hypotheses.
 name: wisdom-v2                                      # Stable LambdaForge experiment name.
-run: wisdom.Training.train_wisdom                   # Same controlled training action as v1.
-output_root: ../runs/experiments                    # Keep study evidence outside experiments/.
+run: wisdom.Training.Training                       # Same LambdaForge 0.12 Work class as v1.
 
-with:                                                # Fixed train_wisdom(...) arguments.
+with:                                                # Fixed Training.run(...) arguments.
   dataset:                                           # Resolve one immutable managed placement.
-    dataset: wisdom-dna@2                            # Exact release used by v1.
+    dataset: wisdom-dna@3                            # Exact leakage-safe release used by v1.
   model_version: 2                                  # Enable only the v2 pooling extension.
   subset: full                                      # Use the complete balanced dataset.
   hidden_dim: 128                                   # Fixed reviewed v1 latent width.
@@ -25,7 +24,7 @@ with:                                                # Fixed train_wisdom(...) a
   epochs: 100                                       # Maximum epochs per pooling/seed run.
   data_workers: 0                                   # Loader subprocesses inside each run.
 
-# Fixed train_wisdom option reference:
+# Fixed Training.run option reference:
 # Values shown above equal public defaults except model_version=2. subset="full"; widths and
 # depths are positive; dropout is in [0,1); topk_fraction is in (0,1]; attention_hidden_dim and
 # regional_levels are positive; log_sum_exp_beta and learning_rate are positive; weight_decay and
@@ -43,7 +42,6 @@ search:                                              # Exhaustive one-factor sci
 objective:                                           # Used to compare pooling hypotheses.
   metric: val_auprc                                  # Validation precision–recall area.
   mode: max                                          # Larger validation AUPRC is better.
-max_parallel: 1                                      # Run one single-GPU training at a time.
 
 resources:                                           # Per-training allocation.
   gpu: 1                                             # Exactly one accelerator per run.
@@ -51,7 +49,7 @@ resources:                                           # Per-training allocation.
   memory: 32GiB                                      # Host-memory reservation.
   time: 24h                                          # Scheduler wall-time limit.
 
-# output_root defaults to runs/tasks per internal Work; WISDOM selects ../runs/experiments.
-# LambdaForge study options: seeds defaults to one implicit seed; objective uses metric plus
-# mode=max|min; max_parallel defaults to available placement. Resource options are gpu>=0,
-# cpu>=1, memory=<size>, and time=<duration>.
+# LambdaForge 0.12 study options: seeds defaults to one unseeded Run and objective accepts metric
+# plus mode=max|min. Finite-only search forms the Cartesian product; every pooling/seed Run executes
+# serially inside this Work's fixed allocation, so max_parallel no longer exists. Resource options
+# are cpu, gpu, memory, gpu_memory, time, storage, and processes. output_root is framework-owned.

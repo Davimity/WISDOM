@@ -7,13 +7,13 @@ import numpy as np
 import pytest
 import torch
 from lambdaforge.data import DatasetAsset, DatasetIndex, DatasetMember
-from lambdaforge.preprocessing import PreprocessingRecord
-from lambdaforge.tasks import TaskContext
 from torch import Tensor
 
 from wisdom.data.WisdomCollator import WisdomCollator
 from wisdom.data.WisdomDataset import WisdomDataset
 from wisdom.models.WisdomV1 import WisdomV1
+from wisdom.preprocessing.ProcessingRecord import ProcessingRecord
+from wisdom.preprocessing.ProcessingWorkspace import ProcessingWorkspace
 from wisdom.preprocessing.structure.PreprocessConfig import PreprocessConfig
 from wisdom.preprocessing.structure.PreprocessPipeline import PreprocessPipeline
 
@@ -253,33 +253,13 @@ def test_real_preprocessing_output_reaches_a_finite_protein_logit(
     config      = PreprocessConfig(chains=("A",), surface_resolution=1.2)
     identifiers = tmp_path / "proteins.txt"
     identifiers.write_text(f"{pdb_path}\n", encoding="utf-8")
-    context = TaskContext(
-        name="model-preprocess-fixture",
-        run_dir=tmp_path,
-        source_dir=tmp_path,
-        attempt_id="model-preprocess-attempt",
-        config_fingerprint="model-preprocess-fingerprint",
-        resume=False,
-        inputs=(
-            {
-                "name": "protein_identifiers",
-                "path": str(identifiers),
-                "resolved_path": str(identifiers),
-                "sha256": "fixture-identifiers",
-                "size_bytes": identifiers.stat().st_size,
-            },
-            {
-                "name": "local_structures",
-                "path": str(pdb_path.parent),
-                "resolved_path": str(pdb_path.parent),
-                "sha256": "fixture-structures",
-                "size_bytes": 0,
-            },
-        ),
-        outputs={"downloads": "raw"},
+    context = ProcessingWorkspace(
+        tmp_path,
+        inputs={"protein_identifiers": identifiers},
+        outputs={"downloads": tmp_path / "raw"},
     )
     transformed = PreprocessPipeline(config, download=False).transform(
-        PreprocessingRecord(
+        ProcessingRecord(
             key=str(pdb_path),
             value=str(pdb_path),
             metadata={"output_name": "tiny.npz"},

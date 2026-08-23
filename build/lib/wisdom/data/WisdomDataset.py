@@ -9,6 +9,7 @@ from pathlib import Path
 
 import numpy as np
 import torch
+from lambdaforge.data import DatasetIndex
 from torch import Tensor
 from torch.utils.data import Dataset
 
@@ -24,6 +25,7 @@ class WisdomDataset(Dataset[Mapping[str, Tensor | str]]):
         self,
         manifest: str | Path,
         split   : str,
+        subset  : str = "full",
     ) -> None:
         """Read and validate a compact ``file,label,split`` CSV manifest.
 
@@ -32,9 +34,11 @@ class WisdomDataset(Dataset[Mapping[str, Tensor | str]]):
         NPZ files remain unopened until ``__getitem__`` so DataLoader workers do not share handles.
 
         Args:
-            manifest: CSV path with exactly the columns ``file,label,split``. ``file`` addresses a
-                WISDOM NPZ, ``label`` is binary 0/1, and ``split`` is train/val/test.
+            manifest: LambdaForge 0.12 managed dataset root containing ``index.jsonl``, or a legacy
+                CSV with exactly ``file,label,split`` columns.
             split: Explicit subset to expose; one of ``train``, ``val``, or ``test``.
+            subset: ``full`` or a configured dilution name such as ``train-100``. Managed dataset
+                members carry this view membership in metadata without duplicating heavy assets.
 
         Raises:
             ValueError: If the split, header, label, row split, path, or selected subset is invalid.
@@ -42,8 +46,17 @@ class WisdomDataset(Dataset[Mapping[str, Tensor | str]]):
         """
         if split not in self.SPLITS:
             raise ValueError(f"split must be one of {sorted(self.SPLITS)}")
+        if not subset.strip():
+            raise ValueError("subset cannot be empty")
 
         manifest_path = Path(manifest).resolve()
+        if manifest_path.is_dir():
+            managed_records = self._dataset_records(manifest_path, split, subset)
+            self.manifest = manifest_path / "index.jsonl"
+            self.split    = split
+            self.records  = tuple(managed_records)
+            return
+
         records: list[tuple[Path, Path | None, int, str, str]] = []
         with manifest_path.open("r", encoding="utf-8", newline="") as handle:
             reader = csv.DictReader(handle)
@@ -101,6 +114,72 @@ class WisdomDataset(Dataset[Mapping[str, Tensor | str]]):
         self.manifest = manifest_path
         self.split    = split
         self.records  = tuple(records)
+
+    @staticmethod
+    def _dataset_records(
+        root  : Path,
+        split : str,
+        subset: str,
+    ) -> list[tuple[Path, Path | None, int, str, str]]:
+        """Read explicit labels, partitions, views, and assets from DatasetArtifact v2.
+
+        Args:
+            root: Resolved immutable LambdaForge dataset placement.
+            split: Required main partition.
+            subset: ``full`` or one deterministic dilution name.
+
+        Returns:
+            Ordered base/annotation paths and labels consumed by ``__getitem__``.
+
+        Raises:
+            ValueError: If the index, split, targets, view metadata, or assets are malformed.
+            OSError: If the canonical index cannot be read.
+        """
+        index_path = root / "index.jsonl"
+        if not index_path.is_file():
+            raise ValueError("managed WISDOM dataset root must contain index.jsonl")
+
+        records: list[tuple[Path, Path | None, int, str, str]] = []
+        managed_split = "validation" if split == "val" else split
+        for member in DatasetIndex(index_path):
+            if str(member.partitions.get("split", "")) != managed_split:
+                continue
+            dilutions = member.metadata.get("dilutions", ())
+            if subset != "full" and (
+                not isinstance(dilutions, (list, tuple)) or subset not in dilutions
+            ):
+                continue
+            try:
+                label = int(member.targets["dna_binding"])
+                base  = root / member.assets["universal_npz"].path
+            except (KeyError, TypeError, ValueError) as error:
+                raise ValueError(
+                    f"managed member {member.member_id!r} lacks WISDOM label/base asset"
+                ) from error
+            if label not in {0, 1} or not base.is_file() or base.suffix.lower() != ".npz":
+                raise ValueError(f"managed member {member.member_id!r} has invalid base data")
+            annotation_asset = member.assets.get("dna_annotation")
+            annotation = root / annotation_asset.path if annotation_asset is not None else None
+            if annotation is not None and (
+                not annotation.is_file() or annotation.suffix.lower() != ".npz"
+            ):
+                raise ValueError(
+                    f"managed member {member.member_id!r} has invalid DNA annotation"
+                )
+            records.append(
+                (
+                    base,
+                    annotation,
+                    label,
+                    member.member_id,
+                    str(member.partitions.get("tier", "unspecified")),
+                )
+            )
+        if not records:
+            raise ValueError(
+                f"managed dataset contains no records for split={split!r}, subset={subset!r}"
+            )
+        return records
 
     def __len__(self) -> int:
         """Return the number of explicitly labeled proteins in the selected split.
@@ -285,6 +364,6 @@ class WisdomDataset(Dataset[Mapping[str, Tensor | str]]):
                         "sensitivity_gaps": torch.from_numpy(gaps.astype(np.float32)),
                     }
                 )
-            output["identifier"] = identifier
-            output["tier"]       = tier
+        output["identifier"] = identifier
+        output["tier"]       = tier
         return output

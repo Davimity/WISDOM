@@ -1,11 +1,10 @@
 # Search the basic WISDOM v1 backbone while keeping protein aggregation fixed to MAX.
 name: wisdom-v1                                      # Stable LambdaForge experiment name.
-run: wisdom.Training.train_wisdom                   # Complete train/validate/test action.
-output_root: ../runs/experiments                    # Keep study evidence outside experiments/.
+run: wisdom.Training.Training                       # LambdaForge 0.12 train/validate/test Work class.
 
-with:                                                # Fixed train_wisdom(...) arguments.
+with:                                                # Fixed Training.run(...) arguments.
   dataset:                                           # Resolve one immutable managed placement.
-    dataset: wisdom-dna@2                            # Balanced release published by preprocessing.
+    dataset: wisdom-dna@3                            # Post-geometry leakage-safe benchmark release.
   model_version: 1                                  # Select the v1 fixed-MAX hypothesis.
   subset: full                                      # Use all selected training members.
   pooling_type: max                                 # Required invariant for v1.
@@ -13,14 +12,15 @@ with:                                                # Fixed train_wisdom(...) a
   epochs: 100                                       # Maximum training epochs per candidate.
   data_workers: 0                                   # Loader subprocesses inside each run.
 
-# Fixed train_wisdom option reference:
+# Fixed Training.run option reference:
 # dataset has no default. model_version=1, subset="full", pooling_type="max", batch_size=2,
 # epochs=100, data_workers=0, and seed=0. LambdaForge supplies each seed below. Valid subsets are
-# "full" or names published in member metadata, for example "10pct" and "25pct".
+# "full" or names published in member metadata, for example "train-100" and "train-400".
 
 seeds: [7, 17, 27]                                  # Repeat candidates to expose seed variance.
 
 search:                                              # LambdaForge samples basic v1 choices.
+  trials: 40                                         # Draw forty unique random numeric variants.
   hidden_dim: {values: [64, 128, 256]}               # Shared atom/surface latent width.
   embedding_dim: {values: [16, 32, 64]}              # Element/residue embedding width.
   use_residue_type: {values: [true, false]}          # Test whether residue identity helps.
@@ -38,11 +38,9 @@ search:                                              # LambdaForge samples basic
 # is positive, and weight decay is non-negative. values enumerates categories; range samples a
 # numeric interval; scale=log samples multiplicatively rather than linearly.
 
-trials: 40                                           # Sample forty HPO candidates before seeds.
 objective:                                           # Never optimize on held-out test labels.
   metric: val_auprc                                  # Validation precision–recall area.
   mode: max                                          # Larger validation AUPRC is better.
-max_parallel: 1                                      # Run one single-GPU training at a time.
 
 resources:                                           # Per-training allocation.
   gpu: 1                                             # Exactly one accelerator per run.
@@ -50,7 +48,8 @@ resources:                                           # Per-training allocation.
   memory: 32GiB                                      # Host-memory reservation.
   time: 24h                                          # Scheduler wall-time limit.
 
-# output_root defaults to runs/tasks per internal Work; WISDOM selects ../runs/experiments.
-# LambdaForge study options: seeds defaults to one implicit seed; trials is required for sampled
-# ranges; objective has metric and mode=max|min; max_parallel defaults to available placement.
-# Resource options are gpu>=0, cpu>=1, memory=<size>, and time=<duration>.
+# LambdaForge 0.12 study options: seeds defaults to one unseeded Run; search.trials is required for
+# numeric ranges; objective accepts metric plus mode=max|min. Search/seed Runs for one Work execute
+# serially inside its fixed allocation, so the removed max_parallel field is unnecessary.
+# Resource options are cpu>=1, gpu>=0, memory/gpu_memory/storage=<size>, time=<duration>, and
+# processes<=cpu. Work/Attempt output paths are framework-owned; output_root is not configurable.

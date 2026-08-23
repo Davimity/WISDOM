@@ -74,18 +74,19 @@ project contract, not optional style suggestions.
   Never label a project override as a framework default.
 - Keep YAML comments synchronized with public constructor signatures and LambdaForge schemas.
   A stale configuration comment is a correctness defect, and every changed YAML must still pass
-  LambdaForge validation, resolved inspection, and dry-run checks.
+  LambdaForge validation, `lf explain`, and dry-run checks.
 
 ## Architecture inside `src/`
 
 - Use classes for every reasonable stateful or cohesive source concept. Configuration and immutable
   static data are accepted exceptions.
-- Keep at most one class in each Python file. Name a class file exactly like its class, using the
-  existing PascalCase convention even though it differs from standard Python module naming.
-- Use ordinary typed functions for the three LambdaForge 0.11 public actions:
-  `select_dna`, `preprocess_dna`, and `train_wisdom`. Keep other cohesive stateful/scientific
-  concepts as classes; private module helpers are allowed only beside those entry points when they
-  keep the public action readable.
+- Keep at most one substantive class in each Python file and name that file exactly like its class.
+  Several tiny related enums may share one clearly named vocabulary module when separate files
+  would add navigation without isolating behavior.
+- Expose exactly the cohesive LambdaForge 0.12 Work classes required by public YAML actions:
+  `Selection`, `Preprocessing`, `DNAValidation`, and `Training`. Keep other cohesive
+  stateful/scientific concepts as classes; private module helpers are allowed only when they isolate
+  a substantial algorithm and cannot be expressed more clearly as a method.
 - Prefer a small number of meaningful domain and service classes. Do not introduce factories,
   adapters, managers, builders, DTOs, wrappers, or interfaces unless they remove real complexity.
 - Preserve the ownership hierarchy `Protein -> Chain -> Residue -> Atom`. Do not duplicate atoms or
@@ -93,30 +94,36 @@ project contract, not optional style suggestions.
   domain entities.
 - Use enums instead of magic strings or unscoped numeric categories whenever the values form a
   closed semantic set.
-- Author every user-facing LambdaForge 0.11 YAML with the function-first `name`, `run`, `with`, and
-  `resources` vocabulary. Do not expose legacy `kind`, `schema_version`, `inputs`, object graphs,
-  DatasetRecipe stages, or model/loss/optimizer construction trees in project YAML.
-- Internally, use LambdaForge's public `PreprocessingTask` where record-level work needs stable keys,
-  worker selection, failure policy, checkpoints, preprocessing manifests, partial resume, and
-  aggregate progress. Do not recreate those mechanisms inside WISDOM.
-- Build WISDOM-DNA through two public actions. `select_dna` publishes only evidence tables,
-  homology-safe balanced split lists, deterministic diluted views, reports, and resume evidence.
-  After that small artifact is fetched, `preprocess_dna` generates geometry and annotations once
-  and publishes the final checksummed members through LambdaForge 0.11 `lf.publish_dataset`.
+- Make every YAML-executable action a class derived directly from LambdaForge 0.12 `Work`, with all
+  scientific parameters on its single public `run()` method. Never use function targets,
+  constructor injection, method escape hatches, removed `Task`/`TaskContext`/`PreprocessingTask`
+  APIs, or project-owned framework compatibility shims.
+- Author every user-facing LambdaForge 0.12 YAML only with `name`, `run`, `with`, `resources`,
+  `seeds`, `search`, `objective`, and `steps` as applicable. Do not add `output_root`, `kind`,
+  `schema_version`, `inputs`, `outputs`, `trials` outside `search`, `max_parallel`, object graphs,
+  DatasetRecipe stages, or model/loss/optimizer construction trees.
+- Use `self.map` for bounded intra-Work parallelism and stable JSON checkpoints; use `self.cache`,
+  `self.checkpoints`, `self.progress`, `self.metrics`, and `self.outputs` for their exact public
+  purposes. Map workers must persist large scientific arrays atomically and return compact JSON
+  evidence rather than serializing NumPy arrays or recreating a runner inside WISDOM.
+- Build WISDOM-DNA through two public Work classes. `Selection` discovers evidence, verifies labels
+  and biological-assembly contacts, deduplicates logical proteins, selects one best structure, and
+  publishes only a split-free curation artifact. `Preprocessing` must then execute geometry ->
+  local annotation -> leakage/phenotype analysis -> partition/dilution -> validation -> LambdaForge
+  0.12 `self.outputs.dataset(...)` in that order.
 - Keep all code under one top-level `wisdom` package. Put the two action modules under
   `wisdom.preprocessing`, structural internals under `wisdom.preprocessing.structure`, DNA-specific
   internals under `wisdom.preprocessing.dna`, and trainable data/models/evaluation in their named
   sibling packages. Do not restore parallel top-level packages with cross-cutting imports.
-- Treat dilution membership as a selection concern, not a geometry or annotation concern. Select
-  deterministic nested prefixes independently within each split and class, maximize early coverage
-  of external sequence clusters, and preprocess the union only once. Materialize each dilution as
-  lightweight TXT/JSON/CSV views and final model manifests pointing to shared heavy arrays.
+- Create dilutions only after final leakage groups and phenotype clusters exist. Reduce training
+  only; validation and test remain fixed. Keep absolute-size views deterministic, nested, as
+  class-balanced as indivisible groups permit, and representative of leakage/phenotype groups.
 - Treat DatasetRegistry as authoritative for managed immutable versions and their placements. Use
   DataCatalog only for aliases, external datasets, loaders, pins, or institutional overrides; never
   duplicate Registry-managed locations in a project catalog.
-- Resolve fixed task paths through named `context.input()` and `context.output()` bindings. Use a
-  declared dynamic-path compatibility check only when a manifest can legitimately point to
-  arbitrary local files that cannot have one fixed logical name.
+- Receive external files and datasets as typed `Path` parameters resolved by LambdaForge. Keep all
+  durable attempt artifacts below `self.run_dir`, resumable state below `self.checkpoints`, and
+  reconstructible downloads below `self.cache`; never expose physical framework paths in YAML.
 - Keep the per-record `PreprocessPipeline` transform readable as commented pseudocode. Scientific,
   parsing, geometry, download, and metadata complexity belongs in cohesive peripheral classes;
   exact NPZ validation, scientific resume, and atomic publication belong at the sink boundary.
@@ -141,15 +148,15 @@ project contract, not optional style suggestions.
   representations to the structural preprocessing phase.
 - Keep trainable WISDOM code small and conceptual: one dataset for validated `index.jsonl`/NPZ
   ingestion, one graph collator for domain-specific disjoint batching, the two explicitly requested
-  model generations, and one function-first training action.
-- Let the LambdaForge 0.11 callable runtime resolve datasets, expand seeds/search, reserve resources,
-  capture metrics/artifacts, and compare objectives. The public Python function owns its readable
-  PyTorch loop and uses LambdaForge public graph layers, scatter operations, pooling, and metrics;
-  do not reconstruct framework scheduling, Registry, results, or HPO infrastructure.
-- Prefer LambdaForge result indexing/plotting and generic safe artifact inspection, validation,
-  export, and explicit-role visualization over project-local equivalents. Retain a WISDOM-specific
-  tool only when it enforces domain semantics that the generic API cannot express at equal quality,
-  such as protein topology, signed surface gaps, normal orientation, or curvature identities.
+  model generations, and one `Training` Work.
+- Let LambdaForge 0.12 resolve datasets, expand seeds/search, reserve resources, capture
+  metrics/artifacts, and compare objectives. `Training.run()` owns its readable PyTorch loop and
+  uses LambdaForge public graph layers, scatter operations, pooling, and metrics; do not reconstruct
+  framework scheduling, Registry, results, or HPO infrastructure.
+- Prefer LambdaForge result indexing and plotting for run-level evidence. LambdaForge 0.12 does not
+  expose the former generic artifact-inspection command family, so retain WISDOM tools that enforce
+  protein topology, signed surface gaps, normal orientation, curvature identities, and visual NPZ
+  inspection.
 - Keep train/validation/test splits explicit in label manifests. Never invent a random split or
   infer scientific labels from filenames.
 - For the DNA-binding benchmark, treat RCSB protein-plus-DNA metadata as candidate discovery only.
@@ -157,9 +164,21 @@ project contract, not optional style suggestions.
   biological assembly. Accept a negative only from explicit curated non-DNA-binding evidence;
   absence of DNA from a deposited structure is unknown, not negative. Quarantine contradictory
   evidence instead of resolving it silently.
-- Split DNA data by externally produced sequence clusters (RCSB/MMseqs2 or another documented
-  specialist tool), never by individual structures and never with a project-owned mass aligner.
-  Reject exact-sequence and cluster leakage across train, validation, and test.
+- Keep three dataset concepts explicit and separate. Leakage groups contain sequence, Foldseek
+  structure, exact-sequence, logical-identity, deposition, or coordinate connections and have no
+  functional meaning. Positive phenotype clusters describe local physical DNA-binding-site shape;
+  negative phenotype clusters describe global protein morphology. Neither phenotype may define a
+  leakage edge.
+- Compute sequence pair evidence with a versioned external MMseqs2 installation and structure pair
+  evidence with a versioned external Foldseek installation after geometry exists. Retain thresholded
+  pair tables, join all similarity/identity edges transitively, and assign each connected leakage
+  group wholly to train, validation, or test. Never silently fall back when either tool is absent.
+- Fit positive and negative physical phenotypes separately with median/IQR robust scaling and
+  HDBSCAN. Keep HDBSCAN noise explicit, audit a small neighboring-parameter stability grid, never
+  cluster a UMAP visualization, and report honestly when no robust multi-cluster solution exists.
+- Require every positive validation/test member to have usable local ground truth with at least one
+  positive surface point. A positive without local ground truth may remain in training/global
+  classification only; it may never be converted into an all-negative local target.
 - Keep DNA surface ground truth in a fingerprinted sidecar whose point order and length exactly
   match the immutable universal NPZ. Never rewrite the base archive to add a task label. Exclude the
   surface target from losses, gradients, HPO objectives, and checkpoint selection unless a future
@@ -263,19 +282,21 @@ project contract, not optional style suggestions.
   ruff check .
   mypy src/wisdom
   pytest -q
-  lambdaforge validate experiments/dna_select.yaml
-  lambdaforge inspect experiments/dna_select.yaml --resolved
-  lambdaforge run experiments/dna_select.yaml --dry-run
-  lambdaforge validate experiments/dna_preprocess.yaml
-  lambdaforge run experiments/dna_preprocess.yaml --dry-run
-  lambdaforge validate experiments/wisdom_v1.yaml
-  lambdaforge validate experiments/wisdom_v2.yaml
+  lf validate experiments/dna_curate.yaml
+  lf explain experiments/dna_curate.yaml
+  lf run experiments/dna_curate.yaml --dry-run
+  lf validate experiments/dna_preprocess.yaml
+  lf explain experiments/dna_preprocess.yaml
+  lf run experiments/dna_preprocess.yaml --dry-run
+  lf validate experiments/validate_dna.yaml
+  lf validate experiments/wisdom_v1.yaml
+  lf validate experiments/wisdom_v2.yaml
   ```
 
 - Also run relevant focused tests while iterating. Multiprocessing tests may require execution
   outside a restricted sandbox because Python's process server creates local IPC resources.
 - Validate every changed LambdaForge YAML. When an authored file deliberately references a not-yet
-  published selection or DatasetVersion, validate an equivalent temporary fixture binding and
+  published curation artifact or DatasetVersion, validate an equivalent temporary fixture binding and
   report that the production selector cannot resolve until its upstream action has run. Never
   publish fake data just to satisfy validation.
 - Verify both README language versions whenever documentation or scientific behavior changes.

@@ -34,10 +34,10 @@ class WisdomDataset(Dataset[Mapping[str, Tensor | str]]):
         NPZ files remain unopened until ``__getitem__`` so DataLoader workers do not share handles.
 
         Args:
-            manifest: LambdaForge 0.11 managed dataset root containing ``index.jsonl``, or a legacy
+            manifest: LambdaForge 0.12 managed dataset root containing ``index.jsonl``, or a legacy
                 CSV with exactly ``file,label,split`` columns.
             split: Explicit subset to expose; one of ``train``, ``val``, or ``test``.
-            subset: ``full`` or a configured selection name such as ``25pct``. Managed dataset
+            subset: ``full`` or a configured dilution name such as ``train-100``. Managed dataset
                 members carry this view membership in metadata without duplicating heavy assets.
 
         Raises:
@@ -140,8 +140,9 @@ class WisdomDataset(Dataset[Mapping[str, Tensor | str]]):
             raise ValueError("managed WISDOM dataset root must contain index.jsonl")
 
         records: list[tuple[Path, Path | None, int, str, str]] = []
+        managed_split = "validation" if split == "val" else split
         for member in DatasetIndex(index_path):
-            if str(member.partitions.get("split", "")) != split:
+            if str(member.partitions.get("split", "")) != managed_split:
                 continue
             dilutions = member.metadata.get("dilutions", ())
             if subset != "full" and (

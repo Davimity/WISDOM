@@ -1,0 +1,20 @@
+name: wisdom-dna-validate                         # Stable read-only scientific validation Work.
+run: wisdom.preprocessing.dna.DNAValidation.DNAValidation # Direct LambdaForge 0.12 Work class.
+
+with:                                             # Keyword arguments passed to DNAValidation.run(...).
+  dataset:                                        # Resolve and fingerprint the immutable placement.
+    dataset: wisdom-dna@3                         # Validate exactly release 3, never an implicit latest.
+  fail_on_error: true                             # Preserve reports, then fail when a hard check fails.
+
+# DNAValidation.run option reference:
+# dataset has no default and must be a LambdaForge {dataset: NAME@VERSION} marker.
+# fail_on_error=true by default; false is diagnostic-only and still computes every hard leakage,
+# checksum, NPZ/sidecar, local-ground-truth, and dilution check without weakening its verdict.
+
+resources:                                        # Portable validation reservation.
+  cpu: 4                                          # Parallelism is dominated by archive decompression and hashing.
+  memory: 16GiB                                   # Enough memory for several complete surface archives.
+  time: 2h                                        # Bounded audit wall time for the complete placement.
+
+# LambdaForge 0.12 accepts cpu, memory, gpu, gpu_memory, time, storage, and processes. This audit
+# selects cpu=4, memory=16GiB, and time=2h; omitted gpu/storage/processes use framework defaults.

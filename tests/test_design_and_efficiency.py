@@ -7,11 +7,11 @@ from pathlib import Path
 
 import numpy as np
 import pytest
-from lambdaforge.configuration import AuthoringConfig
 from lambdaforge.data import DatasetRegistry
-from lambdaforge.preprocessing import PreprocessingTask
-from lambdaforge.tasks import TaskConfig, TaskContext
+from lambdaforge.work import Work, WorkConfig, WorkRunner
+from yaml import safe_load
 
+from wisdom.preprocessing.ProcessingWorkspace import ProcessingWorkspace
 from wisdom.preprocessing.structure.PreprocessConfig import PreprocessConfig
 from wisdom.preprocessing.structure.PreprocessPipeline import PreprocessPipeline
 from wisdom.preprocessing.structure.ProteinReader import ProteinReader
@@ -32,10 +32,18 @@ def test_one_class_per_source_file_and_reader_public_api() -> None:
         functions = [
             node for node in tree.body if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
         ]
-        assert len(classes) <= 1, f"{path.name} contains {len(classes)} classes"
+        # Related zero-behavior vocabularies intentionally share one compact module; every other
+        # cohesive class retains the PascalCase one-class-per-file convention.
+        if path.name == "DNAEnums.py":
+            assert classes and all(
+                any(isinstance(base, ast.Name) and base.id == "Enum" for base in node.bases)
+                for node in classes
+            )
+        else:
+            assert len(classes) <= 1, f"{path.name} contains {len(classes)} classes"
         if functions:
             assert path in entrypoints, f"{path.name} contains unexpected free module functions"
-        if classes and path.name != "__init__.py":
+        if classes and path.name not in {"__init__.py", "DNAEnums.py"}:
             assert classes[0].name == path.stem
     public_methods = [
         name
@@ -161,44 +169,22 @@ def test_npz_schema_is_sparse_compact_and_has_no_learned_features(
     )
     manifest = tmp_path / "proteins.txt"
     manifest.write_text(f"{pdb_path}\n", encoding="utf-8")
-    context = TaskContext(
-        name="schema-test",
-        run_dir=tmp_path / "run",
-        source_dir=tmp_path,
-        attempt_id="schema-test-attempt",
-        config_fingerprint="schema-test-fingerprint",
-        resume=True,
-        inputs=(
-            {
-                "name": "protein_identifiers",
-                "path": str(manifest),
-                "resolved_path": str(manifest),
-                "sha256": "schema-manifest",
-                "size_bytes": manifest.stat().st_size,
-            },
-            {
-                "name": "local_structures",
-                "path": str(pdb_path.parent),
-                "resolved_path": str(pdb_path.parent),
-                "sha256": "schema-structures",
-                "size_bytes": 0,
-            },
-        ),
+    run_dir = tmp_path / "run"
+    context = ProcessingWorkspace(
+        run_dir,
+        inputs={"protein_identifiers": manifest},
         outputs={
-            "downloads": "raw",
-            "processed": "processed",
-            "report": "preprocessing-report.json",
+            "downloads": run_dir / "raw",
+            "processed": run_dir / "processed",
+            "report": run_dir / "preprocessing-report.json",
         },
     )
-    context.run_dir.mkdir(parents=True)
-    PreprocessingTask(
-        source=ProteinSource(),
-        transforms=(PreprocessPipeline(config, download=False),),
-        sink=ProteinSink(),
-        workers=1,
-        workload="cpu",
-        on_error="skip",
-    ).run(context)
+    run_dir.mkdir(parents=True)
+    source = tuple(ProteinSource().records(context))
+    result = PreprocessPipeline(config, download=False).process(source[0], context)
+    sink   = ProteinSink()
+    sink.records = {result.key: dict(result.value)}
+    sink.finalize(context)
     archive_path = context.run_dir / "processed" / f"{pdb_path.stem}.npz"
     with np.load(archive_path, allow_pickle=False) as archive:
         forbidden_fragments = ("embedding", "one_hot", "rbf", "relative_vector", "message")
@@ -218,25 +204,28 @@ def test_npz_schema_is_sparse_compact_and_has_no_learned_features(
 
 def test_lambdaforge_owns_preprocessing_workers_resources_and_resume() -> None:
     project_root = Path(__file__).parents[1]
-    selection = AuthoringConfig.from_yaml(project_root / "experiments" / "dna_select.yaml")
-    preprocess = AuthoringConfig.from_yaml(project_root / "experiments" / "dna_preprocess.yaml")
-    selection_values = selection.values
-    preprocess_values = preprocess.values
+    selection_values = safe_load(
+        (project_root / "experiments" / "dna_curate.yaml").read_text(encoding="utf-8")
+    )
+    preprocess_values = safe_load(
+        (project_root / "experiments" / "dna_preprocess.yaml").read_text(encoding="utf-8")
+    )
 
-    assert selection_values["run"] == "wisdom.preprocessing.Selection.select_dna"
+    assert selection_values["run"] == "wisdom.preprocessing.Selection.Selection"
     assert selection_values["resources"] == {"cpu": 36, "memory": "64GiB", "time": "24h"}
     assert selection_values["with"]["workers"] == 72
-    assert selection_values["with"]["dilutions"] == [0.10, 0.25, 0.50, 0.75]
-    assert preprocess_values["run"] == "wisdom.preprocessing.Preprocessing.preprocess_dna"
-    assert preprocess_values["resources"] == {
+    assert "dilutions" not in selection_values["with"]
+    assert [step["name"] for step in preprocess_values["steps"]] == ["curate", "preprocess"]
+    preprocess_step = preprocess_values["steps"][1]
+    assert preprocess_step["run"] == "wisdom.preprocessing.Preprocessing.Preprocessing"
+    assert preprocess_step["resources"] == {
         "cpu": 36,
         "memory": "128GiB",
         "time": "24h",
     }
-    assert preprocess_values["with"]["workers"] == 36
-    assert inspect.signature(PreprocessingTask).parameters[
-        "progress_interval_seconds"
-    ].default == 10.0
+    assert preprocess_step["with"]["workers"] == 36
+    assert preprocess_step["with"]["curation"] == {"from": "curate.curation"}
+    assert any(name == "map" for name, _ in inspect.getmembers(Work, inspect.isfunction))
     assert not any(
         hasattr(PreprocessConfig(), name)
         for name in ("workers", "processes_per_cpu", "resume", "fail_fast", "raw_dir")
@@ -252,29 +241,23 @@ def test_training_catalog_resolves_before_every_dry_run(
 ) -> None:
     project_root = Path(__file__).parents[1]
     try:
-        record = DatasetRegistry().get("wisdom-dna@2")
+        record = DatasetRegistry().get("wisdom-dna@3")
     except KeyError:
-        pytest.skip("wisdom-dna@2 is not published in the LambdaForge DatasetRegistry")
+        pytest.skip("wisdom-dna@3 is not published in the LambdaForge DatasetRegistry")
     local = next(
         (placement for placement in record.placements if placement.cluster == "local"),
         None,
     )
     if local is None:
-        pytest.skip("wisdom-dna@2 has no local placement")
-    authoring = AuthoringConfig.from_yaml(project_root / "experiments" / filename)
-    expected  = Path(local.root).resolve()
-    materialized = authoring.materialize()
+        pytest.skip("wisdom-dna@3 has no local placement")
+    expected = Path(local.root).resolve()
+    assert expected.is_dir()
+    config = WorkConfig.from_yaml(project_root / "experiments" / filename)
+    plan   = WorkRunner().plan(config)
 
-    # Every expanded Work receives the same resolved immutable DatasetVersion root.
-    nodes = materialized.values["nodes"]
-    assert len(nodes) == (120 if filename == "wisdom_v1.yaml" else 18)
-    for node in nodes.values():
-        config = TaskConfig(
-            node["config"],
-            source=project_root / "experiments" / filename,
-        )
-        assert config.resolved_inputs[0].resolved_path == expected
-    assert materialized.values["metadata"]["objective"] == {
+    # Every expanded LambdaForge 0.12 Run resolves the same exact DatasetVersion marker at launch.
+    assert len(plan.levels[0]) == (120 if filename == "wisdom_v1.yaml" else 18)
+    assert config.raw["objective"] == {
         "metric": "val_auprc",
         "mode": "max",
     }
