@@ -11,19 +11,21 @@ from lambdaforge.data import DatasetRegistry
 from lambdaforge.work import Work, WorkConfig, WorkRunner
 from yaml import safe_load
 
+from wisdom.preprocessing.Preprocessing import Preprocessing
 from wisdom.preprocessing.ProcessingWorkspace import ProcessingWorkspace
 from wisdom.preprocessing.structure.PreprocessConfig import PreprocessConfig
 from wisdom.preprocessing.structure.PreprocessPipeline import PreprocessPipeline
 from wisdom.preprocessing.structure.ProteinReader import ProteinReader
 from wisdom.preprocessing.structure.ProteinSink import ProteinSink
 from wisdom.preprocessing.structure.ProteinSource import ProteinSource
+from wisdom.preprocessing.structure.StructureCache import StructureCache
 
 
 def test_one_class_per_source_file_and_reader_public_api() -> None:
     source_dir = Path(__file__).parents[1] / "src"
     entrypoints = {
         source_dir / "wisdom" / "Training.py",
-        source_dir / "wisdom" / "preprocessing" / "Selection.py",
+        source_dir / "wisdom" / "preprocessing" / "DatasetDesign.py",
         source_dir / "wisdom" / "preprocessing" / "Preprocessing.py",
     }
     for path in source_dir.rglob("*.py"):
@@ -32,18 +34,10 @@ def test_one_class_per_source_file_and_reader_public_api() -> None:
         functions = [
             node for node in tree.body if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
         ]
-        # Related zero-behavior vocabularies intentionally share one compact module; every other
-        # cohesive class retains the PascalCase one-class-per-file convention.
-        if path.name == "DNAEnums.py":
-            assert classes and all(
-                any(isinstance(base, ast.Name) and base.id == "Enum" for base in node.bases)
-                for node in classes
-            )
-        else:
-            assert len(classes) <= 1, f"{path.name} contains {len(classes)} classes"
+        assert len(classes) <= 1, f"{path.name} contains {len(classes)} classes"
         if functions:
             assert path in entrypoints, f"{path.name} contains unexpected free module functions"
-        if classes and path.name not in {"__init__.py", "DNAEnums.py"}:
+        if classes and path.name != "__init__.py":
             assert classes[0].name == path.stem
     public_methods = [
         name
@@ -172,16 +166,15 @@ def test_npz_schema_is_sparse_compact_and_has_no_learned_features(
     run_dir = tmp_path / "run"
     context = ProcessingWorkspace(
         run_dir,
-        inputs={"protein_identifiers": manifest},
+        inputs={"protein_identifiers": manifest, "structures": pdb_path.parent},
         outputs={
-            "downloads": run_dir / "raw",
             "processed": run_dir / "processed",
             "report": run_dir / "preprocessing-report.json",
         },
     )
     run_dir.mkdir(parents=True)
     source = tuple(ProteinSource().records(context))
-    result = PreprocessPipeline(config, download=False).process(source[0], context)
+    result = PreprocessPipeline(config).process(source[0], context)
     sink   = ProteinSink()
     sink.records = {result.key: dict(result.value)}
     sink.finalize(context)
@@ -204,28 +197,48 @@ def test_npz_schema_is_sparse_compact_and_has_no_learned_features(
 
 def test_lambdaforge_owns_preprocessing_workers_resources_and_resume() -> None:
     project_root = Path(__file__).parents[1]
-    selection_values = safe_load(
-        (project_root / "experiments" / "dna_curate.yaml").read_text(encoding="utf-8")
+    design_values = safe_load(
+        (project_root / "experiments" / "dna_design.yaml").read_text(encoding="utf-8")
     )
     preprocess_values = safe_load(
         (project_root / "experiments" / "dna_preprocess.yaml").read_text(encoding="utf-8")
     )
 
-    assert selection_values["run"] == "wisdom.preprocessing.Selection.Selection"
-    assert selection_values["resources"] == {"cpu": 36, "memory": "64GiB", "time": "24h"}
-    assert selection_values["with"]["workers"] == 72
-    assert "dilutions" not in selection_values["with"]
-    assert [step["name"] for step in preprocess_values["steps"]] == ["curate", "preprocess"]
+    assert design_values["run"] == "wisdom.preprocessing.DatasetDesign.DatasetDesign"
+    assert design_values["resources"] == {
+        "cpu": 36,
+        "memory": "96GiB",
+        "storage": "100GiB",
+        "time": "24h",
+    }
+    assert design_values["with"]["workers"] == 36
+    assert design_values["with"]["output_directory"] == "data/dna/design"
+    assert design_values["with"]["overwrite_output"] is True
+    assert design_values["with"]["maximum_resolution"] == 4.0
+    assert design_values["with"]["dilution_fractions"] == [1.0, 0.75, 0.5, 0.25, 0.1]
+    assert [step["name"] for step in preprocess_values["steps"]] == ["design", "preprocess"]
+    assert preprocess_values["steps"][0]["with"]["output_directory"] == "data/dna/design"
     preprocess_step = preprocess_values["steps"][1]
     assert preprocess_step["run"] == "wisdom.preprocessing.Preprocessing.Preprocessing"
     assert preprocess_step["resources"] == {
         "cpu": 36,
         "memory": "128GiB",
+        "storage": "150GiB",
         "time": "24h",
     }
     assert preprocess_step["with"]["workers"] == 36
-    assert preprocess_step["with"]["curation"] == {"from": "curate.curation"}
+    assert preprocess_step["with"]["requests_per_second"] == 4.0
+    assert preprocess_step["with"]["retries"] == 5
+    assert preprocess_step["with"]["design"] == {"from": "design.dataset-design"}
     assert any(name == "map" for name, _ in inspect.getmembers(Work, inspect.isfunction))
+
+    preprocessing_source = inspect.getsource(Preprocessing)
+    structure_cache_source = inspect.getsource(StructureCache)
+    assert "self.resume_map(" in preprocessing_source
+    assert "self.cache.fetch(" in preprocessing_source
+    assert "urllib" not in structure_cache_source
+    assert "CrossProcessFileLock" not in structure_cache_source
+
     assert not any(
         hasattr(PreprocessConfig(), name)
         for name in ("workers", "processes_per_cpu", "resume", "fail_fast", "raw_dir")
@@ -241,15 +254,15 @@ def test_training_catalog_resolves_before_every_dry_run(
 ) -> None:
     project_root = Path(__file__).parents[1]
     try:
-        record = DatasetRegistry().get("wisdom-dna@3")
+        record = DatasetRegistry().get("wisdom-dna@4")
     except KeyError:
-        pytest.skip("wisdom-dna@3 is not published in the LambdaForge DatasetRegistry")
+        pytest.skip("wisdom-dna@4 is not published in the LambdaForge DatasetRegistry")
     local = next(
         (placement for placement in record.placements if placement.cluster == "local"),
         None,
     )
     if local is None:
-        pytest.skip("wisdom-dna@3 has no local placement")
+        pytest.skip("wisdom-dna@4 has no local placement")
     expected = Path(local.root).resolve()
     assert expected.is_dir()
     config = WorkConfig.from_yaml(project_root / "experiments" / filename)

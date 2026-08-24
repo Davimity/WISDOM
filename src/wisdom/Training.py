@@ -141,7 +141,7 @@ def _train_wisdom(
         work: Active LambdaForge Work providing run-owned metrics and output services.
         dataset: Resolved managed dataset root containing LambdaForge ``index.jsonl``.
         model_version: Supported architecture generation, either ``1`` or ``2``.
-        subset: Full data or a deterministic view name such as ``25pct``.
+        subset: Full data or a deterministic view such as ``replicate-00/train-25``.
         hidden_dim: Shared atom/surface latent width.
         embedding_dim: Element and optional residue embedding width.
         use_residue_type: Include learned residue category features when true.

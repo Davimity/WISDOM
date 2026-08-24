@@ -60,7 +60,7 @@ def test_explicit_double_and_triple_are_preserved() -> None:
 
 def test_templates_peptides_aromatics_and_disulfides(pdb_path: Path) -> None:
     config = PreprocessConfig(chains=["A"])
-    source = StructureCache(pdb_path.parent, download=False).resolve(str(pdb_path), pdb_path.parent)
+    source = StructureCache(pdb_path.parent).resolve(str(pdb_path), pdb_path.parent)
     protein, _ = ProteinReader(config).read(source)
     graph = AtomicStructureBuilder(0.1).build(protein)
     types = graph["atom_edge_bond_type"].tolist()

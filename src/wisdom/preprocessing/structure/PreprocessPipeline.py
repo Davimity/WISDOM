@@ -18,27 +18,24 @@ class PreprocessPipeline:
         self,
         config          : PreprocessConfig,
         identifier_input: str  = "protein_identifiers",
-        download_output : str  = "downloads",
-        download        : bool = True,
+        structure_input : str  = "structures",
     ) -> None:
         """Bind scientific settings and logical LambdaForge path names.
 
         Args:
             config: Settings that determine protein selection, graphs, surface and curvature.
             identifier_input: Named task input containing the protein TXT manifest.
-            download_output: Named task output used as the race-safe RCSB structure cache.
-            download: Whether a missing remote PDB entry may be downloaded.
+            structure_input: Named input containing LambdaForge-managed prefetched structures.
 
         Raises:
-            ValueError: If a logical input/output name is empty.
+            ValueError: If a logical input name is empty.
         """
-        if not identifier_input.strip() or not download_output.strip():
-            raise ValueError("logical input and output names cannot be empty")
+        if not identifier_input.strip() or not structure_input.strip():
+            raise ValueError("logical input names cannot be empty")
 
         self.config           = config
         self.identifier_input = identifier_input
-        self.download_output  = download_output
-        self.download         = download
+        self.structure_input  = structure_input
 
     def transform(
         self,
@@ -48,7 +45,7 @@ class PreprocessPipeline:
         """Build one complete validated representation without writing dataset state.
 
         LambdaForge invokes this method sequentially, in threads, or in spawn-safe CPU processes.
-        The method resolves/downloads one structure, reads its hierarchy with Gemmi, builds the
+        The method resolves one prefetched structure, reads its hierarchy with Gemmi, builds the
         sparse atomic graph and molecular surface, and prepares NPZ metadata. It intentionally
         leaves publication and aggregate reporting to ``ProteinSink`` while LambdaForge Work owns
         map concurrency, progress, retries, and checkpoints.
@@ -64,7 +61,7 @@ class PreprocessPipeline:
         Raises:
             TypeError: If the source value or output-name metadata violates the source contract.
             ValueError: If record grammar, parsing, scientific construction or validation fails.
-            OSError: If source download/read or numerical construction cannot access its files.
+            OSError: If source reading or numerical construction cannot access its files.
         """
         if not isinstance(record.value, str):
             raise TypeError("protein preprocessing records must contain an identifier string")
@@ -88,11 +85,10 @@ class PreprocessPipeline:
         from wisdom.preprocessing.structure.SurfaceBuilder import SurfaceBuilder
 
         started      = time.perf_counter()
-        manifest_dir = context.input(self.identifier_input).parent
-        download_dir = context.output(self.download_output)
-        download_dir.mkdir(parents=True, exist_ok=True)
+        manifest_dir  = context.input(self.identifier_input).parent
+        structure_dir = context.input(self.structure_input)
 
-        source = StructureCache(download_dir, self.download).resolve(record.value, manifest_dir)
+        source = StructureCache(structure_dir).resolve(record.value, manifest_dir)
         if source.is_local:
             # Dynamic paths inside the manifest still require declared-input coverage. LambdaForge
             # has no logical name for an arbitrary line, so this is the justified legacy helper.
@@ -155,12 +151,13 @@ class PreprocessPipeline:
 
         LambdaForge 0.12 requires ``Work.map`` results to be JSON-compatible. Scientific arrays
         are therefore written atomically by the worker to the checkpoint-owned geometry
-        directory, while only the compact report returns through the framework map. A resumed map
-        reuses that report and its durable NPZ instead of serializing large NumPy arrays.
+        directory, while only the compact report returns through the framework map. Every map
+        invocation first asks ``ProteinSink`` to revalidate an existing durable NPZ; exact valid
+        archives return a fresh compact ``skipped`` report, while stale archives are rebuilt.
 
         Args:
             record: Stable protein identifier and collision-safe output filename.
-            context: Explicit manifest, download-cache, and processed-output paths.
+            context: Explicit manifest, managed-structure, and processed-output paths.
 
         Returns:
             Record whose value is the JSON-compatible per-protein processing report.
@@ -168,7 +165,7 @@ class PreprocessPipeline:
         Raises:
             TypeError: If the source or transformed record violates its contract.
             ValueError: If scientific construction or NPZ validation fails.
-            OSError: If coordinate acquisition or atomic NPZ persistence fails.
+            OSError: If coordinate reading or atomic NPZ persistence fails.
         """
         from wisdom.preprocessing.structure.ProteinSink import ProteinSink
 

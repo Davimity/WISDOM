@@ -1,0 +1,71 @@
+{
+  "simple_global_model_visible": {
+    "auprc_mean": 0.8176886523741296,
+    "auprc_std": 0.01251809931722054,
+    "auroc_mean": 0.8358652449220141,
+    "auroc_std": 0.01342149093723668,
+    "available": true,
+    "balanced_accuracy_mean": 0.749738219895288,
+    "balanced_accuracy_std": 0.016688353351318574,
+    "categorical_features": [],
+    "cross_validation": "StratifiedGroupKFold",
+    "folds": 5,
+    "model": "LogisticRegression",
+    "numeric_features": [
+      "sequence_length",
+      "theoretical_isoelectric_point",
+      "net_charge_at_pH_7",
+      "gravy",
+      "positive_residue_fraction",
+      "negative_residue_fraction",
+      "polar_residue_fraction",
+      "hydrophobic_residue_fraction",
+      "aromatic_fraction",
+      "radius_of_gyration_normalized",
+      "aspect_ratio",
+      "compactness",
+      "packing_density"
+    ]
+  },
+  "technical_with_origin": {
+    "auprc_mean": 0.9724516891176288,
+    "auprc_std": 0.004751681371061332,
+    "auroc_mean": 0.960302623283353,
+    "auroc_std": 0.007472131490345313,
+    "available": true,
+    "balanced_accuracy_mean": 0.9397905759162304,
+    "balanced_accuracy_std": 0.005235602094240866,
+    "categorical_features": [
+      "origin",
+      "experimental_method"
+    ],
+    "cross_validation": "StratifiedGroupKFold",
+    "folds": 5,
+    "model": "LogisticRegression",
+    "numeric_features": [
+      "resolution",
+      "coordinate_coverage",
+      "release_year"
+    ]
+  },
+  "technical_without_origin": {
+    "auprc_mean": 0.6348573959852573,
+    "auprc_std": 0.02517479132985653,
+    "auroc_mean": 0.6380691318768673,
+    "auroc_std": 0.036134209582455876,
+    "available": true,
+    "balanced_accuracy_mean": 0.6015706806282722,
+    "balanced_accuracy_std": 0.03129996895839816,
+    "categorical_features": [
+      "experimental_method"
+    ],
+    "cross_validation": "StratifiedGroupKFold",
+    "folds": 5,
+    "model": "LogisticRegression",
+    "numeric_features": [
+      "resolution",
+      "coordinate_coverage",
+      "release_year"
+    ]
+  }
+}

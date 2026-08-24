@@ -102,6 +102,21 @@ class DNAValidation(lf.Work):
         checks: list[dict[str, Any]] = []
         details: list[dict[str, Any]] = []
         by_id = {member.member_id: member for member in members}
+        try:
+            design_provenance = json.loads(
+                (evidence / "provenance.json").read_text(encoding="utf-8")
+            )
+            design_schema = str(design_provenance.get("design_schema_version", ""))
+        except (OSError, json.JSONDecodeError):
+            design_schema = ""
+        self._check(
+            checks,
+            "design_schema_version",
+            design_schema == "1.2",
+            int(design_schema != "1.2"),
+            "The immutable design contract must use schema 1.2 with explicit label evidence, "
+            "content-level structure hashes, paired manifests, and a human report.",
+        )
         self._check(
             checks,
             "unique_member_ids",
@@ -117,6 +132,21 @@ class DNAValidation(lf.Work):
             len(catalog_failures),
             "The canonical catalog and DatasetIndex must name identical members, labels, splits, "
             "and leakage groups.",
+        )
+        manifest_failures = self._manifest_audit(evidence, catalog)
+        self._check(
+            checks,
+            "design_manifest_consistency",
+            not manifest_failures,
+            len(manifest_failures),
+            "ID-only and labelled TXT views must exactly reproduce the authoritative catalog.",
+        )
+        self._check(
+            checks,
+            "design_human_report",
+            (evidence / "REPORT.md").is_file(),
+            int(not (evidence / "REPORT.md").is_file()),
+            "The design must include its plain-language statistical and figure interpretation.",
         )
 
         split_ids: dict[str, set[str]] = defaultdict(set)
@@ -164,7 +194,7 @@ class DNAValidation(lf.Work):
         )
 
         pair_failures: dict[str, int] = {}
-        for name in ("sequence-pairs.csv", "structure-pairs.csv", "exact-identity-pairs.csv"):
+        for name in ("sequence-edges.csv", "structure-edges.csv", "exact-pairs.csv"):
             path = evidence / "clusters" / name
             failures = self._pair_leakage(path, by_id)
             pair_failures[name] = failures
@@ -194,11 +224,11 @@ class DNAValidation(lf.Work):
         class_counts = Counter(int(member.targets["dna_binding"]) for member in members)
         self._check(
             checks,
-            "global_class_balance",
-            class_counts[0] == class_counts[1] and class_counts[0] > 0,
-            abs(class_counts[0] - class_counts[1]),
-            "The published benchmark must contain equal positive and negative populations; "
-            "group-aware split sizes may still deviate slightly.",
+            "canonical_class_coverage",
+            class_counts[0] > 0 and class_counts[1] > 0,
+            int(class_counts[0] == 0) + int(class_counts[1] == 0),
+            "The designed benchmark must contain both labels. Its configured ratio is audited "
+            "by DatasetDesign and need not be 1:1 when the user deliberately changes it.",
         )
 
         phenotype_failures = self._phenotype_coverage(members)
@@ -273,14 +303,21 @@ class DNAValidation(lf.Work):
         group_sizes = Counter(
             str(member.partitions.get("leakage_group", "")) for member in members.values()
         )
-        phenotype_by_split: dict[str, Counter[str]] = {
+        global_by_split: dict[str, Counter[str]] = {
+            split: Counter() for split in ("train", "validation", "test")
+        }
+        interface_by_split: dict[str, Counter[str]] = {
             split: Counter() for split in ("train", "validation", "test")
         }
         for member in members.values():
             split = str(member.partitions.get("split", ""))
-            phenotype_by_split.setdefault(split, Counter())[
-                str(member.partitions.get("phenotype", "unavailable"))
+            global_by_split.setdefault(split, Counter())[
+                str(member.partitions.get("global_phenotype", "unavailable"))
             ] += 1
+            if int(member.targets.get("dna_binding", -1)) == 1:
+                interface_by_split.setdefault(split, Counter())[
+                    str(member.partitions.get("interface_phenotype", "unavailable"))
+                ] += 1
 
         max_cross_sequence: float | None = None
         sequence_path = evidence / "clusters" / "sequence-pairs.tsv"
@@ -302,7 +339,7 @@ class DNAValidation(lf.Work):
             with structure_path.open("r", encoding="utf-8") as stream:
                 for line in stream:
                     fields = line.rstrip("\n").split("\t")
-                    if len(fields) != 7:
+                    if len(fields) != 8:
                         continue
                     left, right = Path(fields[0]).stem, Path(fields[1]).stem
                     if left not in members or right not in members:
@@ -313,10 +350,14 @@ class DNAValidation(lf.Work):
                             probability /= 100.0
                         max_cross_structure = max(max_cross_structure or 0.0, probability)
 
-        partition_report: dict[str, Any] = {}
-        report_path = evidence / "partition-report.json"
-        if report_path.is_file():
-            partition_report = json.loads(report_path.read_text(encoding="utf-8"))
+        clustering: dict[str, Any] = {}
+        clustering_path = evidence / "clusters" / "clustering-diagnostics.json"
+        if clustering_path.is_file():
+            clustering = json.loads(clustering_path.read_text(encoding="utf-8"))
+        provenance: dict[str, Any] = {}
+        provenance_path = evidence / "provenance.json"
+        if provenance_path.is_file():
+            provenance = json.loads(provenance_path.read_text(encoding="utf-8"))
         return {
             "leakage_group_count": len(group_sizes),
             "largest_leakage_group": max(group_sizes.values(), default=0),
@@ -328,14 +369,18 @@ class DNAValidation(lf.Work):
             "group_size_histogram": dict(sorted(Counter(group_sizes.values()).items())),
             "maximum_cross_split_mmseqs2_identity": max_cross_sequence,
             "maximum_cross_split_foldseek_probability": max_cross_structure,
-            "phenotype_by_split": {
+            "global_phenotype_by_split": {
                 split: dict(sorted(counts.items()))
-                for split, counts in phenotype_by_split.items()
+                for split, counts in global_by_split.items()
             },
-            "positive_hdbscan": partition_report.get("positive_phenotypes", {}),
-            "negative_hdbscan": partition_report.get("negative_phenotypes", {}),
-            "software": partition_report.get("software", {}),
-            "thresholds": partition_report.get("parameters", {}),
+            "positive_interface_phenotype_by_split": {
+                split: dict(sorted(counts.items()))
+                for split, counts in interface_by_split.items()
+            },
+            "global_hdbscan": clustering.get("global", {}),
+            "positive_interface_hdbscan": clustering.get("positive_interface", {}),
+            "software": provenance.get("software", {}),
+            "thresholds": provenance.get("leakage_criteria", {}),
         }
 
     @staticmethod
@@ -399,9 +444,9 @@ class DNAValidation(lf.Work):
     def _evidence_root(root: Path, members: list[Any]) -> Path:
         """Resolve run-owned or published dataset-wide audit evidence.
 
-        Before publication, canonical tables live directly below the final run root. LambdaForge
-        0.12 member publication has no global-assets argument, so the placement stores those same
-        small files once as the first member's ``dataset_evidence`` directory asset.
+        Before publication, the unchanged DatasetDesign artifact lives below ``design/``. In a
+        published placement LambdaForge stores that directory once as the first member's
+        ``dataset_design`` asset.
 
         Args:
             root: Dataset or pre-publication root.
@@ -413,16 +458,79 @@ class DNAValidation(lf.Work):
         Raises:
             ValueError: If neither representation contains the mandatory evidence contract.
         """
-        if (root / "catalog.csv").is_file():
-            return root
+        if (root / "design" / "catalog.csv").is_file():
+            return root / "design"
         candidates = [
-            root / member.assets["dataset_evidence"].path
+            root / member.assets["dataset_design"].path
             for member in members
-            if "dataset_evidence" in member.assets
+            if "dataset_design" in member.assets
         ]
         if len(candidates) != 1 or not (candidates[0] / "catalog.csv").is_file():
-            raise ValueError("WISDOM-DNA lacks its unique dataset_evidence asset")
+            raise ValueError("WISDOM-DNA lacks its unique dataset_design asset")
         return candidates[0]
+
+    @staticmethod
+    def _manifest_audit(
+        root   : Path,
+        catalog: Mapping[str, Mapping[str, str]],
+    ) -> list[str]:
+        """Compare every root manifest view with the authoritative design catalog.
+
+        Args:
+            root: DatasetDesign directory containing canonical and split TXT views.
+            catalog: Parsed canonical rows keyed by exact protein identifier.
+
+        Returns:
+            Ordered human-readable failures for missing, malformed, duplicate, or drifting views.
+        """
+        failures: list[str] = []
+        expected = {
+            "proteins": set(catalog),
+            **{
+                split: {
+                    identifier
+                    for identifier, row in catalog.items()
+                    if str(row.get("split", "")) == split
+                }
+                for split in ("train", "validation", "test")
+            },
+        }
+        for name, identifiers in expected.items():
+            plain_path   = root / f"{name}.txt"
+            labelled_path = root / f"{name}-labelled.txt"
+            try:
+                plain_lines = [
+                    line.strip()
+                    for line in plain_path.read_text(encoding="utf-8").splitlines()
+                    if line.strip()
+                ]
+                labelled_lines = [
+                    line.strip()
+                    for line in labelled_path.read_text(encoding="utf-8").splitlines()
+                    if line.strip()
+                ]
+            except OSError as error:
+                failures.append(f"{name}: missing manifest view ({error})")
+                continue
+            if len(plain_lines) != len(set(plain_lines)) or set(plain_lines) != identifiers:
+                failures.append(f"{name}: ID-only manifest differs from catalog")
+            parsed: dict[str, int] = {}
+            try:
+                for line in labelled_lines:
+                    identifier, label = line.split("\t", 1)
+                    if identifier in parsed:
+                        raise ValueError("duplicate identifier")
+                    parsed[identifier] = int(label)
+            except ValueError:
+                failures.append(f"{name}: labelled manifest must use ID<TAB>0|1")
+                continue
+            expected_labels = {
+                identifier: int(catalog[identifier]["label"])
+                for identifier in identifiers
+            }
+            if parsed != expected_labels or any(label not in {0, 1} for label in parsed.values()):
+                failures.append(f"{name}: labelled manifest differs from catalog")
+        return failures
 
     @staticmethod
     def _phenotype_coverage(members: list[Any]) -> dict[str, Any]:
@@ -439,37 +547,28 @@ class DNAValidation(lf.Work):
         Returns:
             Mapping from offending phenotype to its available groups and observed splits.
         """
-        groups: dict[str, list[Any]] = defaultdict(list)
-        for member in members:
-            groups[str(member.partitions.get("leakage_group", ""))].append(member)
-
         phenotype_groups: dict[str, set[str]] = defaultdict(set)
         phenotype_splits: dict[str, set[str]] = defaultdict(set)
         for member in members:
-            phenotype = str(member.partitions.get("phenotype", "unavailable"))
-            if phenotype.endswith("NOISE") or phenotype == "unavailable":
-                continue
             group = str(member.partitions.get("leakage_group", ""))
-            phenotype_groups[phenotype].add(group)
-            phenotype_splits[phenotype].add(str(member.partitions.get("split", "")))
+            for field in ("global_phenotype", "interface_phenotype"):
+                phenotype = str(member.partitions.get(field, "unavailable"))
+                if phenotype.endswith("NOISE") or phenotype in {
+                    "unavailable",
+                    "not_applicable",
+                }:
+                    continue
+                key = f"{field}:{phenotype}"
+                phenotype_groups[key].add(group)
+                phenotype_splits[key].add(str(member.partitions.get("split", "")))
 
         failures: dict[str, Any] = {}
         required = {"train", "validation", "test"}
         for phenotype, candidate_groups in sorted(phenotype_groups.items()):
-            movable = {
-                group
-                for group in candidate_groups
-                if not any(
-                    int(member.targets["dna_binding"]) == 1
-                    and not bool(member.targets["local_ground_truth"])
-                    for member in groups[group]
-                )
-            }
             observed = phenotype_splits[phenotype]
-            if len(candidate_groups) >= 3 and len(movable) >= 3 and observed != required:
+            if len(candidate_groups) >= 3 and observed != required:
                 failures[phenotype] = {
                     "group_count": len(candidate_groups),
-                    "movable_group_count": len(movable),
                     "observed_splits": sorted(observed),
                     "missing_splits": sorted(required - observed),
                 }
@@ -543,11 +642,11 @@ class DNAValidation(lf.Work):
         with path.open("r", encoding="utf-8", newline="") as stream:
             for row in csv.DictReader(stream):
                 left, right = str(row.get("left", "")), str(row.get("right", ""))
-                if (
-                    left not in members
-                    or right not in members
-                    or members[left].partitions["split"] != members[right].partitions["split"]
-                ):
+                # DatasetDesign evidence is full-raw by construction. Omitted valid positives are
+                # outside the published index and therefore irrelevant to selected split crossing.
+                if left not in members or right not in members:
+                    continue
+                if members[left].partitions["split"] != members[right].partitions["split"]:
                     failures += 1
         return failures
 
@@ -556,22 +655,24 @@ class DNAValidation(lf.Work):
         """Reapply recorded thresholds directly to raw MMseqs2 and Foldseek tables.
 
         Args:
-            evidence: Dataset-wide evidence directory containing raw TSV and partition provenance.
+            evidence: DatasetDesign directory containing raw TSV and provenance.
             members: Dataset members keyed by exact logical identifier.
 
         Returns:
             Cross-split qualifying-pair counts for both specialist tools. A missing or malformed
             mandatory evidence file contributes one failure instead of being silently ignored.
         """
-        report_path = evidence / "partition-report.json"
+        report_path = evidence / "provenance.json"
         try:
             report = json.loads(report_path.read_text(encoding="utf-8"))
-            parameters = report["parameters"]
+            parameters = report["leakage_criteria"]
             sequence_identity = float(parameters["sequence_identity"])
             sequence_coverage = float(parameters["sequence_coverage"])
             sequence_evalue = float(parameters["sequence_evalue"])
-            structure_probability = float(parameters["structure_probability"])
-            structure_evalue = float(parameters["structure_evalue"])
+            foldseek_probability = float(parameters["foldseek_probability"])
+            foldseek_tmscore = float(parameters["foldseek_tmscore"])
+            foldseek_coverage = float(parameters["foldseek_coverage"])
+            foldseek_evalue = float(parameters["foldseek_evalue"])
         except (OSError, KeyError, TypeError, ValueError, json.JSONDecodeError):
             return {"mmseqs2": 1, "foldseek": 1}
 
@@ -588,9 +689,14 @@ class DNAValidation(lf.Work):
                     if left == right:
                         continue
                     if left not in members or right not in members:
-                        sequence_failures += 1
                         continue
                     identity, query_coverage, target_coverage, evalue = map(float, fields[2:6])
+                    if identity > 1.0:
+                        identity /= 100.0
+                    if query_coverage > 1.0:
+                        query_coverage /= 100.0
+                    if target_coverage > 1.0:
+                        target_coverage /= 100.0
                     retained = (
                         identity >= sequence_identity
                         and min(query_coverage, target_coverage) >= sequence_coverage
@@ -609,21 +715,27 @@ class DNAValidation(lf.Work):
             with structure_path.open("r", encoding="utf-8") as stream:
                 for line in stream:
                     fields = line.rstrip("\n").split("\t")
-                    if len(fields) != 7:
+                    if len(fields) != 8:
                         structure_failures += 1
                         continue
                     left, right = Path(fields[0]).stem, Path(fields[1]).stem
                     if left == right:
                         continue
                     if left not in members or right not in members:
-                        structure_failures += 1
                         continue
                     probability = float(fields[2])
                     if probability > 1.0:
                         probability /= 100.0
+                    qtm, ttm, query_coverage, target_coverage = map(float, fields[4:8])
+                    if query_coverage > 1.0:
+                        query_coverage /= 100.0
+                    if target_coverage > 1.0:
+                        target_coverage /= 100.0
                     retained = (
-                        probability >= structure_probability
-                        and float(fields[3]) <= structure_evalue
+                        probability >= foldseek_probability
+                        and min(qtm, ttm) >= foldseek_tmscore
+                        and min(query_coverage, target_coverage) >= foldseek_coverage
+                        and float(fields[3]) <= foldseek_evalue
                     )
                     if retained and members[left].partitions["split"] != members[right].partitions[
                         "split"
@@ -635,104 +747,104 @@ class DNAValidation(lf.Work):
 
     @staticmethod
     def _validate_dilutions(root: Path, members: Mapping[str, Any]) -> dict[str, Any]:
-        """Audit canonical train dilution membership and nesting.
+        """Audit every replicate's group-wise nested training membership.
 
         Args:
-            root: Dataset root containing ``dilutions/canonical/train-N.txt``.
+            root: DatasetDesign root containing ``dilutions/replicate-NN/train-P.txt``.
             members: Final members keyed by identifier.
 
         Returns:
             Per-dilution sizes, class counts, nesting result, and total failure count.
         """
-        paths = sorted(
-            (root / "dilutions" / "canonical").glob("train-*.txt"),
-            key=lambda path: int(path.stem.split("-")[1]),
-        )
-        previous: set[str] = set()
+        replicate_paths = sorted((root / "dilutions").glob("replicate-*"))
         result: dict[str, Any] = {}
-        failures = int(not paths)
+        failures = int(not replicate_paths)
         warnings: list[str] = []
         train_ids = {
             identifier
             for identifier, member in members.items()
             if member.partitions.get("split") == "train"
         }
-        train_positive = sum(
-            int(members[identifier].targets["dna_binding"]) == 1 for identifier in train_ids
-        )
-        train_fraction = train_positive / len(train_ids) if train_ids else 0.0
-        stable_phenotypes = {
-            str(members[identifier].partitions.get("phenotype", "unavailable"))
-            for identifier in train_ids
-            if not str(members[identifier].partitions.get("phenotype", "unavailable")).endswith(
-                ("NOISE", "unavailable")
+        for replicate in replicate_paths:
+            paths = sorted(
+                (
+                    path
+                    for path in replicate.glob("train-*.txt")
+                    if not path.stem.endswith("-labelled")
+                ),
+                key=lambda path: int(path.stem.split("-")[1]),
             )
-        }
-        for path in paths:
-            identifiers = {
-                line.strip()
-                for line in path.read_text(encoding="utf-8").splitlines()
-                if line.strip()
-            }
-            unknown = identifiers - members.keys()
-            non_train = {
-                identifier
-                for identifier in identifiers & members.keys()
-                if members[identifier].partitions["split"] != "train"
-            }
-            nested = previous.issubset(identifiers)
-            failures += len(unknown) + len(non_train) + int(not nested)
-            counts = Counter(
-                int(members[identifier].targets["dna_binding"])
-                for identifier in identifiers & members.keys()
-            )
-            selected = identifiers & members.keys()
-            phenotypes = Counter(
-                str(members[identifier].partitions.get("phenotype", "unavailable"))
-                for identifier in selected
-            )
-            leakage_groups = {
-                str(members[identifier].partitions.get("leakage_group", ""))
-                for identifier in selected
-            }
-            missing_phenotypes = sorted(stable_phenotypes - phenotypes.keys())
-            phenotypes_in_previous = {
-                str(members[identifier].partitions.get("phenotype", "unavailable"))
-                for identifier in previous & members.keys()
-            }
-            additions_available = len(identifiers) - len(previous)
-            missing_after_previous = stable_phenotypes - phenotypes_in_previous
-            feasible_coverage = additions_available >= len(missing_after_previous)
-            if missing_phenotypes and feasible_coverage:
-                warnings.append(
-                    f"{path.stem} omits stable phenotypes despite a nested alternative with the "
-                    f"same size: "
-                    f"{missing_phenotypes}"
+            failures += int(not paths)
+            previous: set[str] = set()
+            for path in paths:
+                identifiers = {
+                    line.strip()
+                    for line in path.read_text(encoding="utf-8").splitlines()
+                    if line.strip()
+                }
+                unknown = identifiers - members.keys()
+                non_train = {
+                    identifier
+                    for identifier in identifiers & members.keys()
+                    if members[identifier].partitions["split"] != "train"
+                }
+                nested = previous.issubset(identifiers)
+                group_members: dict[str, set[str]] = defaultdict(set)
+                for identifier in train_ids:
+                    group_members[
+                        str(members[identifier].partitions.get("leakage_group", ""))
+                    ].add(identifier)
+                fragmented = [
+                    group
+                    for group, values in group_members.items()
+                    if values & identifiers and not values.issubset(identifiers)
+                ]
+                failures += len(unknown) + len(non_train) + int(not nested) + len(fragmented)
+                selected = identifiers & members.keys()
+                counts = Counter(
+                    int(members[identifier].targets["dna_binding"]) for identifier in selected
                 )
-            positive_fraction = counts[1] / len(selected) if selected else None
-            result[path.stem] = {
-                "size": len(identifiers),
-                "positive": counts[1],
-                "negative": counts[0],
-                "unknown": sorted(unknown),
-                "non_train": sorted(non_train),
-                "contains_previous": nested,
-                "positive_fraction": positive_fraction,
-                "positive_fraction_deviation_from_full_train": (
-                    abs(positive_fraction - train_fraction)
-                    if positive_fraction is not None
-                    else None
-                ),
-                "phenotype_counts": dict(sorted(phenotypes.items())),
-                "phenotype_coverage_fraction": (
-                    len(stable_phenotypes & phenotypes.keys()) / len(stable_phenotypes)
-                    if stable_phenotypes
-                    else None
-                ),
-                "leakage_group_count": len(leakage_groups),
-                "missing_stable_phenotypes": missing_phenotypes,
-            }
-            previous = identifiers
+                labelled_path = path.with_name(f"{path.stem}-labelled.txt")
+                try:
+                    labelled_lines = [
+                        line
+                        for line in labelled_path.read_text(encoding="utf-8").splitlines()
+                        if line.strip()
+                    ]
+                    labelled_pairs = [line.split("\t", 1) for line in labelled_lines]
+                    labelled = {
+                        identifier: int(label) for identifier, label in labelled_pairs
+                    }
+                    labelled_unique = len(labelled) == len(labelled_pairs)
+                except (OSError, ValueError):
+                    labelled = {}
+                    labelled_unique = False
+                expected_labels = {
+                    identifier: int(members[identifier].targets["dna_binding"])
+                    for identifier in selected
+                }
+                labelled_matches = labelled_unique and labelled == expected_labels
+                failures += int(not labelled_matches)
+                result[f"{replicate.name}/{path.stem}"] = {
+                    "size": len(identifiers),
+                    "positive": counts[1],
+                    "negative": counts[0],
+                    "unknown": sorted(unknown),
+                    "non_train": sorted(non_train),
+                    "contains_previous": nested,
+                    "fragmented_groups": fragmented,
+                    "labelled_manifest_matches": labelled_matches,
+                    "leakage_group_count": len(
+                        {
+                            str(members[identifier].partitions.get("leakage_group", ""))
+                            for identifier in selected
+                        }
+                    ),
+                }
+                previous = identifiers
+            if paths and previous != train_ids:
+                failures += 1
+                warnings.append(f"{replicate.name} Train100 does not equal the fixed train split")
         return {"failure_count": failures, "warnings": warnings, "subsets": result}
 
     @staticmethod
@@ -764,8 +876,14 @@ class DNAValidation(lf.Work):
         for split in ("train", "validation", "test"):
             selected = [member for member in members if member.partitions.get("split") == split]
             labels = Counter(int(member.targets["dna_binding"]) for member in selected)
-            phenotypes = Counter(
-                str(member.partitions.get("phenotype", "unavailable")) for member in selected
+            global_phenotypes = Counter(
+                str(member.partitions.get("global_phenotype", "unavailable"))
+                for member in selected
+            )
+            interface_phenotypes = Counter(
+                str(member.partitions.get("interface_phenotype", "unavailable"))
+                for member in selected
+                if int(member.targets["dna_binding"]) == 1
             )
             groups = Counter(str(member.partitions.get("leakage_group", "")) for member in selected)
             sources = Counter(
@@ -788,7 +906,8 @@ class DNAValidation(lf.Work):
                 "positive_fraction": labels[1] / len(selected) if selected else None,
                 "leakage_groups": len(groups),
                 "largest_leakage_group": max(groups.values(), default=0),
-                "phenotypes": dict(sorted(phenotypes.items())),
+                "global_phenotypes": dict(sorted(global_phenotypes.items())),
+                "positive_interface_phenotypes": dict(sorted(interface_phenotypes.items())),
                 "source_datasets": dict(sorted(sources.items())),
                 "continuous": {
                     field: DNAValidation._distribution(values)
@@ -924,16 +1043,15 @@ class DNAValidation(lf.Work):
                 "",
                 "## Dilutions",
                 "",
-                "Only training membership changes. Positive-fraction deviation compares each "
-                "nested subset with full train; phenotype coverage reports stable clusters still "
-                "represented. Validation and test remain the same immutable members.",
+                "Only training membership changes. Every nested view contains complete leakage "
+                "groups, while validation and test remain the same immutable members.",
             ]
         )
         for name, values in payload["dilutions"]["subsets"].items():
             lines.append(
-                f"- **{name}**: {values['size']} proteins, positive fraction "
-                f"{values['positive_fraction']}, {values['leakage_group_count']} leakage groups, "
-                f"phenotype coverage {values['phenotype_coverage_fraction']}."
+                f"- **{name}**: {values['size']} proteins "
+                f"({values['positive']} positive and {values['negative']} negative), "
+                f"{values['leakage_group_count']} complete leakage groups."
             )
         for warning in payload["dilutions"]["warnings"]:
             lines.append(f"- **WARNING**: {warning}")
@@ -966,17 +1084,20 @@ class DNAValidation(lf.Work):
         axes[1].set_ylabel("Group count")
         axes[1].set_title("Leakage-group size distribution")
 
-        phenotype_table = payload["cluster_audit"]["phenotype_by_split"]
-        for axis, prefix, title in (
-            (axes[2], "P", "Positive local phenotypes by split"),
-            (axes[3], "N", "Negative global phenotypes by split"),
+        for axis, table_name, title in (
+            (
+                axes[2],
+                "positive_interface_phenotype_by_split",
+                "Positive local phenotypes by split",
+            ),
+            (axes[3], "global_phenotype_by_split", "Global phenotypes by split"),
         ):
+            phenotype_table = payload["cluster_audit"][table_name]
             phenotypes = sorted(
                 {
                     name
                     for values in phenotype_table.values()
                     for name in values
-                    if name.startswith(prefix)
                 }
             )
             bottom = np.zeros(len(splits))
@@ -1022,15 +1143,13 @@ class DNAValidation(lf.Work):
         dilution_positive = [dilutions[name]["positive"] for name in names]
         dilution_negative = [dilutions[name]["negative"] for name in names]
         positions = np.arange(len(names))
-        coverage = [dilutions[name]["phenotype_coverage_fraction"] for name in names]
         axes[7].plot(
             positions,
-            [np.nan if value is None else value for value in coverage],
+            [dilutions[name]["leakage_group_count"] for name in names],
             marker="o",
         )
         axes[7].set_xticks(positions, names, rotation=45, ha="right")
-        axes[7].set_ylim(0.0, 1.05)
-        axes[7].set_title("Stable phenotype coverage in dilutions")
+        axes[7].set_title("Complete leakage groups in dilutions")
         axes[8].bar(positions, dilution_positive, label="positive")
         axes[8].bar(positions, dilution_negative, bottom=dilution_positive, label="negative")
         axes[8].set_xticks(positions, names, rotation=45, ha="right")
@@ -1053,17 +1172,39 @@ class DNAValidation(lf.Work):
             path: Output PNG path.
         """
         figure, axes = plt.subplots(1, 2, figsize=(11, 5))
-        for axis, name, title in (
-            (axes[0], "positive-phenotypes.csv", "Positive local-interface PCA"),
-            (axes[1], "negative-phenotypes.csv", "Negative global-morphology PCA"),
+        for axis, features_name, labels_name, label_field, title in (
+            (
+                axes[0],
+                "positive-interface-features.csv",
+                "positive-interface-phenotypes.csv",
+                "interface_phenotype",
+                "Positive local-interface PCA",
+            ),
+            (
+                axes[1],
+                "global-features.csv",
+                "global-phenotypes.csv",
+                "global_phenotype",
+                "Global morphology PCA",
+            ),
         ):
-            source = evidence / "clusters" / name
+            feature_source = evidence / "descriptors" / features_name
+            label_source   = evidence / "clusters" / labels_name
             rows: list[dict[str, str]] = []
-            if source.is_file():
-                with source.open("r", encoding="utf-8", newline="") as stream:
+            labels_by_id: dict[str, str] = {}
+            if feature_source.is_file():
+                with feature_source.open("r", encoding="utf-8", newline="") as stream:
                     rows = list(csv.DictReader(stream))
+            if label_source.is_file():
+                with label_source.open("r", encoding="utf-8", newline="") as stream:
+                    labels_by_id = {
+                        str(row["identifier"]): str(row[label_field])
+                        for row in csv.DictReader(stream)
+                    }
             feature_names = sorted(
-                set(rows[0]) - {"identifier", "phenotype"} if rows else set()
+                name
+                for name in (set(rows[0]) - {"identifier"} if rows else set())
+                if all(DNAValidation._finite_csv_value(row.get(name)) for row in rows)
             )
             if len(rows) < 2 or len(feature_names) < 2:
                 axis.text(0.5, 0.5, "Insufficient descriptor support", ha="center", va="center")
@@ -1075,9 +1216,10 @@ class DNAValidation(lf.Work):
                 dtype=np.float64,
             )
             projected = PCA(n_components=2).fit_transform(RobustScaler().fit_transform(matrix))
-            labels = sorted({row["phenotype"] for row in rows})
+            row_labels = [labels_by_id.get(str(row["identifier"]), "unavailable") for row in rows]
+            labels = sorted(set(row_labels))
             for label in labels:
-                mask = np.asarray([row["phenotype"] == label for row in rows])
+                mask = np.asarray([row_label == label for row_label in row_labels])
                 axis.scatter(
                     projected[mask, 0],
                     projected[mask, 1],
@@ -1093,3 +1235,20 @@ class DNAValidation(lf.Work):
         figure.tight_layout()
         figure.savefig(path, dpi=160)
         plt.close(figure)
+
+    @staticmethod
+    def _finite_csv_value(value: str | None) -> bool:
+        """Return whether one CSV scalar is a finite floating-point descriptor.
+
+        Args:
+            value: Possibly absent CSV cell.
+
+        Returns:
+            ``True`` only for a scalar accepted by ``float`` and finite under NumPy.
+        """
+        if value is None:
+            return False
+        try:
+            return bool(np.isfinite(float(value)))
+        except (TypeError, ValueError):
+            return False

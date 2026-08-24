@@ -4,7 +4,7 @@ run: wisdom.Training.Training                       # Same LambdaForge 0.12 Work
 
 with:                                                # Fixed Training.run(...) arguments.
   dataset:                                           # Resolve one immutable managed placement.
-    dataset: wisdom-dna@3                            # Exact leakage-safe release used by v1.
+    dataset: wisdom-dna@4                            # Exact designed release used by v1.
   model_version: 2                                  # Enable only the v2 pooling extension.
   subset: full                                      # Use the complete balanced dataset.
   hidden_dim: 128                                   # Fixed reviewed v1 latent width.

@@ -1,0 +1,275 @@
+{
+  "accepted_refinement_moves": 16,
+  "algorithm": "rare_first_weighted_greedy_with_deterministic_group_moves",
+  "final_objective": 4.301370561611028,
+  "initial_objective": 8.792443186144306,
+  "phenotype_feasibility": {
+    "global_phenotype:G001": {
+      "leakage_group_count": 5,
+      "observed_splits": [
+        "test",
+        "train",
+        "validation"
+      ],
+      "representable_in_all_splits": true
+    },
+    "global_phenotype:G002": {
+      "leakage_group_count": 1,
+      "observed_splits": [
+        "train"
+      ],
+      "representable_in_all_splits": false
+    },
+    "global_phenotype:G003": {
+      "leakage_group_count": 1,
+      "observed_splits": [
+        "train"
+      ],
+      "representable_in_all_splits": false
+    },
+    "global_phenotype:G004": {
+      "leakage_group_count": 2,
+      "observed_splits": [
+        "train"
+      ],
+      "representable_in_all_splits": false
+    },
+    "global_phenotype:G005": {
+      "leakage_group_count": 2,
+      "observed_splits": [
+        "train"
+      ],
+      "representable_in_all_splits": false
+    },
+    "global_phenotype:G006": {
+      "leakage_group_count": 2,
+      "observed_splits": [
+        "train"
+      ],
+      "representable_in_all_splits": false
+    },
+    "global_phenotype:G009": {
+      "leakage_group_count": 1,
+      "observed_splits": [
+        "train"
+      ],
+      "representable_in_all_splits": false
+    },
+    "global_phenotype:G010": {
+      "leakage_group_count": 3,
+      "observed_splits": [
+        "test",
+        "train"
+      ],
+      "representable_in_all_splits": true
+    },
+    "global_phenotype:G011": {
+      "leakage_group_count": 7,
+      "observed_splits": [
+        "test",
+        "train",
+        "validation"
+      ],
+      "representable_in_all_splits": true
+    },
+    "global_phenotype:G012": {
+      "leakage_group_count": 1,
+      "observed_splits": [
+        "train"
+      ],
+      "representable_in_all_splits": false
+    },
+    "global_phenotype:G013": {
+      "leakage_group_count": 2,
+      "observed_splits": [
+        "train"
+      ],
+      "representable_in_all_splits": false
+    },
+    "global_phenotype:G014": {
+      "leakage_group_count": 9,
+      "observed_splits": [
+        "test",
+        "train",
+        "validation"
+      ],
+      "representable_in_all_splits": true
+    },
+    "global_phenotype:G015": {
+      "leakage_group_count": 3,
+      "observed_splits": [
+        "test",
+        "train"
+      ],
+      "representable_in_all_splits": true
+    },
+    "global_phenotype:G016": {
+      "leakage_group_count": 1,
+      "observed_splits": [
+        "train"
+      ],
+      "representable_in_all_splits": false
+    },
+    "global_phenotype:G017": {
+      "leakage_group_count": 1,
+      "observed_splits": [
+        "train"
+      ],
+      "representable_in_all_splits": false
+    },
+    "global_phenotype:G018": {
+      "leakage_group_count": 2,
+      "observed_splits": [
+        "train"
+      ],
+      "representable_in_all_splits": false
+    },
+    "global_phenotype:G019": {
+      "leakage_group_count": 4,
+      "observed_splits": [
+        "test",
+        "train",
+        "validation"
+      ],
+      "representable_in_all_splits": true
+    },
+    "global_phenotype:G020": {
+      "leakage_group_count": 9,
+      "observed_splits": [
+        "test",
+        "train",
+        "validation"
+      ],
+      "representable_in_all_splits": true
+    },
+    "global_phenotype:G021": {
+      "leakage_group_count": 3,
+      "observed_splits": [
+        "train",
+        "validation"
+      ],
+      "representable_in_all_splits": true
+    },
+    "global_phenotype:G022": {
+      "leakage_group_count": 2,
+      "observed_splits": [
+        "train"
+      ],
+      "representable_in_all_splits": false
+    },
+    "global_phenotype:G023": {
+      "leakage_group_count": 1,
+      "observed_splits": [
+        "train"
+      ],
+      "representable_in_all_splits": false
+    },
+    "global_phenotype:G024": {
+      "leakage_group_count": 3,
+      "observed_splits": [
+        "test",
+        "train"
+      ],
+      "representable_in_all_splits": true
+    },
+    "global_phenotype:G025": {
+      "leakage_group_count": 3,
+      "observed_splits": [
+        "test",
+        "train"
+      ],
+      "representable_in_all_splits": true
+    },
+    "global_phenotype:G026": {
+      "leakage_group_count": 2,
+      "observed_splits": [
+        "train"
+      ],
+      "representable_in_all_splits": false
+    },
+    "global_phenotype:G027": {
+      "leakage_group_count": 7,
+      "observed_splits": [
+        "test",
+        "train",
+        "validation"
+      ],
+      "representable_in_all_splits": true
+    },
+    "global_phenotype:G028": {
+      "leakage_group_count": 1,
+      "observed_splits": [
+        "train"
+      ],
+      "representable_in_all_splits": false
+    },
+    "global_phenotype:G029": {
+      "leakage_group_count": 4,
+      "observed_splits": [
+        "test",
+        "train",
+        "validation"
+      ],
+      "representable_in_all_splits": true
+    },
+    "global_phenotype:G030": {
+      "leakage_group_count": 2,
+      "observed_splits": [
+        "train"
+      ],
+      "representable_in_all_splits": false
+    },
+    "interface_phenotype:I001": {
+      "leakage_group_count": 31,
+      "observed_splits": [
+        "test",
+        "train",
+        "validation"
+      ],
+      "representable_in_all_splits": true
+    },
+    "interface_phenotype:I002": {
+      "leakage_group_count": 857,
+      "observed_splits": [
+        "test",
+        "train",
+        "validation"
+      ],
+      "representable_in_all_splits": true
+    },
+    "interface_phenotype:I003": {
+      "leakage_group_count": 17,
+      "observed_splits": [
+        "test",
+        "train",
+        "validation"
+      ],
+      "representable_in_all_splits": true
+    }
+  },
+  "split_counts": {
+    "test": {
+      "negative": 143,
+      "positive": 143,
+      "total": 286
+    },
+    "train": {
+      "negative": 669,
+      "positive": 669,
+      "total": 1338
+    },
+    "validation": {
+      "negative": 143,
+      "positive": 143,
+      "total": 286
+    }
+  },
+  "weights": {
+    "split_class_weight": 2.0,
+    "split_global_phenotype_weight": 0.5,
+    "split_interface_phenotype_weight": 0.5,
+    "split_nuisance_weight": 0.25,
+    "split_size_weight": 1.0,
+    "split_source_weight": 0.25
+  }
+}

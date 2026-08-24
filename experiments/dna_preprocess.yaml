@@ -1,67 +1,107 @@
-# Curate, preprocess, validate, and publish WISDOM-DNA with LambdaForge 0.12 Works.
-name: wisdom-dna-preprocess                           # Stable identity of the complete two-Work execution.
+# Design, geometrically preprocess, validate, and publish one immutable WISDOM-DNA release.
+name: wisdom-dna-preprocess                              # Stable identity of the complete execution.
 
-steps:                                                # Run curation first, then pass its named artifact directly.
-  - name: curate                                      # Split-free public-evidence and structure-selection Work.
-    run: wisdom.preprocessing.Selection.Selection     # Direct LambdaForge Work subclass; no function/task graph.
-    with:                                             # Keyword arguments passed to Selection.run(...).
-      public_sources:                                 # Fingerprint and stage the pinned source definition.
-        file: ../data/dna/public-sources.json         # DyProL, BTD-Combo, and BioLiP release/checksum contract.
-      workers: 72                                     # I/O threads; two per CPU overlap bounded network latency.
-      requests_per_second: 4.0                        # Aggregate public-service request-start ceiling.
-    resources:                                        # Absolute scheduler reservation for this Work.
-      cpu: 36                                         # Reserve 36 CPU cores for parsing and I/O orchestration.
-      memory: 64GiB                                   # Host-memory ceiling for concurrent curation records.
-      time: 24h                                       # Maximum scheduler wall time for public curation.
+steps:                                                   # Exact artifact flow in declared execution order.
+  - name: design                                         # Fix all scientific decisions before surface geometry.
+    run: wisdom.preprocessing.DatasetDesign.DatasetDesign # Complete raw-to-canonical design Work.
+    with:                                                # Arguments passed to DatasetDesign.run(...).
+      raw_records: {file: ../data/dna/raw/raw.jsonl}      # Explicit candidate, label evidence, and sequence rows.
+      workers: 36                                        # PDB-analysis workers and specialist-tool threads.
+      requests_per_second: 4.0                           # Select four aggregate RCSB request starts per second.
+      retries: 5                                         # Five retries after each transfer's initial attempt.
+      output_directory: data/dna/design                  # Publish a verified convenient copy below project root.
+      overwrite_output: true                             # Replace that copy atomically only after success.
+      balance_classes: true                              # Build the ratio-controlled canonical population.
+      positive_negative_ratio: 1.0                       # Select one positive per negative by default.
+      keep_all_negatives: true                           # Preserve every curated negative.
+      retain_core_positives: true                        # Give BTD-Core positives priority.
+      sequence_identity: 0.30                            # MMseqs2 hard-edge identity threshold.
+      sequence_coverage: 0.80                            # Bilateral MMseqs2 coverage threshold.
+      sequence_evalue: 0.001                             # Maximum MMseqs2 E-value.
+      foldseek_probability: 0.90                         # Foldseek homology-probability threshold.
+      foldseek_tmscore: 0.75                             # Bilateral normalized TM-score threshold.
+      foldseek_coverage: 0.80                            # Bilateral Foldseek coverage threshold.
+      foldseek_evalue: 0.001                             # Maximum Foldseek E-value.
+      group_same_pdb: true                               # Join candidates from the same deposition.
+      giant_group_fraction_warning: 0.05                 # Warn for a component covering at least 5% of raw data.
+      global_min_cluster_size: 15                        # Stable minimum global phenotype support.
+      global_min_samples: 2                              # Preserve sparse families without forced labels.
+      interface_min_cluster_size: 20                     # Minimum positive-interface cluster size.
+      interface_min_samples: 5                           # Interface HDBSCAN density conservativeness.
+      phenotype_stability_minimum: 0.60                  # Minimum median local-grid ARI.
+      phenotype_noise_warning: 0.50                      # Warn when half the selected set remains global noise.
+      interface_region_distance: 8.0                     # Interface residue-link distance in Å.
+      maximum_resolution: 4.0                            # Canonical X-ray/cryo-EM resolution ceiling in Å.
+      train_fraction: 0.70                               # Target training fraction.
+      validation_fraction: 0.15                          # Target validation fraction.
+      test_fraction: 0.15                                # Target test fraction.
+      split_size_weight: 1.0                             # Objective weight for split sizes.
+      split_class_weight: 2.0                            # Objective weight for labels.
+      split_global_phenotype_weight: 0.5                 # Weight for global phenotypes.
+      split_interface_phenotype_weight: 0.5              # Weight for positive-interface phenotypes.
+      split_source_weight: 0.25                          # Weight for positive data origin.
+      split_nuisance_weight: 0.25                        # Weight for technical covariate means.
+      split_refinement_steps: 500                        # Maximum deterministic post-greedy moves.
+      split_tolerance: 0.05                              # Relative split-size warning boundary.
+      dilution_fractions: [1.0, 0.75, 0.50, 0.25, 0.10] # Nested training-only fractions.
+      dilution_replicates: 1                             # Number of nested group rankings.
+      smd_warning: 0.25                                  # SMD warning threshold.
+      smd_strong_warning: 0.50                           # Strong SMD warning threshold.
+      ks_warning: 0.20                                   # KS warning threshold.
+      cramers_v_warning: 0.20                            # Cramer's V warning threshold.
+      technical_shortcut_auc_warning: 0.75               # Technical-only group-CV AUROC warning.
+      seed: 2026                                         # Deterministic scientific seed.
+      mmseqs_executable: mmseqs                          # MMseqs2 binary name/path.
+      foldseek_executable: foldseek                      # Foldseek binary name/path.
+    resources:                                           # Reservation for the design phase.
+      cpu: 36                                            # Matches maximum worker/tool concurrency.
+      memory: 96GiB                                      # Structures, descriptors, and clustering.
+      storage: 100GiB                                    # Cache and specialist-tool scratch.
+      time: 24h                                          # Design wall-time ceiling.
 
-    # Selection.run option reference:
-    # public_sources has no default and must be a LambdaForge {file: ...} marker.
-    # workers=72, requests_per_second=4.0, and retries=5 are positive; candidate caps default to
-    # zero (complete releases). contact_distance=4.5 Å, minimum_residues=30,
-    # minimum_interface_residues=2, minimum_sequence_coverage=0.80, maximum_resolution=4.0 Å, and
-    # challenge_aspect_ratio=4.0 are the true Work defaults. This step publishes only named
-    # curation/report artifacts; it creates no split and no DatasetVersion.
+    # DatasetDesign exposes exactly the parameters above. Defaults/constraints are documented in
+    # experiments/dna_design.yaml. The step publishes one dataset-design directory containing its
+    # report, never a DatasetVersion. output_directory=null and overwrite_output=false are the safe
+    # component defaults; this recipe deliberately maintains data/dna/design. Relative destinations
+    # on a remote Job are remote workspace paths, so use an absolute durable cluster path when the
+    # copy must survive cleanup. maximum_resolution=4.0 Å by default and null disables that filter.
+    # phenotype_noise_warning=0.50 by default; it only controls reporting and accepts [0,1].
+    # LambdaForge resumable-map checkpoints and managed-file dependencies safely reuse completed
+    # per-PDB analyses; its cache/checkpoint services own atomic writes.
 
-  - name: preprocess                                  # Geometry, annotation, partition, validation, publication.
-    run: wisdom.preprocessing.Preprocessing.Preprocessing # Direct LambdaForge Work subclass.
-    with:                                             # Keyword arguments passed to Preprocessing.run(...).
-      curation:                                       # Consume the exact successful upstream artifact.
-        from: curate.curation                         # LambdaForge resolves this to a typed immutable Path.
-      dataset_name: wisdom-dna                        # Stable Registry family name.
-      dataset_version: "3"                            # Immutable release; change when intended content changes.
-      workers: 36                                     # Spawn one CPU process per reserved core for protein records.
-      threads: 36                                     # Threads granted to each dataset-level specialist tool.
-      sequence_identity: 0.30                         # MMseqs2 identity threshold for a leakage edge.
-      sequence_coverage: 0.80                         # Require at least 80% bilateral aligned coverage.
-      structure_probability: 0.50                     # Foldseek homology-probability threshold for an edge.
-      train_fraction: 0.70                            # Target fraction; leakage groups remain indivisible.
-      validation_fraction: 0.15                       # Target model-development fraction.
-      test_fraction: 0.15                             # Target untouched final-evaluation fraction.
-      dilution_sizes: [400, 200, 100, 75, 50, 25]    # Nested absolute training views; val/test never change.
-    resources:                                        # Absolute scheduler reservation for this Work.
-      cpu: 36                                         # Make all 36 requested CPU cores available to workers/tools.
-      memory: 128GiB                                  # Peak host memory for surfaces and specialist pair search.
-      time: 24h                                       # Maximum scheduler wall time for dataset construction.
+  - name: preprocess                                     # Generate geometry and publish the fixed design.
+    run: wisdom.preprocessing.Preprocessing.Preprocessing # No balancing, clustering, or split logic remains here.
+    with:                                                # Arguments passed to Preprocessing.run(...).
+      design: {from: design.dataset-design}              # Exact upstream catalog, groups, splits, and dilutions.
+      dataset_name: wisdom-dna                            # Stable LambdaForge Registry family.
+      dataset_version: "4"                               # Immutable release; bump for intended content changes.
+      workers: 36                                        # One independent protein process per reserved CPU.
+      requests_per_second: 4.0                           # Aggregate RCSB request-start ceiling across threads.
+      retries: 5                                         # Retry each missing structure five times after failure.
+      surface_resolution: 1.0                            # Target surface point spacing in Å.
+      probe_radius: 1.4                                  # Solvent probe radius in Å.
+      atom_radius: 6.0                                   # Sparse atom-edge cutoff in Å.
+      atom_surface_radius: 6.0                           # Sparse atom-to-surface edge cutoff in Å.
+      curvature_scales: [2.5, 5.0]                       # Curvature fit radii in resolution units.
+      positive_gap: 1.4                                  # Largest confidently DNA-contacting gap in Å.
+      negative_gap: 3.0                                  # Smallest confidently non-contacting gap in Å.
+      sensitivity_gaps: [1.0, 1.4, 2.0]                  # Evaluation-only positive cutoffs in Å.
+    resources:                                           # Geometry/annotation/publication reservation.
+      cpu: 36                                            # Exact ceiling checked against workers.
+      memory: 128GiB                                     # Concurrent protein surfaces and validation.
+      storage: 150GiB                                    # Structures, NPZs, sidecars, and checkpoints.
+      time: 24h                                          # Preprocessing wall-time ceiling.
 
-    # Preprocessing.run geometry/annotation option reference:
-    # curation has no default and is supplied by {from: curate.curation}. dataset_name="wisdom-dna"
-    # and dataset_version="3" are selected here; workers=36 and threads=36 are positive integers.
+    # Preprocessing.run option reference:
+    # design has no default. dataset_name="wisdom-dna", dataset_version="4", workers=36,
+    # requests_per_second=4.0, retries=5,
     # surface_resolution=1.0 Å, probe_radius=1.4 Å, atom_radius=6.0 Å,
     # atom_surface_radius=6.0 Å, curvature_scales=(2.5,5.0), positive_gap=1.4 Å,
-    # negative_gap=3.0 Å, and sensitivity_gaps=(1.0,1.4,2.0) are true Work defaults.
-    #
-    # Preprocessing.run leakage/partition option reference:
-    # sequence_identity=0.30, sequence_coverage=0.80, sequence_evalue=1e-3,
-    # structure_probability=0.50, and structure_evalue=1e-3 define retained specialist edges.
-    # train/validation/test fractions default to 0.70/0.15/0.15 and must sum to one.
-    # phenotype_min_cluster_size=15, phenotype_min_samples=5, and
-    # phenotype_stability_minimum=0.60 control HDBSCAN stability. dilution_sizes defaults to
-    # (400,200,100,75,50,25); partition_seed=2026 fixes deterministic ties.
-    # mmseqs_executable="mmseqs" and foldseek_executable="foldseek" must resolve to the documented
-    # specialist binaries.
+    # negative_gap=3.0 Å, and sensitivity_gaps=(1.0,1.4,2.0) are true defaults. workers is positive
+    # and <=resources.cpu; geometry radii/scales are positive (probe non-negative), gaps are
+    # non-negative, and negative_gap must exceed positive_gap. requests_per_second must be finite
+    # and positive; retries is a non-negative integer and counts attempts after the first request.
 
-# LambdaForge 0.12 step documents accept name, run, with, resources, seeds, search, and objective.
-# Levels are sequential unless an explicit parallel group is used. Named output references require
-# one unambiguous upstream Run. Work/Attempt paths, checkpoints, and caches are framework-owned;
-# output_root, kind, task, inputs, outputs, max_parallel, and DatasetRecipe stages do not exist.
-# Resource fields are cpu, memory, gpu, gpu_memory, time, storage, and processes<=cpu.
+# LambdaForge 0.12 scripts use name/run/with/resources or a sequential steps list. Typed {file}
+# and {from} values stage immutable input bytes and exact upstream outputs. Removed fields such as
+# kind, schema_version, task, inputs, outputs, and DatasetRecipe stages are intentionally absent.

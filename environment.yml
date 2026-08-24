@@ -1,0 +1,19 @@
+name: wisdom                 # Stable Conda environment name used by install.sh.
+
+channels:                    # Ordered package repositories resolved by Conda/Mamba.
+  - conda-forge              # Python, numerical, and general scientific packages.
+  - bioconda                 # Maintained MMseqs2 and Foldseek bioinformatics packages.
+
+dependencies:                # Base non-PyPI tools required before editable WISDOM installation.
+  - python=3.11              # Supported interpreter with current scientific binary availability.
+  - pip                      # Installs local LambdaForge/WISDOM checkouts in editable mode.
+  - biopython>=1.84          # ProteinAnalysis sequence descriptors used by DatasetDesign.
+  - foldseek                 # Full-RAW protein-structure similarity and leakage edges.
+  - mmseqs2                  # Full-RAW protein-sequence similarity and leakage edges.
+
+# Environment option reference:
+# name may be any valid Conda environment name; install.sh deliberately expects "wisdom" here.
+# channels are searched in the declared order. Python 3.10+ is supported by WISDOM, while 3.11 is
+# pinned for this reproducible environment. pip, Biopython, Foldseek, and MMseqs2 are mandatory;
+# their transitive versions are solved by the two channels and exact installed versions are stored
+# in each LambdaForge Work environment/provenance record.

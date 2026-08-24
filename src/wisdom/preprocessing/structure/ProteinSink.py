@@ -21,7 +21,6 @@ class ProteinSink:
         identifier_input: str = "protein_identifiers",
         dataset_output  : str = "processed",
         report_output   : str = "report",
-        download_output : str | None = None,
     ) -> None:
         """Bind the logical task input/output names used by the sink.
 
@@ -29,22 +28,17 @@ class ProteinSink:
             identifier_input: Named TXT input used to restore authored record order in the report.
             dataset_output: Named output directory receiving per-protein NPZ files.
             report_output: Named output file receiving the compatibility human-readable report.
-            download_output: Optional named structure-cache output declared as a downstream
-                artifact so another recipe stage can reuse the exact downloaded coordinate bytes.
 
         Raises:
             ValueError: If any logical name is empty.
         """
         names = (identifier_input, dataset_output, report_output)
-        if any(not name.strip() for name in names) or (
-            download_output is not None and not download_output.strip()
-        ):
+        if any(not name.strip() for name in names):
             raise ValueError("logical input and output names cannot be empty")
 
         self.identifier_input = identifier_input
         self.dataset_output   = dataset_output
         self.report_output    = report_output
-        self.download_output  = download_output
 
         self.records  : dict[str, dict[str, Any]]                      = {}
         self._existing: dict[str, tuple[Path, dict[str, Any]]] | None = None
@@ -221,13 +215,7 @@ class ProteinSink:
                 f"for the {counts['failed']} recorded failure(s)"
             )
 
-        declarations = [output_root, report_path]
-        if self.download_output is not None:
-            download_root = context.output(self.download_output)
-            if not download_root.is_dir():
-                raise RuntimeError("configured structure cache output does not exist")
-            declarations.append(download_root)
-        return tuple(declarations)
+        return output_root, report_path
 
     def _existing_records(
         self,

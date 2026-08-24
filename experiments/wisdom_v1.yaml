@@ -4,7 +4,7 @@ run: wisdom.Training.Training                       # LambdaForge 0.12 train/val
 
 with:                                                # Fixed Training.run(...) arguments.
   dataset:                                           # Resolve one immutable managed placement.
-    dataset: wisdom-dna@3                            # Post-geometry leakage-safe benchmark release.
+    dataset: wisdom-dna@4                            # Designed leakage-safe benchmark release.
   model_version: 1                                  # Select the v1 fixed-MAX hypothesis.
   subset: full                                      # Use all selected training members.
   pooling_type: max                                 # Required invariant for v1.
@@ -15,7 +15,7 @@ with:                                                # Fixed Training.run(...) a
 # Fixed Training.run option reference:
 # dataset has no default. model_version=1, subset="full", pooling_type="max", batch_size=2,
 # epochs=100, data_workers=0, and seed=0. LambdaForge supplies each seed below. Valid subsets are
-# "full" or names published in member metadata, for example "train-100" and "train-400".
+# "full" or names published in member metadata, for example "replicate-00/train-25".
 
 seeds: [7, 17, 27]                                  # Repeat candidates to expose seed variance.
 

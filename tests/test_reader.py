@@ -15,12 +15,12 @@ from wisdom.preprocessing.structure.StructureCache import StructureCache
 
 def _read(path: Path, config: PreprocessConfig | None = None):
     selected_config = config or PreprocessConfig()
-    source = StructureCache(path.parent, download=False).resolve(str(path), path.parent)
+    source = StructureCache(path.parent).resolve(str(path), path.parent)
     return ProteinReader(selected_config).read(source)
 
 
 def test_underscore_chain_identifier_format(tmp_path: Path) -> None:
-    cache = StructureCache(tmp_path, download=False)
+    cache = StructureCache(tmp_path)
     with pytest.raises(ValueError, match="identifier"):
         cache.resolve("XYZ#A,B", tmp_path)
 
@@ -48,7 +48,7 @@ def test_reads_pdb_mmcif_and_gzip(request: pytest.FixtureRequest, fixture_name: 
 
 def test_chain_selection_and_source_selector_precedence(pdb_path: Path) -> None:
     config = PreprocessConfig(chains=["B"])
-    source = StructureCache(pdb_path.parent, download=False).resolve(str(pdb_path), pdb_path.parent)
+    source = StructureCache(pdb_path.parent).resolve(str(pdb_path), pdb_path.parent)
     chain_b, metadata_b = ProteinReader(config).read(source)
     chain_a, metadata_a = ProteinReader(config).read(replace(source, chains=("A",)))
     assert [chain.id for chain in chain_b.chains] == ["B"]
@@ -62,7 +62,7 @@ def test_invalid_model_chain_and_filtering(pdb_path: Path) -> None:
         _read(pdb_path, PreprocessConfig(model_index=1))
 
     config = PreprocessConfig()
-    source = StructureCache(pdb_path.parent, download=False).resolve(str(pdb_path), pdb_path.parent)
+    source = StructureCache(pdb_path.parent).resolve(str(pdb_path), pdb_path.parent)
     with pytest.raises(ValueError, match="requested chains"):
         ProteinReader(config).read(replace(source, chains=("Z",)))
 

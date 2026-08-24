@@ -1,0 +1,33 @@
+{
+  "leakage_group_count": 1754,
+  "raw": {
+    "negative": 955,
+    "positive": 3529,
+    "total": 4484
+  },
+  "selected": {
+    "negative": 955,
+    "positive": 955,
+    "total": 1910
+  },
+  "splits": {
+    "test": {
+      "negative": 143,
+      "positive": 143,
+      "total": 286
+    },
+    "train": {
+      "negative": 669,
+      "positive": 669,
+      "total": 1338
+    },
+    "validation": {
+      "negative": 143,
+      "positive": 143,
+      "total": 286
+    }
+  },
+  "technical_shortcut_auc": 0.6380691318768673,
+  "verdict": "PASS",
+  "warning_count": 19
+}

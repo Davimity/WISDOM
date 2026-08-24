@@ -255,10 +255,10 @@ def test_real_preprocessing_output_reaches_a_finite_protein_logit(
     identifiers.write_text(f"{pdb_path}\n", encoding="utf-8")
     context = ProcessingWorkspace(
         tmp_path,
-        inputs={"protein_identifiers": identifiers},
-        outputs={"downloads": tmp_path / "raw"},
+        inputs={"protein_identifiers": identifiers, "structures": pdb_path.parent},
+        outputs={},
     )
-    transformed = PreprocessPipeline(config, download=False).transform(
+    transformed = PreprocessPipeline(config).transform(
         ProcessingRecord(
             key=str(pdb_path),
             value=str(pdb_path),

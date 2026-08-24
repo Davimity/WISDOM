@@ -35,9 +35,8 @@ def _context(run_dir: Path, id_file: Path, config: PreprocessConfig) -> Processi
     run_dir.mkdir(parents=True, exist_ok=True)
     return ProcessingWorkspace(
         run_dir,
-        inputs={"protein_identifiers": id_file},
+        inputs={"protein_identifiers": id_file, "structures": id_file.parent},
         outputs={
-            "downloads": run_dir / "raw",
             "processed": run_dir / "processed",
             "report": run_dir / "preprocessing-report.json",
         },
@@ -55,7 +54,7 @@ def _run(
     config = PreprocessConfig(chains=chains, surface_resolution=resolution)
     context  = _context(run_dir, id_file, config)
     records  = tuple(ProteinSource().records(context))
-    pipeline = PreprocessPipeline(config, download=False)
+    pipeline = PreprocessPipeline(config)
     operation = partial(pipeline.process, context=context)
     with ThreadPoolExecutor(max_workers=workers) as pool:
         results = tuple(pool.map(operation, records))
@@ -64,7 +63,7 @@ def _run(
     sink.records = {
         record.key: dict(record.value)
         for value in results
-        for record in (ProcessingRecord.restore(value),)
+        for record in (ProcessingRecord(value),)
     }
     sink.finalize(context)
     return json.loads((run_dir / "preprocessing-report.json").read_text(encoding="utf-8"))

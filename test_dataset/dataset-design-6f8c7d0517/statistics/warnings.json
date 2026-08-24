@@ -1,0 +1,163 @@
+{
+  "warnings": [
+    {
+      "feature": "gravy",
+      "feature_category": "model_visible_global",
+      "interpretation": "A model-visible difference may be real biology or a global shortcut; it is not automatically bias.",
+      "kind": "class_continuous_shift",
+      "severity": "strong_warning",
+      "threshold": 0.25,
+      "value": -0.6545136870709323
+    },
+    {
+      "feature": "net_charge_at_pH_7",
+      "feature_category": "model_visible_global",
+      "interpretation": "A model-visible difference may be real biology or a global shortcut; it is not automatically bias.",
+      "kind": "class_continuous_shift",
+      "severity": "strong_warning",
+      "threshold": 0.25,
+      "value": 0.7198400109772075
+    },
+    {
+      "feature": "packing_density",
+      "feature_category": "model_visible_global",
+      "interpretation": "A model-visible difference may be real biology or a global shortcut; it is not automatically bias.",
+      "kind": "class_continuous_shift",
+      "severity": "strong_warning",
+      "threshold": 0.25,
+      "value": -0.5222231223805275
+    },
+    {
+      "feature": "positive_residue_fraction",
+      "feature_category": "model_visible_global",
+      "interpretation": "A model-visible difference may be real biology or a global shortcut; it is not automatically bias.",
+      "kind": "class_continuous_shift",
+      "severity": "strong_warning",
+      "threshold": 0.25,
+      "value": 0.991481360229764
+    },
+    {
+      "feature": "theoretical_isoelectric_point",
+      "feature_category": "model_visible_global",
+      "interpretation": "A model-visible difference may be real biology or a global shortcut; it is not automatically bias.",
+      "kind": "class_continuous_shift",
+      "severity": "strong_warning",
+      "threshold": 0.25,
+      "value": 0.9388543755450675
+    },
+    {
+      "feature": "origin",
+      "interpretation": "This category is associated with the label. Origin/method associations are technical confounding risks; phenotype associations are descriptive.",
+      "kind": "class_categorical_association",
+      "severity": "warning",
+      "threshold": 0.2,
+      "value": 0.886795398107401
+    },
+    {
+      "feature": "compactness",
+      "feature_category": "model_visible_global",
+      "interpretation": "A model-visible difference may be real biology or a global shortcut; it is not automatically bias.",
+      "kind": "class_continuous_shift",
+      "severity": "warning",
+      "threshold": 0.25,
+      "value": -0.336987035495873
+    },
+    {
+      "feature": "hydrophobic_residue_fraction",
+      "feature_category": "model_visible_global",
+      "interpretation": "A model-visible difference may be real biology or a global shortcut; it is not automatically bias.",
+      "kind": "class_continuous_shift",
+      "severity": "warning",
+      "threshold": 0.25,
+      "value": -0.4198888452358586
+    },
+    {
+      "feature": "release_year",
+      "feature_category": "technical_nuisance",
+      "interpretation": "A technical difference is a possible nuisance confounder.",
+      "kind": "class_continuous_shift",
+      "severity": "warning",
+      "threshold": 0.25,
+      "value": 0.29220657431437663
+    },
+    {
+      "feature": "compactness",
+      "interpretation": "Positive and negative empirical distributions differ substantially.",
+      "kind": "class_distribution_shift",
+      "severity": "warning",
+      "threshold": 0.2,
+      "value": 0.23664921465968586
+    },
+    {
+      "feature": "gravy",
+      "interpretation": "Positive and negative empirical distributions differ substantially.",
+      "kind": "class_distribution_shift",
+      "severity": "warning",
+      "threshold": 0.2,
+      "value": 0.2649214659685864
+    },
+    {
+      "feature": "net_charge_at_pH_7",
+      "interpretation": "Positive and negative empirical distributions differ substantially.",
+      "kind": "class_distribution_shift",
+      "severity": "warning",
+      "threshold": 0.2,
+      "value": 0.38534031413612563
+    },
+    {
+      "feature": "packing_density",
+      "interpretation": "Positive and negative empirical distributions differ substantially.",
+      "kind": "class_distribution_shift",
+      "severity": "warning",
+      "threshold": 0.2,
+      "value": 0.2994764397905759
+    },
+    {
+      "feature": "positive_residue_fraction",
+      "interpretation": "Positive and negative empirical distributions differ substantially.",
+      "kind": "class_distribution_shift",
+      "severity": "warning",
+      "threshold": 0.2,
+      "value": 0.4387434554973822
+    },
+    {
+      "feature": "radius_of_gyration_normalized",
+      "interpretation": "Positive and negative empirical distributions differ substantially.",
+      "kind": "class_distribution_shift",
+      "severity": "warning",
+      "threshold": 0.2,
+      "value": 0.23664921465968586
+    },
+    {
+      "feature": "release_year",
+      "interpretation": "Positive and negative empirical distributions differ substantially.",
+      "kind": "class_distribution_shift",
+      "severity": "warning",
+      "threshold": 0.2,
+      "value": 0.20732984293193718
+    },
+    {
+      "feature": "resolution",
+      "interpretation": "Positive and negative empirical distributions differ substantially.",
+      "kind": "class_distribution_shift",
+      "severity": "warning",
+      "threshold": 0.2,
+      "value": 0.27872447582537946
+    },
+    {
+      "feature": "theoretical_isoelectric_point",
+      "interpretation": "Positive and negative empirical distributions differ substantially.",
+      "kind": "class_distribution_shift",
+      "severity": "warning",
+      "threshold": 0.2,
+      "value": 0.39267015706806285
+    },
+    {
+      "interpretation": "A large transitive homology component limits independent split balance; it was kept intact because leakage takes priority over balance.",
+      "kind": "giant_leakage_group",
+      "severity": "warning",
+      "threshold": 0.05,
+      "value": 0.060437109723461196
+    }
+  ]
+}
