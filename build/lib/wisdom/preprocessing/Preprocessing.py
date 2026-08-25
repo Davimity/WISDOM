@@ -1,20 +1,30 @@
-"""LambdaForge 0.12 Work for WISDOM-DNA geometry, annotation, and publication."""
+"""Generate WISDOM geometry/annotations for one fixed DatasetDesign artifact."""
 
 from __future__ import annotations
 
+import csv
+import gzip
+import hashlib
+import json
+import math
+import os
 import shutil
+import time
 from collections.abc import Iterable, Mapping, Sequence
 from functools import partial
 from pathlib import Path
+from threading import Event, Thread
 from typing import Any
+from uuid import uuid4
 
+import gemmi
 import lambdaforge as lf
-from lambdaforge.data import DatasetIndex
+from lambdaforge.data import DatasetAsset, DatasetIndex, DatasetMember
+from lambdaforge.work import ManagedFile, RateLimit
 
 from wisdom.preprocessing.dna.DNAAnnotationSink import DNAAnnotationSink
 from wisdom.preprocessing.dna.DNAAnnotationSource import DNAAnnotationSource
 from wisdom.preprocessing.dna.DNAAnnotationTransform import DNAAnnotationTransform
-from wisdom.preprocessing.dna.DNAPartitionTask import DNAPartitionTask
 from wisdom.preprocessing.dna.DNAValidation import DNAValidation
 from wisdom.preprocessing.ProcessingRecord import ProcessingRecord
 from wisdom.preprocessing.ProcessingWorkspace import ProcessingWorkspace
@@ -25,109 +35,178 @@ from wisdom.preprocessing.structure.ProteinSource import ProteinSource
 
 
 class Preprocessing(lf.Work):
-    """Build and publish the complete immutable WISDOM-DNA DatasetVersion."""
+    """Generate geometry/sidecars and publish the immutable designed WISDOM-DNA dataset."""
+
+    _download_retries    : int
+    _structure_rate_limit: RateLimit
 
     def run(
         self,
-        curation                    : Path,
-        dataset_name                : str = "wisdom-dna",
-        dataset_version             : str = "3",
-        workers                     : int = 36,
-        threads                     : int = 36,
-        surface_resolution          : float = 1.0,
-        probe_radius                : float = 1.4,
-        atom_radius                 : float = 6.0,
-        atom_surface_radius         : float = 6.0,
-        curvature_scales            : Sequence[float] = (2.5, 5.0),
-        positive_gap                : float = 1.4,
-        negative_gap                : float = 3.0,
-        sensitivity_gaps            : Sequence[float] = (1.0, 1.4, 2.0),
-        sequence_identity           : float = 0.30,
-        sequence_coverage           : float = 0.80,
-        sequence_evalue             : float = 1e-3,
-        structure_probability       : float = 0.50,
-        structure_evalue            : float = 1e-3,
-        train_fraction              : float = 0.70,
-        validation_fraction         : float = 0.15,
-        test_fraction               : float = 0.15,
-        phenotype_min_cluster_size  : int = 15,
-        phenotype_min_samples       : int = 5,
-        phenotype_stability_minimum : float = 0.60,
-        dilution_sizes              : Sequence[int] = (400, 200, 100, 75, 50, 25),
-        partition_seed              : int = 2026,
-        mmseqs_executable           : str = "mmseqs",
-        foldseek_executable         : str = "foldseek",
+        design              : Path,
+        dataset_name        : str             = "wisdom-dna",
+        dataset_version     : str             = "4",
+        workers             : int             = 36,
+        requests_per_second : float           = 4.0,
+        retries             : int             = 5,
+        progress_log_seconds: float           = 120.0,
+        surface_resolution  : float           = 1.0,
+        probe_radius        : float           = 1.4,
+        atom_radius         : float           = 6.0,
+        atom_surface_radius : float           = 6.0,
+        curvature_scales    : Sequence[float] = (2.5, 5.0),
+        positive_gap        : float           = 1.4,
+        negative_gap        : float           = 3.0,
+        sensitivity_gaps    : Sequence[float] = (1.0, 1.4, 2.0),
     ) -> dict[str, Any]:
-        """Generate geometry and DNA sidecars, partition, validate, and publish the dataset.
+        """Process only canonical members and publish their fixed design metadata.
 
-        The Work consumes a frozen split-free curation. LambdaForge ``self.map`` distributes
-        independent geometry and annotation records across spawned CPU workers. Each worker writes
-        validated scientific files into Work checkpoints and returns a JSON audit row, preventing
-        large NumPy arrays from crossing process boundaries. Dataset-level specialist tools then
-        form leakage groups and phenotype strata, validation audits every member, and
-        ``self.outputs.dataset`` performs the only immutable publication.
+        DatasetDesign already fixed balancing, full-raw leakage groups, physical phenotypes,
+        train/validation/test, and nested training dilutions. This Work cannot recompute those
+        decisions. LambdaForge ``self.map`` distributes independent geometry and annotation
+        records across spawned workers. Each WISDOM sink revalidates source/configuration hashes,
+        schemas, and numerical invariants before resuming a large NPZ; the framework map therefore
+        remains intentionally stateless and cannot bypass this stricter scientific boundary.
 
         Args:
-            curation: Curation artifact with ``curated-catalog.csv`` and
-                ``curated-proteins.txt``.
-            dataset_name: Stable LambdaForge Registry dataset name.
-            dataset_version: Immutable content release label.
+            design: Exact ``dataset-design`` artifact containing ``catalog.csv``, fixed splits,
+                dilution manifests, pair evidence, statistics, and provenance.
+            dataset_name: Stable LambdaForge Dataset Registry name.
+            dataset_version: New immutable version; conflicting bytes are never overwritten.
             workers: Spawned CPU workers for independent geometry and annotation records.
-            threads: Threads passed to MMseqs2, Foldseek, and HDBSCAN.
-            surface_resolution: Target solvent-surface spacing in ångströms.
-            probe_radius: Solvent probe radius in ångströms.
-            atom_radius: Sparse atom-graph cutoff in ångströms.
-            atom_surface_radius: Sparse surface-to-atom cutoff in ångströms.
-            curvature_scales: Positive geodesic curvature-fit radii in ångströms.
-            positive_gap: Largest DNA-to-surface gap considered confidently positive in Å.
-            negative_gap: Smallest gap considered confidently negative in Å.
-            sensitivity_gaps: Alternative evaluation-only positive cutoffs in ångströms.
-            sequence_identity: Minimum bilateral MMseqs2 pair identity fraction.
-            sequence_coverage: Minimum aligned fraction of both sequences.
-            sequence_evalue: Largest accepted MMseqs2 expectation value.
-            structure_probability: Minimum Foldseek homology probability.
-            structure_evalue: Largest accepted Foldseek expectation value.
-            train_fraction: Target training membership fraction.
-            validation_fraction: Target model-development membership fraction.
-            test_fraction: Target final-evaluation membership fraction.
-            phenotype_min_cluster_size: Smallest HDBSCAN physical cluster.
-            phenotype_min_samples: HDBSCAN core-neighbour parameter.
-            phenotype_stability_minimum: Median parameter-grid ARI required for phenotype labels.
-            dilution_sizes: Absolute sizes for nested training-only subsets.
-            partition_seed: Stable group-assignment and dilution-order seed.
-            mmseqs_executable: Required MMseqs2 executable name or path.
-            foldseek_executable: Required Foldseek executable name or path.
+            requests_per_second: Aggregate RCSB request-start limit for missing structures.
+            retries: Additional LambdaForge download attempts after the first failure.
+            progress_log_seconds: Seconds between concise heartbeat lines during parallel maps.
+            surface_resolution: Target solvent-surface point spacing in ångströms.
+            probe_radius: Solvent probe radius added to atom radii in ångströms.
+            atom_radius: Sparse atom-graph neighborhood cutoff in ångströms.
+            atom_surface_radius: Sparse surface-to-atom communication cutoff in ångströms.
+            curvature_scales: Positive fit radii as multiples of surface resolution.
+            positive_gap: Largest DNA-to-surface gap confidently positive in ångströms.
+            negative_gap: Smallest DNA-to-surface gap confidently negative in ångströms.
+            sensitivity_gaps: Additional positive cutoffs retained for evaluation sensitivity.
 
         Returns:
-            Published dataset record plus geometry, partition, and validation summaries.
+            Published dataset record, member/group counts, and validation verdict.
 
         Raises:
-            ValueError: If curation or scientific parameters violate their contracts.
-            RuntimeError: If processing, specialist tools, validation, or publication fails.
-            OSError: If an immutable input or atomic output cannot be accessed.
+            ValueError: If design, identity, concurrency, or scientific parameters fail.
+            RuntimeError: If geometry, annotation, validation, or publication fails.
+            OSError: If an immutable input or atomic output cannot be read or written.
         """
-        curation = curation.resolve()
-        required = ("curated-catalog.csv", "curated-proteins.txt")
-        missing  = [name for name in required if not (curation / name).is_file()]
+        design = design.resolve()
+        required = (
+            "catalog.csv",
+            "REPORT.md",
+            "selected.fasta",
+            "proteins.txt",
+            "proteins-labelled.txt",
+            "train.txt",
+            "train-labelled.txt",
+            "validation.txt",
+            "validation-labelled.txt",
+            "test.txt",
+            "test-labelled.txt",
+            "provenance.json",
+        )
+        missing = [name for name in required if not (design / name).is_file()]
         if missing:
-            raise ValueError(f"curation artifact is incomplete; missing {missing}")
-        if not dataset_name.strip() or not dataset_version.strip() or min(workers, threads) < 1:
-            raise ValueError("dataset identity must be non-empty and concurrency must be positive")
+            raise ValueError(f"dataset design artifact is incomplete; missing {missing}")
+        if not dataset_name.strip() or not dataset_version.strip():
+            raise ValueError("dataset name and version cannot be empty")
+        if isinstance(workers, bool) or workers < 1:
+            raise ValueError("workers must be a positive integer")
+        if workers > int(self.resources.cpu):
+            raise ValueError(
+                f"workers={workers} exceeds LambdaForge cpu allocation={self.resources.cpu}"
+            )
+        if not math.isfinite(progress_log_seconds) or progress_log_seconds <= 0.0:
+            raise ValueError("progress_log_seconds must be finite and positive")
 
-        # Geometry files live under compatible Work checkpoints. Map results stay small and safe,
-        # while reruns can validate and reuse expensive per-protein archives.
+        if self.resuming:
+            self.log(
+                "Compatible LambdaForge checkpoints were found; structures and scientifically "
+                "valid NPZ/sidecar files will be restored instead of recomputed"
+            )
+
+        # The compact labelled manifests actively define membership and labels. The catalog is
+        # joined only for assembly, contact, grouping, phenotype, and provenance fields that a
+        # two-column TXT cannot represent without becoming another ad-hoc serialization format.
+        catalog = self._catalog(design)
+        identifiers = [str(row["identifier"]) for row in catalog]
+
+        # LambdaForge downloads every unique selected PDB once before CPU-heavy geometry starts.
+        # resume_map stores logical ManagedFile references, so retries restore byte-verified cache
+        # entries without persisting machine-specific cache paths as scientific identity.
+        self._download_retries     = retries
+        self._structure_rate_limit = self.cache.rate_limit(
+            "rcsb-preprocessing",
+            requests_per_second=requests_per_second,
+        )
+        structure_hashes: dict[str, set[str]] = {}
+        for row in catalog:
+            pdb_id = str(row["pdb_id"]).lower()
+            structure_hashes.setdefault(pdb_id, set()).add(str(row["structure_sha256"]))
+        conflicts = sorted(
+            pdb_id for pdb_id, hashes in structure_hashes.items() if len(hashes) != 1
+        )
+        if conflicts:
+            raise ValueError(f"design assigns conflicting structure hashes to PDBs: {conflicts}")
+        structure_jobs = [
+            {"pdb_id": pdb_id, "expected_sha256": next(iter(structure_hashes[pdb_id]))}
+            for pdb_id in sorted(structure_hashes)
+        ]
+        self.log(
+            f"Fetching or restoring {len(structure_jobs)} unique structures with {workers} "
+            "workers; lf top shows the exact completed/total count"
+        )
+        heartbeat_stop = Event()
+        heartbeat      = Thread(
+            target=self._heartbeat,
+            args=(heartbeat_stop, "structure retrieval", progress_log_seconds),
+            daemon=True,
+        )
+        heartbeat.start()
+        try:
+            structures = self.resume_map(
+                structure_jobs,
+                self._fetch_structure,
+                key="pdb_id",
+                workers=workers,
+                executor="thread",
+                name="preprocessing-structures",
+            )
+        finally:
+            heartbeat_stop.set()
+            heartbeat.join()
+        self.log(f"Structure retrieval complete: {len(structures)} verified archives are ready")
+        structure_roots = {Path(structure).parent for structure in structures}
+        if len(structure_roots) != 1:
+            raise RuntimeError("managed structures do not share one LambdaForge cache directory")
+        structure_root = structure_roots.pop()
+
+        manifest = self.checkpoints.path("geometry/protein-identifiers.txt")
+        self._atomic_text(manifest, "".join(f"{identifier}\n" for identifier in identifiers))
+
+        self.log(
+            f"Generating geometry for {len(catalog)} designed proteins with {workers} workers; "
+            "lf top shows the exact completed/total count"
+        )
         geometry_root = self.checkpoints.path("geometry")
-        geometry       = ProcessingWorkspace(
+        geometry      = ProcessingWorkspace(
             self.run_dir,
-            inputs={"protein_identifiers": curation / "curated-proteins.txt"},
+            inputs={
+                "protein_identifiers": manifest,
+                "structures": structure_root,
+            },
             outputs={
-                "downloads": self.cache.path("structures"),
                 "processed": geometry_root / "processed",
                 "report": geometry_root / "preprocessing-report.json",
             },
         )
         protein_records = tuple(ProteinSource().records(geometry))
-        protein_pipeline = PreprocessPipeline(
+        if {record.key for record in protein_records} != set(identifiers):
+            raise ValueError("design catalog and geometry manifest disagree")
+        pipeline = PreprocessPipeline(
             config=PreprocessConfig(
                 atom_radius=atom_radius,
                 surface_resolution=surface_resolution,
@@ -136,34 +215,51 @@ class Preprocessing(lf.Work):
                 curvature_scales=tuple(curvature_scales),
             ),
         )
-        geometry_results = self.map(
-            protein_records,
-            partial(protein_pipeline.process, context=geometry),
-            key=lambda record: record.key,
-            workers=workers,
-            executor="process",
-            resume=False,
-            name="protein-geometry",
+        heartbeat_stop = Event()
+        heartbeat      = Thread(
+            target=self._heartbeat,
+            args=(heartbeat_stop, "protein geometry", progress_log_seconds),
+            daemon=True,
         )
-
-        geometry_sink = ProteinSink(download_output="downloads")
+        heartbeat.start()
+        try:
+            geometry_results = self.map(
+                protein_records,
+                partial(pipeline.process, context=geometry),
+                workers=workers,
+                executor="process",
+                name="protein-geometry",
+            )
+        finally:
+            heartbeat_stop.set()
+            heartbeat.join()
+        geometry_statuses = [
+            str(ProcessingRecord(value).value["status"]) for value in geometry_results
+        ]
+        self.log(
+            f"Geometry complete: {geometry_statuses.count('processed')} generated and "
+            f"{geometry_statuses.count('skipped')} restored after scientific validation"
+        )
+        geometry_sink = ProteinSink()
         geometry_sink.records = {
             record.key: dict(record.value)
             for value in geometry_results
-            for record in (ProcessingRecord.restore(value),)
+            for record in (ProcessingRecord(value),)
         }
         geometry_sink.finalize(geometry)
 
-        # Annotation workers consume exact curation and geometry provenance. Sidecars remain
-        # separate from universal NPZ files so supervised targets cannot alter base geometry.
+        self.log(
+            f"Projecting {len(catalog)} DNA target sidecars; lf top shows the exact "
+            "completed/total count"
+        )
         annotation_root = self.checkpoints.path("annotation")
         annotation      = ProcessingWorkspace(
             self.run_dir,
             inputs={
-                "curation": curation,
-                "dataset_catalog": curation / "curated-catalog.csv",
+                "dataset_design": design,
+                "dataset_catalog": design / "catalog.csv",
                 "base_preprocessing_report": geometry_root / "preprocessing-report.json",
-                "structure_cache": self.cache.path("structures"),
+                "structure_cache": structure_root,
             },
             outputs={
                 "annotations": annotation_root / "annotations",
@@ -178,68 +274,62 @@ class Preprocessing(lf.Work):
             sensitivity_gaps=tuple(sensitivity_gaps),
             structure_output="resolved-structures",
         )
-        annotation_results = self.map(
-            annotation_records,
-            partial(annotation_pipeline.process, context=annotation),
-            key=lambda record: record.key,
-            workers=workers,
-            executor="process",
-            resume=False,
-            name="dna-annotations",
+        heartbeat_stop = Event()
+        heartbeat      = Thread(
+            target=self._heartbeat,
+            args=(heartbeat_stop, "DNA annotation", progress_log_seconds),
+            daemon=True,
         )
-
+        heartbeat.start()
+        try:
+            annotation_results = self.map(
+                annotation_records,
+                partial(annotation_pipeline.process, context=annotation),
+                workers=workers,
+                executor="process",
+                name="dna-annotations",
+            )
+        finally:
+            heartbeat_stop.set()
+            heartbeat.join()
+        self.log(f"DNA annotation complete: {len(annotation_results)} sidecars are ready")
         annotation_sink = DNAAnnotationSink(
             annotation_output="annotations",
             report_output="annotation-report",
-            curation_input="curation",
+            design_input="dataset_design",
         )
         annotation_sink.records = {
             record.key: dict(record.value)
             for value in annotation_results
-            for record in (ProcessingRecord.restore(value),)
+            for record in (ProcessingRecord(value),)
         }
         annotation_sink.finalize(annotation)
 
-        # Dataset-level tools operate on one attempt-owned copy because partitioning adds the final
-        # index and evidence files that LambdaForge will fingerprint and publish atomically.
+        # Arrays and the unchanged complete design meet at the only publication boundary.
         final_root = self.run_dir / "dataset"
+        if final_root.is_symlink():
+            raise ValueError("final dataset root cannot be a symlink")
         if final_root.exists():
             shutil.rmtree(final_root)
         shutil.copytree(annotation_root / "annotations", final_root)
-        partition = DNAPartitionTask(
-            sequence_identity=sequence_identity,
-            sequence_coverage=sequence_coverage,
-            sequence_evalue=sequence_evalue,
-            structure_probability=structure_probability,
-            structure_evalue=structure_evalue,
-            train_fraction=train_fraction,
-            validation_fraction=validation_fraction,
-            test_fraction=test_fraction,
-            phenotype_min_cluster_size=phenotype_min_cluster_size,
-            phenotype_min_samples=phenotype_min_samples,
-            phenotype_stability_minimum=phenotype_stability_minimum,
-            dilution_sizes=dilution_sizes,
-            seed=partition_seed,
-            threads=threads,
-            mmseqs_executable=mmseqs_executable,
-            foldseek_executable=foldseek_executable,
-        ).run(final_root)
+        shutil.copytree(design, final_root / "design")
+        self._write_index(final_root, catalog)
 
         validation = DNAValidation().audit(final_root, self.run_dir / "dna-validation")
         if validation["verdict"] != "PASS":
             raise RuntimeError("final WISDOM-DNA scientific validation failed before publication")
 
         members = tuple(self.published_members(final_root))
-        record  = self.outputs.dataset(
+        record = self.outputs.dataset(
             name=dataset_name,
             version=dataset_version,
             members=members,
             output="dataset",
             metadata={
-                "description": "Leakage-safe DNA-binding proteins with universal WISDOM surfaces",
+                "description": "Designed leakage-safe DNA proteins with WISDOM surfaces",
                 "structural_schema": "2.1",
-                "annotation_schema": "1.2",
-                "partition_schema": "2.0",
+                "annotation_schema": "1.3",
+                "design_schema": "1.2",
                 "supervision": "protein-level-only",
             },
             target_schema={
@@ -262,37 +352,349 @@ class Preprocessing(lf.Work):
             final_root / "annotation-report.json",
             role="report",
         )
-        self.outputs.artifact(
-            "partition-report",
-            final_root / "partition-report.json",
-            role="report",
-        )
         self.outputs.artifact("validation-report", self.run_dir / "dna-validation", role="report")
         self.metrics.log("published_members", len(members))
         return {
             **record,
             "published_members": len(members),
-            "leakage_groups": partition["leakage_group_count"],
+            "leakage_groups": len({str(row["leakage_group"]) for row in catalog}),
             "validation_verdict": validation["verdict"],
         }
 
-    def published_members(self, final_root: Path) -> Iterable[Mapping[str, Any]]:
-        """Translate a validated WISDOM index into LambdaForge dataset member mappings.
+    def _heartbeat(self, stop: Event, phase: str, interval_seconds: float) -> None:
+        """Emit one race-free liveness line while a LambdaForge parallel map is active.
+
+        LambdaForge already writes exact aggregate map progress for ``lf top`` from the parent
+        process. This lightweight thread only adds an occasional timestamped log line so a tailed
+        log also proves that a long CPU phase remains alive. It never counts worker completions,
+        writes scientific state, or competes with process workers.
 
         Args:
-            final_root: Attempt-owned final dataset root containing ``members.jsonl`` and assets.
+            stop: Thread event set by the parent immediately after the map exits or fails.
+            phase: Human-readable name of the active preprocessing phase.
+            interval_seconds: Positive delay in seconds between heartbeat lines.
+
+        Returns:
+            ``None`` after ``stop`` is set.
+        """
+        started = time.monotonic()
+        while not stop.wait(interval_seconds):
+            elapsed_minutes = (time.monotonic() - started) / 60.0
+            self.log(
+                f"{phase} is still active after {elapsed_minutes:.1f} min; "
+                "open lf top for exact aggregate progress"
+            )
+
+    def _fetch_structure(self, job: Mapping[str, Any]) -> ManagedFile:
+        """Fetch one selected RCSB entry through LambdaForge's managed cache.
+
+        Args:
+            job: JSON-compatible mapping containing a lowercase ``pdb_id`` and the SHA-256 of the
+                uncompressed mmCIF bytes fixed by DatasetDesign.
+
+        Returns:
+            Read-only managed ``.cif.gz`` file whose bytes passed a Gemmi parse check. The logical
+            cache key, content digest, and byte count are recorded as a ``resume_map`` dependency.
+
+        Raises:
+            RuntimeError: If LambdaForge exhausts all HTTP attempts or validation keeps failing.
+            ValueError: If the supplied PDB identifier or cache parameters are invalid.
+        """
+        pdb_id         = str(job["pdb_id"]).lower()
+        expected_hash = str(job["expected_sha256"]).lower()
+        if not pdb_id.isalnum():
+            raise ValueError(f"invalid RCSB PDB identifier: {pdb_id!r}")
+        if len(expected_hash) != 64 or not set(expected_hash) <= set("0123456789abcdef"):
+            raise ValueError(f"invalid design structure SHA-256 for {pdb_id}")
+
+        return self.cache.fetch(
+            f"https://files.rcsb.org/download/{pdb_id.upper()}.cif.gz",
+            key        = f"structures/{pdb_id}.cif.gz",
+            retries    = self._download_retries,
+            timeout    = 180.0,
+            validate   = partial(
+                self._valid_structure_archive,
+                expected_sha256=expected_hash,
+            ),
+            rate_limit = self._structure_rate_limit,
+        )
+
+    @staticmethod
+    def _valid_structure_archive(file: ManagedFile, expected_sha256: str) -> bool:
+        """Check a managed gzip archive against the exact structure used by design.
+
+        Args:
+            file: LambdaForge-managed RCSB ``.cif.gz`` candidate.
+            expected_sha256: DatasetDesign digest of the uncompressed mmCIF bytes.
+
+        Returns:
+            ``True`` when Gemmi parses a non-empty structure and decompression reproduces the
+            design digest; ``False`` asks LambdaForge to discard and rebuild the entry atomically.
+        """
+        try:
+            digest = hashlib.sha256()
+            with gzip.open(file, "rb") as stream:
+                for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+                    digest.update(chunk)
+            return bool(gemmi.read_structure(str(file))) and digest.hexdigest() == expected_sha256
+        except (OSError, RuntimeError, ValueError):
+            return False
+
+    @staticmethod
+    def _catalog(design: Path) -> list[dict[str, Any]]:
+        """Join labelled split manifests to the fixed scientific design catalog.
+
+        Args:
+            design: DatasetDesign directory containing ``catalog.csv`` and the three labelled
+                split manifests in ``RCSB_CHAIN<TAB>0|1`` format.
+
+        Returns:
+            Identifier-sorted catalog rows whose membership, labels, and splits exactly match the
+            labelled manifests, with nested JSON fields and scalar types restored.
+
+        Raises:
+            ValueError: If catalog fields, IDs, labels, splits, groups, selected flags, main
+                manifests, or dilution manifests disagree.
+            OSError: If a required catalog or labelled manifest cannot be read.
+        """
+        path = design / "catalog.csv"
+        required = {
+            "identifier",
+            "label",
+            "split",
+            "selected",
+            "leakage_group",
+            "global_phenotype",
+            "interface_phenotype",
+            "origin",
+            "label_evidence",
+            "pdb_id",
+            "protein_chain",
+            "assembly_id",
+            "protein_copy",
+            "structure_sha256",
+            "dna_chains",
+            "binding_residue_indices",
+            "local_gt_expected",
+            "local_gt_method",
+            "assembly_rotation",
+            "assembly_translation",
+        }
+        rows: list[dict[str, Any]] = []
+        with path.open("r", encoding="utf-8", newline="") as stream:
+            reader = csv.DictReader(stream)
+            fields = set(reader.fieldnames or ())
+            if not required.issubset(fields):
+                raise ValueError(f"design catalog lacks fields: {sorted(required - fields)}")
+            for line, raw in enumerate(reader, start=2):
+                row: dict[str, Any] = dict(raw)
+                try:
+                    row["label"] = int(raw["label"])
+                    row["protein_copy"] = int(raw["protein_copy"])
+                    row["selected"] = str(raw["selected"]).lower() == "true"
+                    row["local_gt_expected"] = str(raw["local_gt_expected"]).lower() == "true"
+                    for field in (
+                        "dna_chains",
+                        "binding_residue_indices",
+                        "assembly_rotation",
+                        "assembly_translation",
+                    ):
+                        row[field] = json.loads(raw[field])
+                except (TypeError, ValueError, json.JSONDecodeError) as error:
+                    raise ValueError(f"invalid design catalog values at line {line}") from error
+                if row["label"] not in {0, 1} or row["split"] not in {
+                    "train",
+                    "validation",
+                    "test",
+                }:
+                    raise ValueError(f"invalid label/split at design catalog line {line}")
+                if not row["selected"] or not str(row["leakage_group"]):
+                    raise ValueError(f"canonical catalog line {line} is not selected/grouped")
+                rows.append(row)
+        rows.sort(key=lambda row: str(row["identifier"]))
+        identifiers = [str(row["identifier"]) for row in rows]
+        if not rows or len(identifiers) != len(set(identifiers)):
+            raise ValueError("design catalog must contain unique non-empty identifiers")
+
+        # Split TXT files are the compact researcher-facing contract. Requiring exact equality with
+        # catalog.csv catches accidental edits before any structure download or surface generation.
+        by_identifier = {str(row["identifier"]): row for row in rows}
+        manifested: dict[str, tuple[int, str]] = {}
+        for split in ("train", "validation", "test"):
+            for identifier, label in Preprocessing._labelled_manifest(
+                design / f"{split}-labelled.txt"
+            ).items():
+                if identifier in manifested:
+                    raise ValueError(f"labelled split manifests repeat identifier {identifier!r}")
+                if identifier not in by_identifier:
+                    raise ValueError(
+                        f"{split}-labelled.txt contains unknown identifier {identifier!r}"
+                    )
+                row = by_identifier[identifier]
+                if int(row["label"]) != label or str(row["split"]) != split:
+                    raise ValueError(
+                        f"{split}-labelled.txt contradicts catalog.csv for {identifier!r}"
+                    )
+                manifested[identifier] = (label, split)
+        if set(manifested) != set(by_identifier):
+            missing = sorted(set(by_identifier) - set(manifested))
+            raise ValueError(f"labelled split manifests omit canonical identifiers: {missing}")
+
+        # Dilutions are labelled training views, not independent datasets. They may select only
+        # canonical train members and must preserve the label fixed by the main manifests.
+        dilution_paths = sorted(
+            (design / "dilutions").glob("replicate-*/train-*-labelled.txt")
+        )
+        if not dilution_paths:
+            raise ValueError("design contains no labelled training dilution manifests")
+        train_identifiers = {
+            identifier for identifier, (_label, split) in manifested.items() if split == "train"
+        }
+        for dilution_path in dilution_paths:
+            dilution = Preprocessing._labelled_manifest(dilution_path)
+            unknown  = sorted(set(dilution) - train_identifiers)
+            changed  = sorted(
+                identifier
+                for identifier, label in dilution.items()
+                if identifier in manifested and label != manifested[identifier][0]
+            )
+            if unknown or changed:
+                raise ValueError(
+                    f"invalid labelled dilution {dilution_path.relative_to(design)}: "
+                    f"non-train={unknown}, changed-label={changed}"
+                )
+        return rows
+
+    @staticmethod
+    def _labelled_manifest(path: Path) -> dict[str, int]:
+        """Read one deterministic two-column protein-label manifest.
+
+        Args:
+            path: UTF-8 TXT containing exactly ``RCSB_CHAIN<TAB>0|1`` per non-empty line.
+
+        Returns:
+            Identifier-to-binary-label mapping in source order.
+
+        Raises:
+            ValueError: If a line has the wrong number of columns, an invalid label, an empty
+                identifier, or a duplicate identifier.
+            OSError: If the manifest cannot be read.
+        """
+        values: dict[str, int] = {}
+        for line_number, raw in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+            if not raw.strip():
+                continue
+            fields = raw.split("\t")
+            if len(fields) != 2 or not fields[0].strip() or fields[1].strip() not in {"0", "1"}:
+                raise ValueError(
+                    f"{path.name} line {line_number} must be RCSB_CHAIN<TAB>0|1"
+                )
+            identifier = fields[0].strip()
+            if identifier in values:
+                raise ValueError(f"{path.name} repeats identifier {identifier!r}")
+            values[identifier] = int(fields[1].strip())
+        if not values:
+            raise ValueError(f"{path.name} cannot be empty")
+        return values
+
+    @staticmethod
+    def _write_index(root: Path, catalog: Sequence[Mapping[str, Any]]) -> None:
+        """Join fixed design metadata to validated array assets in a DatasetIndex.
+
+        Args:
+            root: Self-contained pre-publication dataset root.
+            catalog: Decoded canonical design rows.
+
+        Returns:
+            ``None`` after LambdaForge atomically writes ``members.jsonl``.
+
+        Raises:
+            ValueError: If annotation coverage and design membership disagree.
+            OSError: If annotation reports or assets cannot be read.
+        """
+        report = json.loads((root / "annotation-report.json").read_text(encoding="utf-8"))
+        annotation_rows = {str(row["identifier"]): row for row in report.get("records", ())}
+        if set(annotation_rows) != {str(row["identifier"]) for row in catalog}:
+            raise ValueError("annotation report and fixed design catalog have different members")
+        dilution_members = {
+            f"{replicate.name}/{path.stem.removesuffix('-labelled')}": set(
+                Preprocessing._labelled_manifest(path)
+            )
+            for replicate in sorted((root / "design" / "dilutions").glob("replicate-*"))
+            for path in sorted(replicate.glob("train-*-labelled.txt"))
+        }
+        members: list[DatasetMember] = []
+        for row in catalog:
+            identifier = str(row["identifier"])
+            annotation = annotation_rows[identifier]
+            base      = root / str(annotation["portable_base_path"])
+            sidecar   = root / str(annotation["output"])
+            structure = root / "structures" / f"{annotation['source_structure_sha256']}.cif"
+            members.append(
+                DatasetMember(
+                    member_id=identifier,
+                    partitions={
+                        "split": str(row["split"]),
+                        "leakage_group": str(row["leakage_group"]),
+                        "global_phenotype": str(row["global_phenotype"]),
+                        "interface_phenotype": str(row["interface_phenotype"]),
+                    },
+                    targets={
+                        "dna_binding": int(row["label"]),
+                        "local_ground_truth": bool(annotation["local_gt_available"]),
+                    },
+                    metadata={
+                        "origin": str(row["origin"]),
+                        "pdb_id": str(row["pdb_id"]),
+                        "protein_chain": str(row["protein_chain"]),
+                        "assembly_id": str(row["assembly_id"]),
+                        "protein_copy": int(row["protein_copy"]),
+                        "dilutions": sorted(
+                            name
+                            for name, values in dilution_members.items()
+                            if identifier in values
+                        ),
+                    },
+                    assets={
+                        "universal_npz": DatasetAsset(
+                            path=base.relative_to(root).as_posix(),
+                            sha256=f"sha256:{annotation['base_npz_sha256']}",
+                            size_bytes=base.stat().st_size,
+                            media_type="application/x-npz",
+                        ),
+                        "dna_annotation": DatasetAsset(
+                            path=sidecar.relative_to(root).as_posix(),
+                            sha256=f"sha256:{annotation['sidecar_sha256']}",
+                            size_bytes=sidecar.stat().st_size,
+                            media_type="application/x-npz",
+                        ),
+                        "source_structure": DatasetAsset(
+                            path=structure.relative_to(root).as_posix(),
+                            sha256=f"sha256:{annotation['source_structure_sha256']}",
+                            size_bytes=structure.stat().st_size,
+                            media_type="chemical/x-mmcif",
+                        ),
+                    },
+                )
+            )
+        DatasetIndex.write(root / "members.jsonl", members)
+
+    def published_members(self, final_root: Path) -> Iterable[Mapping[str, Any]]:
+        """Translate the validated index into LambdaForge streaming dataset members.
+
+        Args:
+            final_root: Self-contained pre-publication root with index and assets.
 
         Yields:
             Member mappings accepted by :meth:`lambdaforge.Work.outputs.dataset`.
 
         Raises:
-            OSError: If the validated member index cannot be read.
-            ValueError: If an index member references malformed metadata or assets.
+            OSError: If the member index or a declared asset cannot be read.
         """
         for index, member in enumerate(DatasetIndex(final_root / "members.jsonl")):
             assets = {name: final_root / asset.path for name, asset in member.assets.items()}
             if index == 0:
-                assets["dataset_evidence"] = final_root / "evidence"
+                assets["dataset_design"] = final_root / "design"
             yield {
                 "id": member.member_id,
                 "partitions": dict(member.partitions),
@@ -301,3 +703,25 @@ class Preprocessing(lf.Work):
                 "display": dict(member.display),
                 "assets": assets,
             }
+
+    @staticmethod
+    def _atomic_text(path: Path, content: str) -> None:
+        """Publish complete manifest text with ``fsync`` and atomic replacement.
+
+        Args:
+            path: Final checkpoint-owned path.
+            content: Complete UTF-8 payload.
+
+        Returns:
+            ``None`` after atomic replacement.
+        """
+        path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = path.with_name(f".{path.name}.{uuid4().hex}.tmp")
+        try:
+            with temporary.open("w", encoding="utf-8", newline="\n") as stream:
+                stream.write(content)
+                stream.flush()
+                os.fsync(stream.fileno())
+            os.replace(temporary, path)
+        finally:
+            temporary.unlink(missing_ok=True)

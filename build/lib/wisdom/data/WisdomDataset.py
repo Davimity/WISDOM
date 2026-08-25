@@ -37,7 +37,7 @@ class WisdomDataset(Dataset[Mapping[str, Tensor | str]]):
             manifest: LambdaForge 0.12 managed dataset root containing ``index.jsonl``, or a legacy
                 CSV with exactly ``file,label,split`` columns.
             split: Explicit subset to expose; one of ``train``, ``val``, or ``test``.
-            subset: ``full`` or a configured dilution name such as ``train-100``. Managed dataset
+            subset: ``full`` or a dilution name such as ``replicate-00/train-25``. Managed dataset
                 members carry this view membership in metadata without duplicating heavy assets.
 
         Raises:

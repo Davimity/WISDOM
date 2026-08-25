@@ -1,0 +1,44 @@
+{
+  "design_schema_version": "1.2",
+  "leakage_group_count": 1754,
+  "quality_eligible": {
+    "negative": 907,
+    "positive": 3341,
+    "total": 4248
+  },
+  "quality_excluded": {
+    "negative": 48,
+    "positive": 188,
+    "total": 236
+  },
+  "raw": {
+    "negative": 955,
+    "positive": 3529,
+    "total": 4484
+  },
+  "selected": {
+    "negative": 907,
+    "positive": 907,
+    "total": 1814
+  },
+  "splits": {
+    "test": {
+      "negative": 136,
+      "positive": 136,
+      "total": 272
+    },
+    "train": {
+      "negative": 635,
+      "positive": 635,
+      "total": 1270
+    },
+    "validation": {
+      "negative": 136,
+      "positive": 136,
+      "total": 272
+    }
+  },
+  "technical_shortcut_auc": 0.6851675565683042,
+  "verdict": "PASS",
+  "warning_count": 31
+}

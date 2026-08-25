@@ -27,10 +27,14 @@ def test_underscore_chain_identifier_format(tmp_path: Path) -> None:
     # A cached file is sufficient to inspect the public parsed source without network access.
     cached = tmp_path / "xyz.cif.gz"
     cached.write_bytes(b"cached")
-    source = cache.resolve("XYZ_AB", tmp_path)
+    source = cache.resolve("XYZ_A_Q", tmp_path)
     assert source.protein_id == "xyz"
-    assert source.chains == ("A", "B")
-    assert source.name == "xyz_AB"
+    assert source.chains == ("A", "Q")
+    assert source.name == "xyz_A_Q"
+
+    multicharacter = cache.resolve("XYZ_AQ", tmp_path)
+    assert multicharacter.chains == ("AQ",)
+    assert multicharacter.name == "xyz_AQ"
 
 
 @pytest.mark.parametrize("fixture_name", ["pdb_path", "cif_path", "gz_pdb_path"])

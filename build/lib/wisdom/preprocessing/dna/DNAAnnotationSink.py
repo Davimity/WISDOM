@@ -25,14 +25,14 @@ class DNAAnnotationSink:
         self,
         annotation_output : str = "annotations",
         report_output     : str = "annotation-report.json",
-        curation_input    : str | None = None,
+        design_input      : str | None = None,
     ) -> None:
         """Bind named output locations for sidecars and their audit.
 
         Args:
             annotation_output: Named directory receiving ``*.dna.npz`` sidecars.
             report_output: Named JSON report output.
-            curation_input: Optional named directory containing the split-free curated catalog.
+            design_input: Optional named directory containing the fixed canonical design catalog.
 
         Raises:
             ValueError: If a logical input or output name is invalid.
@@ -40,12 +40,12 @@ class DNAAnnotationSink:
         if (
             not annotation_output.strip()
             or not report_output.strip()
-            or (curation_input is not None and not curation_input.strip())
+            or (design_input is not None and not design_input.strip())
         ):
             raise ValueError("annotation output names cannot be empty")
         self.annotation_output = annotation_output
         self.report_output     = report_output
-        self.curation_input    = curation_input
+        self.design_input      = design_input
         self.records: dict[str, dict[str, Any]] = {}
 
     def write(self, record: ProcessingRecord, context: ProcessingWorkspace) -> None:
@@ -168,7 +168,7 @@ class DNAAnnotationSink:
             "base_npz_path": str(metadata["base_npz_path"]),
             "source_structure_sha256": str(metadata["source_structure_sha256"]),
             "source_structure_path": str(metadata["source_structure_path"]),
-            "split": "",
+            "split": str(metadata.get("split", "")),
             "tier": str(metadata.get("tier", "core")),
             "local_gt_expected": bool(metadata["local_gt_expected"]),
             "local_gt_available": bool(metadata["local_gt_available"]),
@@ -198,16 +198,16 @@ class DNAAnnotationSink:
         self._materialize_bases(output_root)
         self._materialize_structures(output_root)
 
-        # Preserve the split-free curated catalog beside the geometry and annotations. Partition
-        # assignment is intentionally a later dataset-level operation.
-        if self.curation_input is not None:
-            curation_root = context.input(self.curation_input)
-            if not curation_root.is_dir():
-                raise RuntimeError("curation input must resolve to a directory")
-            source = curation_root / "curated-catalog.csv"
+        # Preserve the already partitioned canonical catalog beside the arrays. DatasetDesign is
+        # authoritative; annotation never recalculates or mutates its membership metadata.
+        if self.design_input is not None:
+            design_root = context.input(self.design_input)
+            if not design_root.is_dir():
+                raise RuntimeError("dataset design input must resolve to a directory")
+            source = design_root / "catalog.csv"
             if not source.is_file():
-                raise RuntimeError("curation input lacks curated-catalog.csv")
-            self._atomic_copy(source, output_root / "curated-catalog.csv")
+                raise RuntimeError("dataset design input lacks catalog.csv")
+            self._atomic_copy(source, output_root / "catalog.csv")
 
         annotated_records = sorted(
             self.records.values(), key=lambda value: str(value["identifier"])
@@ -225,7 +225,7 @@ class DNAAnnotationSink:
                 value["protein_label"] == 1 and not value["local_gt_available"]
                 for value in self.records.values()
             ),
-            "partition_assignment": "deferred",
+            "partition_assignment": "fixed_by_dataset_design",
             "records": [self.records[key] for key in sorted(self.records)],
         }
         self._atomic_text(
@@ -292,13 +292,13 @@ class DNAAnnotationSink:
             value["portable_base_path"] = target.relative_to(output_root).as_posix()
 
     def _materialize_structures(self, output_root: Path) -> None:
-        """Copy curation-verified structures from the geometry cache into publication.
+        """Copy DatasetDesign-verified structures from the geometry cache into publication.
 
         Args:
             output_root: Final dataset root receiving a ``structures`` directory.
 
         Raises:
-            RuntimeError: If a resolved structure is missing or differs from curation provenance.
+            RuntimeError: If a resolved structure is missing or differs from design provenance.
             OSError: If atomic copying or digest verification fails.
         """
         structure_root = output_root / "structures"
@@ -307,12 +307,12 @@ class DNAAnnotationSink:
             source = Path(str(value["source_structure_path"]))
             digest = str(value["source_structure_sha256"])
             if not source.is_file() or hashlib.sha256(source.read_bytes()).hexdigest() != digest:
-                raise RuntimeError("resolved source structure differs from curation provenance")
+                raise RuntimeError("resolved source structure differs from design provenance")
             target = structure_root / f"{digest}.cif"
             if not target.is_file():
                 self._atomic_copy(source, target)
             if hashlib.sha256(target.read_bytes()).hexdigest() != digest:
-                raise RuntimeError("portable source structure differs from curation provenance")
+                raise RuntimeError("portable source structure differs from design provenance")
 
     @staticmethod
     def _atomic_text(path: Path, content: str) -> None:

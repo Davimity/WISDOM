@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import ast
+import csv
 import inspect
 import re
 from pathlib import Path
 
 import numpy as np
 import pytest
+from lambdaforge.controlplane import NativeEnvironmentSpecification
 from lambdaforge.data import DatasetRegistry
 from lambdaforge.work import Work, WorkConfig, WorkRunner
 from yaml import safe_load
@@ -19,6 +21,18 @@ from wisdom.preprocessing.structure.ProteinReader import ProteinReader
 from wisdom.preprocessing.structure.ProteinSink import ProteinSink
 from wisdom.preprocessing.structure.ProteinSource import ProteinSource
 from wisdom.preprocessing.structure.StructureCache import StructureCache
+
+
+def test_project_declares_bootstrap_native_environment() -> None:
+    """Managed bootstrap must install and verify both specialist command-line tools."""
+    project_root  = Path(__file__).parents[1]
+    specification = NativeEnvironmentSpecification.discover(project_root)
+
+    assert specification is not None
+    assert specification.manager == "conda"
+    assert specification.source == project_root / "environment.yml"
+    assert specification.required_executables == ("mmseqs", "foldseek")
+    assert {"foldseek", "mmseqs2"}.issubset(specification.dependencies)
 
 
 def test_one_class_per_source_file_and_reader_public_api() -> None:
@@ -75,6 +89,15 @@ def test_bilingual_readmes_have_parallel_sections_and_scientific_detail() -> Non
     spanish = (project_root / "README.es.md").read_text(encoding="utf-8")
     assert "[Español](README.es.md)" in english
     assert "[English](README.md)" in spanish
+
+    for document in (english, spanish):
+        assert "./install.sh" in document
+        assert "conda activate wisdom" in document
+        assert "python -m venv" not in document
+        assert "\\[" not in document
+        assert "\\]" not in document
+
+    assert "Benchmark de unión a ADN" in spanish
 
     heading_pattern = re.compile(r"^(#{2,6}) (\d+(?:\.\d+)*)\. ", re.MULTILINE)
     english_headings = heading_pattern.findall(english)
@@ -211,25 +234,24 @@ def test_lambdaforge_owns_preprocessing_workers_resources_and_resume() -> None:
         "storage": "100GiB",
         "time": "24h",
     }
-    assert design_values["with"]["workers"] == 36
+    assert design_values["with"]["workers"] >= design_values["resources"]["cpu"]
     assert design_values["with"]["output_directory"] == "data/dna/design"
     assert design_values["with"]["overwrite_output"] is True
     assert design_values["with"]["maximum_resolution"] == 4.0
     assert design_values["with"]["dilution_fractions"] == [1.0, 0.75, 0.5, 0.25, 0.1]
-    assert [step["name"] for step in preprocess_values["steps"]] == ["design", "preprocess"]
-    assert preprocess_values["steps"][0]["with"]["output_directory"] == "data/dna/design"
-    preprocess_step = preprocess_values["steps"][1]
-    assert preprocess_step["run"] == "wisdom.preprocessing.Preprocessing.Preprocessing"
-    assert preprocess_step["resources"] == {
+    assert "steps" not in preprocess_values
+    assert preprocess_values["run"] == "wisdom.preprocessing.Preprocessing.Preprocessing"
+    assert preprocess_values["resources"] == {
         "cpu": 36,
         "memory": "128GiB",
         "storage": "150GiB",
         "time": "24h",
     }
-    assert preprocess_step["with"]["workers"] == 36
-    assert preprocess_step["with"]["requests_per_second"] == 4.0
-    assert preprocess_step["with"]["retries"] == 5
-    assert preprocess_step["with"]["design"] == {"from": "design.dataset-design"}
+    assert preprocess_values["with"]["workers"] == 36
+    assert preprocess_values["with"]["requests_per_second"] == 60.0
+    assert preprocess_values["with"]["retries"] == 5
+    assert preprocess_values["with"]["progress_log_seconds"] == 120.0
+    assert preprocess_values["with"]["design"] == {"file": "../data/dna/design"}
     assert any(name == "map" for name, _ in inspect.getmembers(Work, inspect.isfunction))
 
     preprocessing_source = inspect.getsource(Preprocessing)
@@ -243,6 +265,87 @@ def test_lambdaforge_owns_preprocessing_workers_resources_and_resume() -> None:
         hasattr(PreprocessConfig(), name)
         for name in ("workers", "processes_per_cpu", "resume", "fail_fast", "raw_dir")
     )
+
+
+def test_preprocessing_joins_labelled_manifests_to_catalog(tmp_path: Path) -> None:
+    """Labelled TXT files must actively agree with the scientific design catalog."""
+    fields = (
+        "identifier",
+        "label",
+        "split",
+        "selected",
+        "leakage_group",
+        "global_phenotype",
+        "interface_phenotype",
+        "origin",
+        "label_evidence",
+        "pdb_id",
+        "protein_chain",
+        "assembly_id",
+        "protein_copy",
+        "structure_sha256",
+        "dna_chains",
+        "binding_residue_indices",
+        "local_gt_expected",
+        "local_gt_method",
+        "assembly_rotation",
+        "assembly_translation",
+    )
+    rows = []
+    for identifier, label, split in (
+        ("1ABC_A", 0, "train"),
+        ("2ABC_B", 1, "validation"),
+        ("3ABC_C", 0, "test"),
+    ):
+        rows.append(
+            {
+                "identifier": identifier,
+                "label": label,
+                "split": split,
+                "selected": "true",
+                "leakage_group": f"group-{identifier}",
+                "global_phenotype": "G_NOISE",
+                "interface_phenotype": "I_NOISE",
+                "origin": "fixture",
+                "label_evidence": "fixture",
+                "pdb_id": identifier[:4],
+                "protein_chain": identifier.split("_", 1)[1],
+                "assembly_id": "1",
+                "protein_copy": "1",
+                "structure_sha256": "a" * 64,
+                "dna_chains": "[]",
+                "binding_residue_indices": "[]",
+                "local_gt_expected": "true",
+                "local_gt_method": "global_negative" if label == 0 else "dna_distance",
+                "assembly_rotation": "[]",
+                "assembly_translation": "[]",
+            }
+        )
+
+    with (tmp_path / "catalog.csv").open("w", encoding="utf-8", newline="") as stream:
+        writer = csv.DictWriter(stream, fieldnames=fields)
+        writer.writeheader()
+        writer.writerows(rows)
+    for identifier, label, split in (
+        ("1ABC_A", 0, "train"),
+        ("2ABC_B", 1, "validation"),
+        ("3ABC_C", 0, "test"),
+    ):
+        (tmp_path / f"{split}-labelled.txt").write_text(
+            f"{identifier}\t{label}\n", encoding="utf-8"
+        )
+    dilution = tmp_path / "dilutions" / "replicate-00"
+    dilution.mkdir(parents=True)
+    (dilution / "train-100-labelled.txt").write_text("1ABC_A\t0\n", encoding="utf-8")
+
+    assert [row["identifier"] for row in Preprocessing._catalog(tmp_path)] == [
+        "1ABC_A",
+        "2ABC_B",
+        "3ABC_C",
+    ]
+    (tmp_path / "test-labelled.txt").write_text("3ABC_C\t1\n", encoding="utf-8")
+    with pytest.raises(ValueError, match=r"contradicts catalog\.csv"):
+        Preprocessing._catalog(tmp_path)
 
 
 @pytest.mark.parametrize(

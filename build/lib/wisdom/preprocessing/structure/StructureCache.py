@@ -1,15 +1,10 @@
-"""Input parsing and race-safe local structure cache."""
+"""Resolve manifest records against local or LambdaForge-managed structure files."""
 
 from __future__ import annotations
 
-import gzip
 import hashlib
-import os
 import re
-import time
-import urllib.request
 from pathlib import Path
-from uuid import uuid4
 
 from wisdom.preprocessing.structure.dataclasses.StructureSource import StructureSource
 
@@ -17,40 +12,36 @@ from wisdom.preprocessing.structure.dataclasses.StructureSource import Structure
 class StructureCache:
     """Resolve supported dataset records into hashed local structure sources.
 
-    The class owns input grammar, remote-cache paths, race-safe HTTP publication, format labels,
-    and source hashing. Dataset iteration and concurrency belong to LambdaForge.
+    The class owns input grammar, managed-cache lookup, format labels, and source hashing.
+    LambdaForge downloads and validates remote files before scientific workers are launched.
     """
 
     _LOCAL_SUFFIXES = (".pdb", ".cif", ".mmcif", ".pdb.gz", ".cif.gz", ".mmcif.gz")
     _REMOTE_ID      = re.compile(r"^[A-Za-z0-9]{3,}$")
-    _CHAINS         = re.compile(r"^[A-Za-z0-9]+$")
-    _REMOTE_URL     = "https://files.rcsb.org/download/{protein_id}.cif.gz"
+    _CHAIN          = re.compile(r"^[A-Za-z0-9]+$")
 
-    def __init__(
-        self,
-        raw_dir : str | Path,
-        download: bool = True,
-    ) -> None:
-        """Bind one record resolver to its named download cache.
+    def __init__(self, structure_dir: str | Path) -> None:
+        """Bind one record resolver to its LambdaForge-managed structure directory.
 
         Args:
-            raw_dir: Run-owned directory used for downloaded PDBx/mmCIF files.
-            download: Whether an absent remote entry may be downloaded from RCSB PDB.
+            structure_dir: Directory containing prefetched ``<pdb_id>.cif.gz`` files.
         """
-        self.raw_dir = Path(raw_dir)
-        self.download = download
+        self.structure_dir = Path(structure_dir)
 
     def resolve(
         self,
         identifier  : str,
         relative_to : Path,
     ) -> StructureSource:
-        """Resolve one local path or remote ``XYZ_ABC`` record.
+        """Resolve one local path or remote ``XYZ_CHAIN[_CHAIN...]`` record.
 
         Local records must end in PDB/PDBx/mmCIF, optionally gzip-compressed, and relative paths are
-        based at ``relative_to``. Remote records use the suffix characters after one underscore as
-        individual chain IDs. An absent remote entry is downloaded atomically before SHA-256
-        hashing. LambdaForge catches record-level failures around this method.
+        based at ``relative_to``. In remote records the first underscore separates the PDB ID from
+        the first complete mmCIF chain name; later underscores separate additional complete chain
+        names. Therefore ``1ABC_AQ`` selects the single chain ``AQ``, while ``1ABC_A_Q`` selects
+        chains ``A`` and ``Q``. A remote file must already have been downloaded through
+        ``Work.cache.fetch`` before SHA-256 hashing. LambdaForge catches record-level failures
+        around this method.
 
         Args:
             identifier: Nonempty, comment-free dataset record.
@@ -60,8 +51,8 @@ class StructureCache:
             One immutable, locally available and content-hashed structure source.
 
         Raises:
-            OSError: If a local file is absent or a remote download cannot be completed.
-            ValueError: If the record grammar, chain selection, or downloaded content is invalid.
+            OSError: If a local file or prefetched remote structure is absent.
+            ValueError: If the record grammar or chain selection is invalid.
         """
         lower = identifier.lower()
         if lower.endswith(self._LOCAL_SUFFIXES):
@@ -74,25 +65,21 @@ class StructureCache:
             chains     : tuple[str, ...] = ()
             is_local   = True
         else:
-            protein_id, separator, chain_text = identifier.rpartition("_")
-            if not separator:
-                protein_id, chain_text = identifier, ""
+            fields     = identifier.split("_")
+            protein_id = fields[0]
+            chains     = tuple(fields[1:])
             if not self._REMOTE_ID.fullmatch(protein_id):
                 raise ValueError(f"invalid protein identifier: {identifier!r}")
-            if chain_text and not self._CHAINS.fullmatch(chain_text):
+            if any(not chain or not self._CHAIN.fullmatch(chain) for chain in chains):
                 raise ValueError(f"invalid chain selection: {identifier!r}")
 
             protein_id = protein_id.lower()
-            chains     = tuple(chain_text)
-            path       = self.raw_dir / f"{protein_id}.cif.gz"
+            path       = self.structure_dir / f"{protein_id}.cif.gz"
             is_local   = False
             if not path.is_file():
-                if not self.download:
-                    raise FileNotFoundError(
-                        f"{protein_id} is absent from cache and download=false"
-                    )
-                self.raw_dir.mkdir(parents=True, exist_ok=True)
-                self._download(protein_id, path)
+                raise FileNotFoundError(
+                    f"{protein_id} is absent from the LambdaForge-managed structure cache"
+                )
 
         # Exact source bytes accompany every record even though task identity is framework-owned.
         digest = hashlib.sha256()
@@ -111,8 +98,8 @@ class StructureCache:
             is_local=is_local,
         )
 
-    @classmethod
-    def output_stem(cls, identifier: str) -> str:
+    @staticmethod
+    def output_stem(identifier: str) -> str:
         """Derive the human-readable output stem without touching source bytes.
 
         Args:
@@ -120,83 +107,24 @@ class StructureCache:
 
         Returns:
             Local coordinate filename without its recognized suffix, or normalized remote PDB ID
-            plus its concatenated chain selector. Invalid remote grammar returns a harmless stem;
-            full validation remains the responsibility of :meth:`resolve` inside the per-record
-            LambdaForge failure boundary.
+            plus its underscore-separated chain selector. Invalid remote grammar returns a
+            harmless stem; full validation remains the responsibility of :meth:`resolve` inside
+            the per-record LambdaForge failure boundary.
 
         Raises:
             ValueError: If a local coordinate filename has no stem before its suffix.
         """
         lower = identifier.lower()
-        if lower.endswith(cls._LOCAL_SUFFIXES):
+        if lower.endswith(StructureCache._LOCAL_SUFFIXES):
             name = Path(identifier).name
-            for suffix in cls._LOCAL_SUFFIXES:
+            for suffix in StructureCache._LOCAL_SUFFIXES:
                 if lower.endswith(suffix):
                     stem = name[: -len(suffix)]
                     if not stem:
                         raise ValueError(f"structure filename has no stem: {identifier}")
                     return stem
 
-        protein_id, separator, chain_text = identifier.rpartition("_")
-        if not separator:
-            protein_id, chain_text = identifier, ""
-        return protein_id.lower() + (f"_{chain_text}" if chain_text else "")
-
-    def _download(
-        self,
-        protein_id : str,
-        target     : Path,
-    ) -> None:
-        """Download and atomically publish one compressed RCSB PDBx/mmCIF entry.
-
-        An exclusive ``.lock`` serializes competing writers. The owner streams one-mebibyte chunks
-        to a PID/UUID temporary file, flushes and synchronizes it, checks that gzip yields payload,
-        and publishes with ``os.replace``. Waiters poll every 0.1 seconds and give up after 180
-        seconds. Cleanup runs for success and failure.
-
-        Args:
-            protein_id: Normalized remote PDB identifier used in the RCSB download URL.
-            target: Final run-cache path, conventionally ``<id>.cif.gz``.
-
-        Raises:
-            TimeoutError: If another writer leaves the target unavailable for 180 seconds.
-            OSError: If locking, HTTP streaming, synchronization, or publication fails.
-            ValueError: If the downloaded gzip stream has no decompressed payload.
-        """
-        lock     = target.with_suffix(target.suffix + ".lock")
-        deadline = time.monotonic() + 180.0
-
-        # Become the sole cache writer, or wait until the current writer publishes its target.
-        while True:
-            try:
-                descriptor = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
-                os.close(descriptor)
-                break
-            except FileExistsError:
-                if target.is_file():
-                    return
-                if time.monotonic() >= deadline:
-                    raise TimeoutError(f"timed out waiting for cache lock: {lock}") from None
-                time.sleep(0.1)
-
-        temporary = target.with_name(f".{target.name}.{os.getpid()}.{uuid4().hex}.tmp")
-        try:
-            if target.is_file():
-                return
-            # Stream and synchronize bytes before validating gzip and atomically renaming the file.
-            url = self._REMOTE_URL.format(protein_id=protein_id.upper())
-            with (
-                urllib.request.urlopen(url, timeout=60.0) as response,
-                temporary.open("wb") as output,
-            ):
-                while chunk := response.read(1024 * 1024):
-                    output.write(chunk)
-                output.flush()
-                os.fsync(output.fileno())
-            with gzip.open(temporary, "rb") as compressed:
-                if not compressed.read(16):
-                    raise ValueError(f"empty structure downloaded from {url}")
-            os.replace(temporary, target)
-        finally:
-            temporary.unlink(missing_ok=True)
-            lock.unlink(missing_ok=True)
+        fields     = identifier.split("_")
+        protein_id = fields[0]
+        chains     = fields[1:]
+        return protein_id.lower() + (f"_{'_'.join(chains)}" if chains else "")

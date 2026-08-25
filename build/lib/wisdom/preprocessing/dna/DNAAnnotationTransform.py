@@ -5,15 +5,16 @@ from __future__ import annotations
 import gzip
 import hashlib
 import json
+import os
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 import gemmi
 import numpy as np
 from scipy.spatial import cKDTree
 
-from wisdom.preprocessing.dna.PublicDataClient import PublicDataClient
 from wisdom.preprocessing.ProcessingRecord import ProcessingRecord
 from wisdom.preprocessing.ProcessingWorkspace import ProcessingWorkspace
 
@@ -21,7 +22,7 @@ from wisdom.preprocessing.ProcessingWorkspace import ProcessingWorkspace
 class DNAAnnotationTransform:
     """Create label sidecar arrays without modifying the universal base archive."""
 
-    SCHEMA_VERSION = "1.2"
+    SCHEMA_VERSION = "1.3"
 
     def __init__(
         self,
@@ -88,22 +89,32 @@ class DNAAnnotationTransform:
         if not isinstance(record.value, Mapping):
             raise TypeError("DNA annotation record must be a mapping")
         value = dict(record.value)
+        label = int(value["label"])
+        if label not in {0, 1}:
+            raise ValueError("DNA annotation requires a curated binary protein label")
 
-        # Decompress and verify geometry's shared coordinate artifact inside the worker process.
-        # This avoids serial source work and preserves the curation-time content fingerprint.
+        # Materialize each content-addressed coordinate file once. Every member retains the source
+        # structure as auditable dataset evidence, including negatives, but an existing verified
+        # file avoids repeating gzip decompression when several chains share one PDB deposition.
         archive_value = value.get("structure_archive_path")
         if archive_value:
             archive_path  = Path(str(archive_value))
-            content       = gzip.decompress(archive_path.read_bytes())
             expected_hash = str(value["structure_sha256"])
-            if hashlib.sha256(content).hexdigest() != expected_hash:
-                raise ValueError(
-                    f"geometry structure bytes disagree with curation for {record.key}"
-                )
             structure_path = context.output(self.structure_output) / f"{expected_hash}.cif"
             structure_path.parent.mkdir(parents=True, exist_ok=True)
-            if not structure_path.is_file():
-                PublicDataClient.atomic_write(structure_path, content)
+            if structure_path.is_file():
+                observed_hash = hashlib.sha256(structure_path.read_bytes()).hexdigest()
+                if observed_hash != expected_hash:
+                    raise ValueError(
+                        f"resolved structure bytes disagree with design for {record.key}"
+                    )
+            else:
+                content = gzip.decompress(archive_path.read_bytes())
+                if hashlib.sha256(content).hexdigest() != expected_hash:
+                    raise ValueError(
+                        f"geometry structure bytes disagree with design for {record.key}"
+                    )
+                self._atomic_write(structure_path, content)
             value["structure_path"] = str(structure_path.resolve())
 
         base_path = Path(str(value["base_npz"]))
@@ -136,9 +147,6 @@ class DNAAnnotationTransform:
         source_surface = surface_positions + origin
         surface_count  = len(source_surface)
 
-        label = int(value["label"])
-        if label not in {0, 1}:
-            raise ValueError("DNA annotation requires a curated binary protein label")
         local_method   = str(value.get("local_gt_method", ""))
         local_expected = bool(value.get("local_gt_expected", False))
         local_reason   = "available"
@@ -147,13 +155,24 @@ class DNAAnnotationTransform:
             structure_hash = hashlib.sha256(structure_path.read_bytes()).hexdigest()
             if structure_hash != str(value["structure_sha256"]):
                 raise ValueError("DNA assembly bytes do not match curated source provenance")
+            rotation    = np.asarray(value["assembly_rotation"], dtype=np.float64)
+            translation = np.asarray(value["assembly_translation"], dtype=np.float64)
+            if rotation.shape != (3, 3) or translation.shape != (3,):
+                raise ValueError("dataset design assembly transform must have shapes [3,3] and [3]")
+            if not np.isfinite(rotation).all() or not np.isfinite(translation).all():
+                raise ValueError("dataset design assembly transform must be finite")
+            if not np.allclose(rotation @ rotation.T, np.eye(3), atol=1e-5):
+                raise ValueError("dataset design assembly rotation is not orthonormal")
+            assembly_surface = source_surface @ rotation.T + translation
             dna_positions, dna_radii = self._dna_atoms(
                 structure_path,
-                {str(chain) for chain in value["dna_chains"]},
+                str(value["assembly_id"]),
+                str(value["protein_chain"]),
+                int(value["protein_copy"]),
             )
             if not len(dna_positions):
-                raise ValueError("positive DNA row has no heavy atoms in declared DNA chains")
-            center_distance, nearest = cKDTree(dna_positions).query(source_surface, k=1)
+                raise ValueError("positive DNA row has no heavy atoms in its declared assembly")
+            center_distance, nearest = cKDTree(dna_positions).query(assembly_surface, k=1)
             distance = center_distance - dna_radii[nearest]
             hard     = (distance <= self.positive_gap).astype(np.uint8)
             valid    = np.logical_or(
@@ -179,7 +198,7 @@ class DNAAnnotationTransform:
                 raise ValueError("surface_atom_edge_index must have shape [2,E]")
 
             # Each surface sample inherits the label of its nearest represented protein atom. The
-            # atom's flattened residue index is aligned to the DyProL sequence mask by curation.
+            # atom's flattened residue index is aligned to the design binding-residue evidence.
             surface_ids = surface_atoms[0]
             atom_ids    = surface_atoms[1]
             edge_gaps   = np.linalg.norm(
@@ -240,6 +259,11 @@ class DNAAnnotationTransform:
             "base_surface_count": surface_count,
             "source_structure_sha256": str(value["structure_sha256"]),
             "source_structure_path": str(value.get("structure_path", "")),
+            "assembly_id": str(value.get("assembly_id", "")),
+            "protein_chain": str(value.get("protein_chain", "")),
+            "protein_copy": int(value.get("protein_copy", 0)),
+            "assembly_rotation": value.get("assembly_rotation"),
+            "assembly_translation": value.get("assembly_translation"),
             "protein_label": label,
             "local_gt_expected": local_expected,
             "local_gt_available": local_available,
@@ -285,10 +309,10 @@ class DNAAnnotationTransform:
     ) -> ProcessingRecord:
         """Compute and atomically persist one sidecar for LambdaForge ``Work.map``.
 
-        Arrays are written inside the worker because LambdaForge's resumable map intentionally
-        checkpoints only JSON-compatible results. Returning the compact sidecar report lets the
-        parent Work assemble and validate the complete dataset without transferring large arrays
-        between spawned processes.
+        Arrays are written inside the worker so the process returns only a compact JSON-compatible
+        audit row instead of transferring large arrays to the coordinator. Scientific resume is
+        performed here by the sink before transformation; the surrounding framework map remains
+        stateless and therefore cannot bypass archive validation.
 
         Args:
             record: Catalog/base-geometry join for one logical protein.
@@ -362,34 +386,79 @@ class DNAAnnotationTransform:
         return regions
 
     @staticmethod
+    def _atomic_write(path: Path, content: bytes) -> None:
+        """Publish immutable uncompressed structure bytes atomically.
+
+        Args:
+            path: Final checkpoint-owned structure path.
+            content: Complete verified uncompressed mmCIF bytes.
+
+        Returns:
+            ``None`` after ``fsync`` and atomic replacement.
+        """
+        path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = path.with_name(f".{path.name}.{os.getpid()}.{uuid4().hex}.tmp")
+        try:
+            with temporary.open("wb") as stream:
+                stream.write(content)
+                stream.flush()
+                os.fsync(stream.fileno())
+            os.replace(temporary, path)
+        finally:
+            temporary.unlink(missing_ok=True)
+
+    @staticmethod
     def _dna_atoms(
         structure_path: Path,
-        dna_chains    : set[str],
+        assembly_id  : str,
+        protein_chain: str,
+        protein_copy : int,
     ) -> tuple[np.ndarray, np.ndarray]:
-        """Read exact DNA heavy-atom coordinates and tabulated van der Waals radii.
+        """Reconstruct exact assembly DNA coordinates and validate the declared protein copy.
 
         Args:
             structure_path: Curated biological assembly path readable by Gemmi.
-            dna_chains: Non-empty exact DNA chain identifiers from the catalog.
+            assembly_id: Exact biological assembly identifier fixed by DatasetDesign.
+            protein_chain: Exact deposited protein chain name, which may contain several chars.
+            protein_copy: One-based copy index under Gemmi's deterministic ``Dup`` naming policy.
 
         Returns:
             Coordinate matrix ``float64 [D,3]`` and matching radii ``float64 [D]`` in Å.
 
         Raises:
-            ValueError: If DNA chain identifiers are absent or an atom radius is unavailable.
+            ValueError: If assembly/copy identity is absent or an atom radius is unavailable.
         """
-        if not dna_chains:
-            raise ValueError("positive annotation requires declared DNA chains")
         structure = gemmi.read_structure(str(structure_path))
+        if not structure:
+            raise ValueError("positive annotation structure has no coordinate model")
+        assembly = next(
+            (value for value in structure.assemblies if str(value.name) == assembly_id),
+            None,
+        )
+        if assembly is None:
+            raise ValueError(f"positive annotation assembly {assembly_id!r} is absent")
+        assembled = gemmi.make_assembly(
+            assembly,
+            structure[0],
+            gemmi.HowToNameCopiedChain.Dup,
+        )
+        protein_copies = [
+            chain
+            for chain in assembled
+            if chain.name == protein_chain
+            and chain.get_polymer().check_polymer_type()
+            in {gemmi.PolymerType.PeptideL, gemmi.PolymerType.PeptideD}
+        ]
+        if protein_copy < 1 or protein_copy > len(protein_copies):
+            raise ValueError("positive annotation protein assembly copy is absent")
         positions: list[tuple[float, float, float]] = []
         radii    : list[float]                      = []
-        for chain in structure[0]:
-            if chain.name not in dna_chains:
+        for chain in assembled:
+            polymer = chain.get_polymer()
+            if not len(polymer) or polymer.check_polymer_type() != gemmi.PolymerType.Dna:
                 continue
-            for residue in chain:
-                if gemmi.find_tabulated_residue(residue.name).kind is not gemmi.ResidueKind.DNA:
-                    continue
-                for atom in residue:
+            for residue in polymer.first_conformer():
+                for atom in residue.first_conformer():
                     if atom.element.atomic_number <= 1:
                         continue
                     position = (atom.pos.x, atom.pos.y, atom.pos.z)

@@ -1,4 +1,4 @@
-"""Stable JSON-compatible record passed between WISDOM preprocessing components."""
+"""Small keyed value passed between WISDOM preprocessing components."""
 
 from __future__ import annotations
 
@@ -7,41 +7,34 @@ from typing import Any
 
 
 class ProcessingRecord(dict[str, Any]):
-    """Represent one keyed scientific item without owning execution or persistence.
-
-    LambdaForge 0.12 deliberately removed its former preprocessing record abstraction. WISDOM
-    still needs a small domain value that keeps a stable key beside a candidate value while its
-    :class:`lambdaforge.Work` calls ``self.map``. Subclassing ``dict`` keeps the value directly
-    JSON-compatible, which is required by LambdaForge's safe map checkpoints.
-    """
+    """Keep one stable map key beside its scientific value and routing metadata."""
 
     def __init__(
         self,
-        key     : str,
-        value   : Any,
+        key     : str | Mapping[str, Any],
+        value   : Any = None,
         metadata: Mapping[str, Any] | None = None,
     ) -> None:
-        """Create one uniquely keyed, JSON-compatible preprocessing value.
+        """Create the JSON-compatible value exchanged by LambdaForge map workers.
 
         Args:
-            key: Non-empty stable identity used for parallel-map resume and duplicate detection.
-            value: Scientific candidate or result payload associated with ``key``.
-            metadata: Optional JSON-compatible routing facts such as the intended filename.
-
-        Raises:
-            ValueError: If ``key`` is empty.
+            key: Stable record identity, or a complete mapping returned by a map worker.
+            value: Scientific candidate or result associated with a text key.
+            metadata: Optional routing information such as an output filename.
         """
-        selected = str(key).strip()
-        if not selected:
-            raise ValueError("processing record key cannot be empty")
-        super().__init__(key=selected, value=value, metadata=dict(metadata or {}))
+        if isinstance(key, Mapping):
+            record   = key
+            key      = str(record["key"])
+            value    = record.get("value")
+            metadata = record.get("metadata")
+        super().__init__(key=key, value=value, metadata=dict(metadata or {}))
 
     @property
     def key(self) -> str:
-        """Return the non-empty stable identity used by LambdaForge ``Work.map``.
+        """Return the stable identity used by LambdaForge map.
 
         Returns:
-            Stable record identity.
+            Record identity as text.
         """
         return str(self["key"])
 
@@ -50,42 +43,26 @@ class ProcessingRecord(dict[str, Any]):
         """Return the scientific payload without copying it.
 
         Returns:
-            Candidate or transformed scientific value stored by this record.
+            Candidate or transformed value stored by this record.
         """
         return self["value"]
 
     @property
     def metadata(self) -> dict[str, Any]:
-        """Return a mutable copy of routing metadata.
+        """Return an independent routing-metadata mapping.
 
         Returns:
-            JSON-compatible metadata mapping.
+            Copy of the record metadata.
         """
-        value = self.get("metadata", {})
-        return dict(value) if isinstance(value, Mapping) else {}
+        return dict(self["metadata"])
 
     def with_value(self, value: Any) -> ProcessingRecord:
-        """Create a record with the same identity and metadata but a new payload.
+        """Return the same keyed record with a replacement scientific payload.
 
         Args:
-            value: Replacement scientific payload.
+            value: Scientific payload for the returned record.
 
         Returns:
-            Independent record retaining this record's stable key and metadata.
+            New record retaining this key and metadata.
         """
         return ProcessingRecord(self.key, value, self.metadata)
-
-    @classmethod
-    def restore(cls, value: Mapping[str, Any]) -> ProcessingRecord:
-        """Restore a record returned from a LambdaForge JSON checkpoint.
-
-        Args:
-            value: Mapping containing ``key``, ``value``, and optional ``metadata`` fields.
-
-        Returns:
-            Validated :class:`ProcessingRecord` instance.
-
-        Raises:
-            ValueError: If the checkpoint lacks a non-empty key.
-        """
-        return cls(str(value.get("key", "")), value.get("value"), value.get("metadata", {}))

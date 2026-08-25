@@ -15,8 +15,9 @@ normalized atomic data, one spatial/covalent atomic graph, a fixed solvent-acces
 cloud, local surface geometry, a surface graph, and surface-to-atom communication edges. Section 4.1
 builds a plain-language picture of all these objects before the mathematical detail begins.
 
-WISDOMv1 performs binary protein classification with weakly supervised local surface logits.
-WISDOMv2 keeps that backbone unchanged and compares MIL pooling rules for small localized signals.
+WISDOMv1 performs binary protein classification while producing local surface scores from only a
+whole-protein training label. WISDOMv2 keeps the same atom/surface encoder and compares pooling
+rules, which combine many point-level scores into one protein-level prediction.
 Neither version implements the later chemistry, bidirectional, quasi-geodesic, dMaSIF-inspired,
 contrastive, or language-model stages in the roadmap.
 
@@ -25,11 +26,15 @@ contrastive, or language-model stages in the roadmap.
 - [1. Quick start](#1-quick-start)
 - [2. Installation](#2-installation)
   - [2.1. Requirements](#21-requirements)
-  - [2.2. Development installation](#22-development-installation)
+  - [2.2. Automated Conda installation](#22-automated-conda-installation)
+  - [2.3. Activation, updates, and installation checks](#23-activation-updates-and-installation-checks)
 - [3. DNA-binding benchmark and annotations](#3-dna-binding-benchmark-and-annotations)
-  - [3.1. Immutable raw population, design, and preprocessing actions](#31-immutable-raw-population-design-and-preprocessing-actions)
-  - [3.2. From RAW candidates to a leakage-safe canonical benchmark](#32-from-raw-candidates-to-a-leakage-safe-canonical-benchmark)
-  - [3.3. Surface ground truth and sidecar contract](#33-surface-ground-truth-and-sidecar-contract)
+  - [3.1. Why DNA binding is the first WISDOM problem](#31-why-dna-binding-is-the-first-wisdom-problem)
+  - [3.2. Phase A — constructing and freezing raw evidence](#32-phase-a--constructing-and-freezing-raw-evidence)
+  - [3.3. From frozen evidence to a managed dataset](#33-from-frozen-evidence-to-a-managed-dataset)
+  - [3.4. Phase B — designing a balanced benchmark without leakage](#34-phase-b--designing-a-balanced-benchmark-without-leakage)
+  - [3.5. Statistical audit and interpretation](#35-statistical-audit-and-interpretation)
+  - [3.6. Phase C — structural arrays and surface reference data](#36-phase-c--structural-arrays-and-surface-reference-data)
 - [4. Structural preprocessing](#4-structural-preprocessing)
   - [4.1. Mental model and complete data journey](#41-mental-model-and-complete-data-journey)
   - [4.2. Preparing, running, and inspecting a dataset](#42-preparing-running-and-inspecting-a-dataset)
@@ -49,33 +54,30 @@ contrastive, or language-model stages in the roadmap.
 
 ## 1. Quick start
 
-The production path is one LambdaForge 0.12 sequence in
-[`experiments/dna_preprocess.yaml`](experiments/dna_preprocess.yaml). Its first `DatasetDesign` Work
-reads immutable typed JSONL evidence, revalidates structures/contacts, builds full-raw sequence and
-structural leakage groups, discovers physical phenotypes, balances the canonical population, and
-fixes splits and nested train dilutions. Its second `Preprocessing` Work receives that exact named
-output, generates universal geometry and aligned DNA sidecars, validates the joined result, and
-publishes it immutably. [`experiments/dna_design.yaml`](experiments/dna_design.yaml) exposes only
-the faster design phase for inspection before expensive surface generation. Normal execution never
-rediscovers public candidates and never modifies `data/dna/raw/raw.jsonl`; `raw.fasta` remains an
-interoperability view for sequence tools.
+WISDOM builds the DNA benchmark with two independent commands. `dna_design.yaml` turns frozen
+public evidence into balanced, leakage-safe splits and nested training subsets under
+`data/dna/design`. After that succeeds once, `dna_preprocess.yaml` reads that directory directly,
+creates geometric arrays, validates them, and publishes the LambdaForge dataset. Preprocessing never
+reruns design or public-data discovery.
 
-The first two commands create and activate `.venv`, an isolated Python environment that prevents
-WISDOM's packages from changing the rest of the system. Replace `/absolute/path/to/LambdaForge` with
-the real directory of the local LambdaForge checkout. The two `pip install -e` commands install both
-projects in **editable** mode, meaning source-code changes take effect without reinstalling.
+WISDOM is installed through Conda. The repository's installer can use an existing Conda
+installation or install Miniforge without administrator privileges, create the `wisdom` environment
+from `environment.yml`, obtain a compatible LambdaForge checkout, and install both projects in
+editable mode. “Editable” means that source-code changes take effect without reinstalling.
 
 ```bash
-python -m venv .venv
-source .venv/bin/activate
-python -m pip install -e "/absolute/path/to/LambdaForge"
-python -m pip install -e ".[dev]"
+./install.sh
+conda activate wisdom
+
+# Review and then prepare the complete managed environment on the target cluster.
+lf clusters bootstrap citius-ctgpgpu12 --project . --dry-run
+lf clusters bootstrap citius-ctgpgpu12 --project .
 
 lf validate experiments/dna_design.yaml
 lf explain experiments/dna_design.yaml
 lf run experiments/dna_design.yaml --dry-run
 
-# The production YAML passes dataset design to preprocessing as a typed named output.
+# Preprocess the already published conventional design directory; design is not rerun.
 lf validate experiments/dna_preprocess.yaml
 lf explain experiments/dna_preprocess.yaml
 lf run experiments/dna_preprocess.yaml --dry-run
@@ -139,10 +141,24 @@ with np.load("runs/datasets/published/wisdom-dna/4/<content-id-prefix>/base/<has
 
 ### 2.1. Requirements
 
-- Python 3.10 or newer;
-- LambdaForge `>=0.12.0,<0.13`, normally installed from its local checkout;
-- a CPU environment with NumPy, SciPy, scikit-learn, Biopython, Gemmi, MMseqs2, and Foldseek;
-- Internet access only when remote PDB entries are absent from the raw cache.
+- Linux or macOS on `x86_64`, `aarch64`, or Apple Silicon;
+- Bash and Internet access for the initial environment and public-data downloads;
+- enough local or cluster storage for coordinate files, specialist-tool databases, surfaces, and
+  LambdaForge checkpoints;
+- Conda is optional before installation: `install.sh` offers to install Miniforge under
+  `~/miniforge3` when no Conda installation is found;
+- an NVIDIA GPU is not required to design or preprocess the dataset. Training can use a managed
+  CPU or CUDA environment selected by the LambdaForge cluster profile.
+
+The reproducible package list is [environment.yml](environment.yml). It creates Python 3.11 and
+installs Biopython, MMseqs2, and Foldseek from `conda-forge`/`bioconda`; Python dependencies such as
+NumPy, SciPy, scikit-learn, Gemmi, PyTorch, and LambdaForge are then resolved while WISDOM is
+installed. Gemmi, MMseqs2, and Foldseek are introduced scientifically in Sections 3.2 and 3.4.
+
+The `[tool.lambdaforge.environment]` table in [pyproject.toml](pyproject.toml) declares this same
+`environment.yml` and names `mmseqs` and `foldseek` as mandatory native executables. “Native” here
+means a command-line program installed outside Python's wheel mechanism. The declaration is part of
+the managed-environment identity; it is not repeated in each experiment YAML.
 
 WISDOM targets LambdaForge `0.12.0`. Every executable action is a direct `Work` subclass with one
 `run()` method. LambdaForge is the source of truth for typed file/dataset resolution, bounded maps,
@@ -150,23 +166,89 @@ safe JSON checkpoints, progress, immutable dataset publication, the placement Re
 resources, seeds, search, and run management. WISDOM remains responsible for protein
 interpretation, scientific geometry, exact NPZ/sidecar validation, and protein visualization.
 
-### 2.2. Development installation
+### 2.2. Automated Conda installation
 
-A **checkout** is a local copy of a Git repository. A **commit** is the exact recorded revision of
-that copy. After replacing both placeholders below, the commands create the isolated environment
-described in Section 1 and verify that installed dependencies are mutually compatible.
+Clone WISDOM, enter the repository, and run the executable installer:
 
 ```bash
 git clone <WISDOM repository URL>
 cd WISDOM
-
-python -m venv .venv
-source .venv/bin/activate
-
-python -m pip install -e "/absolute/path/to/LambdaForge"
-python -m pip install -e ".[dev]"
-python -m pip check
+./install.sh
 ```
+
+The installer is interactive so that it never silently replaces an environment or chooses an
+unexpected LambdaForge directory. In order, it:
+
+1. finds Conda, or offers a user-local Miniforge installation;
+2. creates the `wisdom` environment, or offers to update an existing one with `--prune`;
+3. reuses `./LambdaForge` or `../LambdaForge`, asks for another checkout, or clones the official
+   repository;
+4. verifies that LambdaForge is in the supported range `>=0.12.0,<0.13.0`;
+5. installs LambdaForge and `wisdom[dev]` in editable mode inside the Conda environment;
+6. optionally checks Python, dependency consistency, LambdaForge, MMseqs2, Foldseek, Biopython, and
+   the WISDOM import.
+
+For a non-interactive installation that accepts these defaults, use:
+
+```bash
+./install.sh --yes
+```
+
+The script does not install system-wide packages, an NVIDIA driver, or a system CUDA toolkit. If it
+installs Miniforge and initializes the shell, open a new terminal before activation.
+
+### 2.3. Activation, updates, and installation checks
+
+Activate the environment in every new terminal before running WISDOM:
+
+```bash
+conda activate wisdom
+```
+
+If Conda has not yet been initialized for the current shell, load it once using the path printed by
+the installer, or run `conda init <shell>` and open a new terminal. Running `./install.sh` again is
+the supported update path: it can update the existing environment from `environment.yml`, reuse the
+chosen LambdaForge checkout, and reinstall both editable projects.
+
+These read-only checks confirm what the environment can execute:
+
+```bash
+python --version
+python -m pip check
+lf --version
+mmseqs version
+foldseek version
+python -c 'import Bio, gemmi, wisdom; print("WISDOM environment OK")'
+```
+
+For a cluster profile with `environment: managed`, prepare the project-specific remote environment
+from the WISDOM repository root:
+
+```bash
+# Inspect the exact platform, packages, executables, and connectivity without changing the cluster.
+lf clusters bootstrap citius-ctgpgpu12 --project . --dry-run
+
+# Apply the reviewed plan. This command is idempotent for an already complete environment.
+lf clusters bootstrap citius-ctgpgpu12 --project .
+lf doctor --on citius-ctgpgpu12
+```
+
+`--project .` is significant: it tells bootstrap to read WISDOM's `pyproject.toml` and
+`environment.yml`, build the WISDOM wheel, and prepare those dependencies instead of performing only
+a generic cluster bootstrap. LambdaForge uses its checksum-verified micromamba executable, so the
+remote machine does not need a pre-existing global Conda installation. It creates one immutable
+prefix containing Python, the resolved Conda packages, LambdaForge, WISDOM, and the selected
+PyTorch/CUDA build; then it verifies the Conda inventory and both required executables before the
+environment can be reused. A later `lf run ... --on citius-ctgpgpu12` discovers the same project
+declaration automatically.
+
+`DatasetDesign` performs a second, immediate executable and version preflight at the beginning of
+the Work, before requesting any RCSB structure or starting descriptor computation. If bootstrap was
+not applied, a tool disappeared, or its version command is unusable, `work.log` identifies the
+failing executable and prints the exact local and managed-cluster remediation commands. The later
+`Preprocessing` Work does not require MMseqs2 or Foldseek: it consumes the already fixed design and
+uses Python/Gemmi for geometry, so imposing those unrelated tools there would make standalone
+geometry processing unnecessarily fragile.
 
 LambdaForge 0.12 imports only classes derived from `Work`; function targets and the former
 `Task`/`TaskContext`/`PreprocessingTask` stack no longer exist. `DatasetDesign` uses
@@ -180,83 +262,168 @@ explains this boundary.
 
 ## 3. DNA-binding benchmark and annotations
 
-### 3.1. Immutable raw population, design, and preprocessing actions
+### 3.1. Why DNA binding is the first WISDOM problem
 
-The scientific question is whether a selected protein chain binds DNA. That label was curated
-upstream and is now frozen in `data/dna/raw/raw.jsonl`: approximately 4,484 candidates, 3,529
-positive and 955 negative. JSON Lines (JSONL) stores one complete JSON object per text line. Each
-object explicitly records PDB, chain, biological assembly, assembly copy, binary label, evidence
-tier, origin, source, and full amino-acid sequence. `raw.fasta` contains the same candidates as a
-compatibility view, but no longer overloads a sequence header as the metadata contract. This
-**RAW** population is immutable evidence, not a balanced training set. Normal WISDOM execution does
-not query BTD, rediscover positives, infer a negative from missing DNA, or rewrite these files.
+WISDOM's first question is: **can the selected protein chain bind DNA in a biologically relevant
+setting?** This is a useful first problem because binding happens at a three-dimensional surface:
+the model must relate internal atoms to the shape and chemistry exposed to another molecule.
 
-**How RAW is created.** This is an explicit, infrequent evidence-freezing operation, separate from
-normal dataset design:
+A **benchmark** is a fixed population with explicit labels, train/validation/test partitions, and
+an evaluation protocol. These rules let different models answer the same question under the same
+conditions.
+
+There are two different answers associated with each accepted protein, and confusing them would
+invalidate the experiment:
+
+- the **global label** answers whether the whole protein is considered DNA-binding (`1`) or
+  non-DNA-binding (`0`);
+- the **local reference** marks the surface points that form a known DNA interface. It is also
+  called local *ground truth* (GT): a reference answer used to evaluate localization, not an input
+  shown to the model and not a target used by the present weakly supervised loss.
+
+A deposited structure is only one experimentally studied snapshot. Researchers may crystallize a
+protein alone, remove flexible regions, use a condition without DNA, or deposit only one state of a
+multi-part system. Therefore, **“this PDB file contains no DNA” does not imply “this protein cannot
+bind DNA.”** Even seeing a protein near DNA without contact in one assembly does not prove that it
+never binds under another condition. WISDOM consequently treats a protein as *unknown* unless it
+has defensible positive or negative evidence; unknown records are not relabelled as negatives.
+
+This makes negatives harder than positives. A physical protein–DNA contact supports a positive,
+but finitely many structures cannot prove that a protein never binds DNA. WISDOM therefore starts
+its negative pool from **BTD**, the benchmark of Rahman *et al.* [22]. BTD begins with expert-reviewed
+Swiss-Prot records, removes proteins annotated as known or possible DNA/RNA binders, and reduces
+sequence redundancy. It does not treat the absence of DNA from one structure as negative evidence.
+
+**BTD-Combo** combines BTD with the older PDB1075 and PDB14K benchmarks and reduces redundancy in
+each class. WISDOM uses its labels as source evidence, then adds structure and contact checks because
+surface evaluation needs coordinates. A negative is therefore well curated, but it is still a
+benchmark label—not proof that binding is impossible in every biological context.
+
+Training is **weakly supervised**: it uses the global label, while the local interface is reserved
+for evaluation. The model must therefore discover which surface regions explain its whole-protein
+decision.
+
+The complete selection and preprocessing flow is:
+
+```mermaid
+flowchart LR
+    A["BTD-Combo + dated RCSB evidence"] --> B["Phase A<br/>freeze raw.jsonl"]
+    B --> C["Phase B<br/>revalidate and group all candidates"]
+    C --> D["Balance, split, and create<br/>nested training subsets"]
+    D --> E["Phase C<br/>universal NPZ + DNA sidecar"]
+    E --> F["Validate and publish<br/>wisdom-dna@4"]
+```
+
+| Phase | Main operation | Result used by the next phase |
+|---|---|---|
+| A | Gather defensible labels and exact structures. | Frozen `raw.jsonl`; no split exists yet. |
+| B | Revalidate evidence, group related proteins, balance, split, and audit. | Fixed catalog, train/validation/test files, and nested train subsets. |
+| C | Generate protein geometry and a separate DNA-interface reference. | Validated immutable dataset for training and evaluation. |
+
+### 3.2. Phase A — constructing and freezing raw evidence
+
+Phase A is an infrequent **preanalysis**: it converts public sequence annotations and experimental
+structures into a frozen candidate table. Normal design and preprocessing reuse that table. Rebuild
+it explicitly with:
 
 ```bash
 python scripts/create_fasta.py --workers 36
 ```
 
-The script starts from BTD-Combo, whose negative class was constructed by excluding proteins with
-known or possible DNA-binding annotations rather than by experimentally proving universal
-non-binding. WISDOM therefore calls these records **exclusion-derived benchmark negatives**, not
-biological certainties. It removes ambiguous or duplicate sequences, maps a BTD sequence to RCSB
-only when the complete deposited sequence is identical, requires at least 90% of residues to have
-resolved heavy atoms, reconstructs the declared biological assembly, and rejects a purported
-negative if any inspected copy directly contacts DNA. A failed download or incomplete structural
-audit is also rejected instead of being silently accepted. These rules reduce contradictions but
-cannot turn incomplete annotation into proof that a protein never binds DNA.
+The input is `scripts/btd_combo.fasta`, a local BTD-Combo export. In FASTA, a line beginning with
+`>` names a record and the following letters encode its amino-acid sequence. The script adds exact
+structure identity and evidence to these sequence-only records.
 
-The second source begins with a date-frozen RCSB query for experimental assemblies containing both
-protein and DNA. That query discovers candidates only. WISDOM adds a positive chain after Gemmi has
-reconstructed the selected assembly and the heavy-atom criterion in Section 3.2 has found a real
-protein--DNA contact. A chain merely deposited without DNA, or present in a DNA-containing structure
-but not touching DNA, remains **unknown** and is never converted into a negative. This asymmetric
-policy is intentional: contact is direct positive evidence, whereas absence of an observed contact
-can be caused by construct design, crystallization conditions, missing partners, or incomplete
-annotation. An explicit Gene Ontology `NOT` qualifier can state that an annotation is known not to
-hold, but the currently mappable pool is too sparse to enlarge this structural benchmark safely; it
-is reserved as a future separately reported evidence tier.
+The output is `data/dna/raw/raw.jsonl`, with one JSON object per candidate: identifier, chain,
+biological assembly and copy, label, evidence, source, and amino-acid sequence. The current frozen
+**RAW** population has about 4,484 candidates (3,529 positive and 955 negative). It is evidence,
+not yet a balanced training set. `raw.fasta` is only a compatibility view for sequence tools.
 
-Exact-sequence conflicts between BTD and the contact-verified RCSB expansion are quarantined, with
-direct structural contact taking precedence only for a positive candidate. The script writes typed
-`raw.jsonl`, a hash/provenance summary, detailed CSV evidence, a compatibility `raw.fasta`, and a
-reproducible 1:1 convenience FASTA. That convenience view is not the canonical selection: the
-leakage-aware balancing in Section 3.2 must see the entire RAW population before removing members.
+**A1 — make BTD-Combo compatible with surface evaluation.** BTD-Combo is sequence based, whereas
+WISDOM requires a specific three-dimensional chain. The script removes ambiguous and duplicate
+sequences, then accepts a mapping to the Research Collaboratory for Structural Bioinformatics
+Protein Data Bank (**RCSB PDB**) only when the complete deposited sequence matches. The RCSB PDB is
+the United States data center and web portal for the worldwide PDB archive, the public collection of
+three-dimensional macromolecular structures [1, 17]. An identifier such as `1ABC_A` means chain A of
+PDB entry `1ABC`; it points to experimental coordinates, not merely a protein name.
 
-[`experiments/dna_design.yaml`](experiments/dna_design.yaml) runs the resumable `DatasetDesign`
-action alone. It downloads each unique RCSB mmCIF into a reconstructible LambdaForge cache,
-revalidates exact assemblies/copies and positive contacts, computes descriptors, runs MMseqs2 and
-Foldseek over all RAW candidates, fixes leakage groups and physical phenotypes, and only then selects
-the balanced **CANONICAL** population. Before quality filtering, the current preliminary design in
-`test_dataset/` selected 955 negatives and 955 diversity-aware positives. The production default
-now excludes measured X-ray/cryo-EM resolutions worse than 4 Å from CANONICAL: for this RAW file,
-48 negatives and 188 positives are excluded, leaving a target of 907 members per class. Excluded
-or surplus positives remain RAW evidence in `catalog-all.csv`; omission means “outside the selected
-quality/balance contract,” not “biologically invalid.”
+The mapped structure must resolve heavy atoms—atoms other than hydrogen—for at least 90% of the
+sequence, because a severely incomplete chain cannot support a trustworthy surface reference. The
+script reconstructs the stated **biological assembly**, the molecular arrangement proposed to be
+biologically active rather than merely the contents of one crystallographic box. BTD positives are
+kept only when protein and DNA heavy atoms make the direct contact defined mathematically in Section
+3.4. Without such contact, WISDOM cannot obtain the required coordinate-based local interface and
+removes that candidate from this structural benchmark; it does not change it into a negative.
 
-[`experiments/dna_preprocess.yaml`](experiments/dna_preprocess.yaml) chains that design Work to
-`Preprocessing` through `{from: design.dataset-design}`. Preprocessing is deliberately unable to
-rebalance, recluster, repartition, or invent dilutions: it processes only `catalog.csv`, preserves
-its split/group/phenotype metadata, creates universal label-free NPZ files and aligned DNA sidecars,
-and runs scientific validation. Only after a PASS does `self.outputs.dataset(...)` publish
-`wisdom-dna@4`. A failed execution publishes no version.
+BTD negatives undergo a different check. Their global negative label still comes from the BTD
+curation procedure explained in Section 3.1. WISDOM asks whether a sufficiently complete mapped
+structure can be audited and whether that structure contradicts the label. Any negative whose
+inspected biological assembly directly contacts DNA is quarantined, as are failed downloads and
+incomplete structural audits. Passing this check means “BTD negative with no contradiction in the
+audited structure,” not “every surface point was experimentally proven unable to bind DNA.” The
+all-zero local reference used later is conditional on that accepted global label.
 
-This separates four LambdaForge 0.12 concepts. A **Work** is one class with one framework-invoked
-`run()` method. A **Run** is one immutable expansion of its parameters, seed, and search variant
-with fingerprints and provenance. A **version** is the immutable
-logical content addressed by `wisdom-dna@4`. A **placement** is one physical copy of that version,
-for example on the local workstation or `citius-ctgpgpu12`. Copying verified identical bytes adds a
-placement; it does not create another scientific version. The **DatasetRegistry** is authoritative
-for managed placements. A **DataCatalog** is now reserved for aliases, external data, loader
-definitions, or explicit institutional overrides; WISDOM no longer duplicates managed paths in
-`data/datasets.yaml`.
+**A2 — add positives with observable interfaces.** The second source is a date-frozen RCSB query
+for experimental biological assemblies containing both protein and DNA. This query only discovers
+candidates: inclusion in the same file is not sufficient. WISDOM uses **Gemmi**, an open-source
+structural-biology library that reads PDB/PDBx/mmCIF records and applies their assembly symmetry
+operations [3], to reconstruct the selected assembly. A chain becomes positive only after the
+protein–DNA heavy-atom contact test succeeds. A deposited chain without DNA, or a chain that does
+not touch DNA in one DNA-containing structure, stays unknown and never supplies a negative.
 
-LambdaForge 0.12 makes `lf run` the canonical entry point. Each step has its own absolute
-`resources` request. The preprocessing Work reserves 36 CPUs, 128 GiB, and 24 hours; its
-`workers: 36` argument controls the bounded record pool. Resource reservation and
-scientific concurrency are deliberately distinct.
+**A3 — resolve conflicts and freeze provenance.** An exact sequence with incompatible labels is
+quarantined. The script records source versions and hashes, detailed CSV evidence, typed
+`raw.jsonl`, and FASTA views. The balanced FASTA is only an inspection aid: Phase B always reads the
+full RAW population so even an omitted protein can reveal a similarity link between retained ones.
+
+> **Result after Phase A:** every accepted row has a label source, an exact RCSB chain/assembly, a
+> sequence, and reproducible evidence. No protein has yet been selected for train, validation, or
+> test.
+
+### 3.3. From frozen evidence to a managed dataset
+
+[`experiments/dna_design.yaml`](experiments/dna_design.yaml) runs Phase B alone. It revalidates all
+RAW candidates, computes similarity and physical descriptors, forms dependency groups, and selects
+the balanced **CANONICAL** population used for splitting. RAW remains larger because even an omitted
+candidate may connect two selected proteins. The production 4 Å resolution ceiling leaves a target
+of 907 members per class for the current RAW file. All valid but excluded records remain explained
+in `catalog-all.csv`; exclusion means “outside this benchmark,” not “biologically invalid.”
+
+[`experiments/dna_preprocess.yaml`](experiments/dna_preprocess.yaml) runs Phase C only. Its typed
+file input points to the already completed `data/dna/design` directory. The Work cannot change
+membership or splits and publishes `wisdom-dna@4` only after scientific validation passes.
+
+The preprocessing input has this compact front door:
+
+```text
+data/dna/design/
+├── catalog.csv
+├── train-labelled.txt
+├── validation-labelled.txt
+├── test-labelled.txt
+└── dilutions/
+    └── replicate-00/
+        ├── train-10-labelled.txt
+        ├── train-25-labelled.txt
+        ├── train-50-labelled.txt
+        ├── train-75-labelled.txt
+        └── train-100-labelled.txt
+```
+
+Each labelled TXT line is `RCSB_CHAIN<TAB>LABEL`; for example, `1ABC_A<TAB>1`. Labels are `0` or
+`1`, and chain groups use the underscore convention described in Section 4.2. These manifests
+actively define membership and labels. Preprocessing checks them against `catalog.csv` before any
+download. The catalog remains necessary because a two-column TXT cannot represent the biological
+assembly, transformed chain copy, source-structure hash, DNA chains, contact evidence, leakage
+group, phenotype, and provenance needed for correct annotation and auditing.
+
+The canonical filename is `validation-labelled.txt`, not `val-labelled.txt`; the training loader
+later exposes that split through the shorter API value `val`.
+
+A LambdaForge **Work** is one executable step. A dataset **version** identifies immutable logical
+content; a **placement** is a verified physical copy of that version on one machine. The Registry
+tracks those placements. The YAML requests resources, while `workers` limits concurrent records;
+reserving 36 CPUs does not by itself create 36 workers.
 
 The intended production commands make the artifact boundary explicit:
 
@@ -266,7 +433,7 @@ lf validate experiments/dna_design.yaml
 lf explain experiments/dna_design.yaml
 lf run experiments/dna_design.yaml --dry-run
 
-# Production: the sequence designs membership, generates geometry, then publishes the dataset.
+# Preprocess the existing data/dna/design directory and publish the dataset.
 lf validate experiments/dna_preprocess.yaml
 lf explain experiments/dna_preprocess.yaml
 lf run experiments/dna_preprocess.yaml --dry-run
@@ -287,29 +454,15 @@ lf validate experiments/validate_dna.yaml
 lf run experiments/validate_dna.yaml --on citius-ctgpgpu12
 ```
 
-The first step registers `dataset-design` as one named checksummed directory containing the canonical
-catalog, RAW/selected statistics, leakage evidence, phenotypes, fixed split manifests, and nested
-dilutions; the second step receives it through the typed output reference. Each map result records
-the exact managed mmCIF and protein-only Foldseek dependencies it consumed. LambdaForge validates
-their content hashes before reusing that result. The complete MMseqs2 and Foldseek pair tables are
-separate validated checkpoints, while downloaded/decompressed structures remain reconstructible
-managed cache files. Retrying a compatible failed Run reuses this evidence; `--restart`
-deliberately discards run checkpoints. LambdaForge never trusts an arbitrary directory merely
-because it exists.
+`dataset-design` is one checksummed directory containing catalogs, similarity evidence, phenotypes,
+split manifests, dilutions, and reports. LambdaForge records each mmCIF and specialist-tool result
+used by a map item, so a compatible retry reuses valid downloads and checkpoints. `--restart`
+explicitly discards run checkpoints.
 
-The same managed output is also published atomically to `data/dna/design`, the convenient path
-selected by `output_directory`. `overwrite_output: true` replaces that copy only after a successful
-Work has produced and fingerprinted the complete directory; a failed attempt leaves the previous
-copy untouched. A relative path is relative to the submitted project on the machine that executes
-the Work. For a remote cluster, select an absolute persistent cluster path if the copy must survive
-workspace cleanup. The managed artifact remains the authoritative input of the next step.
-
-The design catalog preserves evidence and deterministic structure identity. Its split manifests,
-pair tables, phenotypes, dilutions, and reports are fixed before geometry as described in Section
-3.2. `REPORT.md` explains every metric, warning, and plot in plain language. ID-only manifests drive
-label-free geometry; matching `*-labelled.txt` views use `RCSB_CHAIN<TAB>0|1` for direct inspection.
-The catalog remains authoritative for labels, assembly identity, and provenance. Geometry and
-annotation reuse the same cached deposited coordinates.
+The Work also copies the complete result atomically to the configured `output_directory` (by
+default `data/dna/design`). `REPORT.md` explains its audit; `*.txt` files contain IDs and
+`*-labelled.txt` files contain `RCSB_CHAIN<TAB>0|1`. `catalog.csv` remains authoritative for labels,
+assemblies, and provenance.
 
 To place the same valid dataset on another cluster, copy the immutable version rather than rerunning
 discovery, mapping, geometry, and annotation:
@@ -322,142 +475,95 @@ lf datasets materialize wisdom-dna@4 --on OTHER_CLUSTER --strategy replicate --a
 lf datasets replicate wisdom-dna@4 --from citius-ctgpgpu12 --to OTHER_CLUSTER --apply
 ```
 
-Both commands verify content identity and register another placement of the same version. To rerun
-only heavy preprocessing elsewhere, transfer the complete `dataset-design` artifact rather than an
-unlabelled list of IDs. To transfer a finished dataset, replication is the complete operation.
+Both commands verify bytes and register another placement of the same version. Transfer the complete
+`dataset-design` output for preprocessing elsewhere; an ID-only file lacks assembly and provenance
+information. `lf top` and `lf logs ... --follow` expose progress and durable `work.log` output.
 
-The invalid version 1 should be removed preview-first. `delete` verifies the registered content,
-refuses active consumers, displays the exact root and bytes, and touches nothing until `--apply`:
+> **Operational result:** run `dna_design.yaml` once to create the inspectable design directory,
+> then run `dna_preprocess.yaml` independently as often as needed. A compatible successful Run is
+> reused; the design Work is never part of the preprocessing execution.
 
-```bash
-# First inspect the deletion plan carefully; this command is read-only.
-lf datasets delete wisdom-dna@1 --on citius-ctgpgpu12
+### 3.4. Phase B — designing a balanced benchmark without leakage
 
-# Delete only that verified physical placement and unregister the placement.
-lf datasets delete wisdom-dna@1 --on citius-ctgpgpu12 --apply
+Phase B validates all RAW records, builds dependency groups, discovers physical phenotypes, selects
+CANONICAL membership, assigns splits, and derives train-only dilutions—in that order. Groups must
+precede selection: if omitted protein B links A to C, A and C must still stay in one split. Otherwise
+the test set could contain information already seen through a close relative, which is **data
+leakage**. Train adjusts the model, validation guides choices, and test remains reserved for the
+final estimate.
 
-# After every placement has been physically deleted, remove the empty version record.
-lf datasets remove wisdom-dna@1
-```
+**Identity and structural revalidation.** Each JSONL row explicitly names its identifier, assembly,
+protein copy, label evidence, origin, source, and sequence. For each PDB entry, a bounded worker
+downloads or reuses the mmCIF, verifies its SHA-256 file digest, reconstructs that biological
+assembly, and selects the declared chain copy. This prevents an equally named chain in another
+assembly copy from being treated as the same physical object.
 
-Do not run `datasets remove` first: it only forgets Registry metadata and deliberately leaves bytes
-on disk, making safe managed cleanup harder. The commands above are instructions; WISDOM never
-deletes a dataset automatically during migration.
+For protein heavy atom $p$ and DNA heavy atom $d$, let their Cartesian centres be $x_p$ and $x_d$ in
+ångströms, and let $r_p$ and $r_d$ be their element-specific van der Waals radii. A direct contact is
 
-LambdaForge 0.12 writes stdout, stderr, and ordinary Python logging to durable `work.log`. Each
-bounded map also updates one coordinator-owned progress snapshot after completed records, so
-parallel workers do not race while formatting status. `lf top` displays that progress and opens the
-captured log; `lf logs wisdom-dna-preprocess --follow` follows it from a terminal.
-
-`dataset.version` is not a cache counter and is not the NPZ schema. `wisdom-dna@4` promises one
-immutable membership and byte identity. This design replaces invalidly imbalanced version 1. Any
-later intended content or scientific-contract change requires a version greater than 4; LambdaForge
-refuses to overwrite an existing name/version with another content ID.
-
-### 3.2. From RAW candidates to a leakage-safe canonical benchmark
-
-Dataset design follows one cumulative order: validate identity, verify structure and contacts,
-describe every RAW member, construct full-population dependency groups, discover physical
-phenotypes, select CANONICAL membership, assign splits, and derive train-only dilutions. Changing
-that order would lose information. Balancing before similarity analysis could remove bridge protein
-B and incorrectly separate selected A and C even when A resembles B and B resembles C.
-
-**Identity and structural revalidation.** The preferred curated input has a deliberately explicit
-contract: one JSON object per line with `identifier`, `assembly_id`, `protein_copy`, `label`,
-`label_evidence`, `origin`, `source`, and `sequence`. `DatasetDesign` also reads the historical
-two-line FASTA for reproducibility, but new builds emit JSONL so delimiters in a header cannot change
-metadata meaning. A malformed researcher-authored input fails when a required field is used. For
-each unique PDB entry, one bounded LambdaForge `resume_map` worker downloads or reuses the RCSB
-mmCIF, verifies its SHA-256 digest, reconstructs the declared biological assembly, and selects the
-exact chain copy. A biological assembly is the intended molecular arrangement, which may contain
-transformed copies of one deposited chain; copy number is not interchangeable with a chain name.
-
-For protein heavy atom p and DNA heavy atom d, let their Cartesian centres be x_p and x_d in
-ångströms, and let r_p and r_d be their element-specific van der Waals radii. A direct contact is
-
-\[
+$$
 \lVert x_p-x_d\rVert_2 < r_p+r_d+0.5\ \text{Å}.
-\]
+$$
 
-The Euclidean norm is ordinary straight-line distance. The extra 0.5 Å is a geometric tolerance
-around the atom envelopes, not a claim that the pair forms a covalent bond. A KD-tree (spatial
-index) finds nearby atoms without a dense protein-atoms × DNA-atoms matrix. A RAW positive must
-reproduce a contact in its exact assembly/copy; a contradiction aborts design. Sequence,
-coordinate coverage, method, resolution, release year, radius of gyration, principal extents,
-interface composition, contact density, and other descriptors remain auditable. Biopython computes
-standard sequence quantities such as molecular weight, aromatic fraction, GRAVY hydropathy,
-theoretical isoelectric point, and charge at pH 7.
+The norm is straight-line distance. The extra 0.5 Å allows small coordinate uncertainty around the
+atom envelopes; it does not imply a covalent bond. A KD-tree spatial index avoids comparing every
+protein atom with every DNA atom. Every RAW positive must reproduce a contact in its exact
+assembly/copy. The audit retains sequence, coverage, experimental method, resolution, release year,
+size, shape, composition, and interface descriptors.
 
-Resolution measures the approximate spatial detail supported by an X-ray or cryo-EM model; a
-larger number means blurrier atomic evidence. WISDOM first builds leakage groups from every RAW
-record, then excludes a structure with a measured resolution above the default 4 Å ceiling from
-CANONICAL. Keeping it in the earlier graph prevents a low-quality homologue from becoming an
-unseen bridge between splits. Records without a comparable numeric resolution, such as many NMR
-models, remain eligible rather than being assigned an invented value. `quality-exclusions.txt` and
-`selection-audit.json` report every exclusion.
+For X-ray and cryo-EM structures, larger resolution values mean less spatial detail. Structures
+worse than the 4 Å default remain in dependency grouping but cannot enter CANONICAL. Records without
+a comparable numeric resolution, such as many NMR models, remain eligible rather than receiving an
+invented value. Every exclusion appears in `quality-exclusions.txt` and `selection-audit.json`.
 
-**Leakage is a full-RAW dependency graph.** A leakage edge means only that two records are too
-dependent to evaluate across different splits; it does not assert equal DNA-binding function.
-MMseqs2 adds a sequence edge when identity is at least 0.30, coverage is at least 0.80 for both query
-and target, and E-value is at most 0.001. Bilateral coverage prevents a short shared domain from
-equating otherwise different proteins. Foldseek adds a protein-only structural edge when
-probability is at least 0.90, both normalized TM-scores are at least 0.75, both coverages are at
-least 0.80, and E-value is at most 0.001. Exact-sequence relations, provenance identity, and—by
-default—all examples from one PDB deposition add auditable hard edges.
+**Leakage groups use all RAW candidates.** **MMseqs2** finds sequence similarity; **Foldseek** finds
+three-dimensional fold similarity that can remain after sequences diverge. Both are needed because
+either relation can make two examples statistically dependent.
 
-WISDOM takes connected components of the union of these sparse edges. A connected component is the
-largest transitive set reachable through any edge. Its stable Lxxxxx identifier is the **leakage
-group**, and the complete group is indivisible during splitting. Raw specialist TSVs, thresholded
-CSV edges, exact-edge reasons, component diagnostics, tool versions, commands, and thresholds remain
-under clusters/ and provenance.json. This preserves the A–B–C bridge even if B is later omitted.
+A dependency edge does not claim equal function; it only forbids a cross-split comparison. MMseqs2
+adds an edge for identity ≥ 0.30, bidirectional coverage ≥ 0.80, and E-value ≤ 0.001. Identity is the
+matching fraction of an alignment, coverage is the aligned fraction of each complete sequence, and
+smaller E-values mean fewer matches of this strength are expected by chance. Foldseek requires
+probability ≥ 0.90, normalized TM-score ≥ 0.75 and coverage ≥ 0.80 in both directions, and E-value
+≤ 0.001. Exact sequences, shared provenance, and by default a shared PDB entry add hard edges.
 
-**Physical phenotypes are descriptive, not functional classes.** Global phenotypes use sequence,
-composition, compactness, anisotropy, size, and experimental descriptors for every quality-eligible
-RAW protein. Quality-excluded proteins still constrain leakage groups but receive `G_NOISE` and
-cannot enter CANONICAL. Positive-interface phenotypes separately use contact count/density, binding
-residue fraction, spatial extent, region count, largest-region fraction, and contacted residue/DNA
-composition for eligible positives. They are never compared between positives and negatives because
-negatives have no positive interface by definition. Neither phenotype system is a DNA-binding label.
+The connected components of the union of all edges are indivisible **leakage groups**. Thus A–B and
+B–C keep A, B, and C together even without an A–C edge. This grouping is a safety constraint, not a
+biological family assignment. Raw tool output, accepted edges, reasons, versions, commands, and
+thresholds remain under `clusters/` and `provenance.json`.
 
-This is intentionally different from the previous **homology clustering**. MMseqs2 and Foldseek ask
-whether two proteins may share evolutionary or structural information, so their connected
-components are dependency constraints: members must remain in one split even if their functions
-differ. **Phenotype clustering** asks whether measured shapes and physicochemical properties occupy
-a similar region of descriptor space. Its clusters support diversity audits and split balance, but
-do not prove common ancestry, equal function, or independence. WISDOM never uses a phenotype to
-break or weaken a homology group.
+**Physical phenotypes measure representation.** Unlike leakage groups, phenotype clusters describe
+similar measured profiles; they do not constrain independence or define biological functions.
+Global phenotypes use size, shape, composition, compactness, and experimental descriptors.
+Positive-interface phenotypes separately use contact density, interface extent, region count, and
+contacted composition. They help distribute observed diversity across splits but never break a
+leakage group or become a model input.
 
-Before HDBSCAN, each finite descriptor column j is robustly scaled. If x_ij is the value for protein
-i, median_j is its population median, and IQR_j is its 75th minus 25th percentile, then
+Before HDBSCAN, each finite descriptor column $j$ is robustly scaled. If $x_{ij}$ is descriptor $j$
+for protein $i$, $\operatorname{median}_j$ is that descriptor's population median, and
+$\operatorname{IQR}_j$ is its 75th percentile minus its 25th percentile, then
 
-\[
+$$
 z_{ij}=\frac{x_{ij}-\operatorname{median}_j}{\operatorname{IQR}_j}.
-\]
+$$
 
-Median/IQR scaling limits extreme sizes. HDBSCAN is density-based and may legitimately mark an
-isolated protein as noise. WISDOM defines the scientific feature set, scaling, neighboring
-parameter grid, and acceptance threshold; LambdaForge executes every HDBSCAN candidate and its
-generic stability comparison. Unlike k-means, HDBSCAN does not require choosing a number of clusters
-or forcing every outlier into one. This is appropriate because WISDOM has no defensible prior number
-of protein shapes and because unusual structures should remain explicitly unsupported rather than
-distort a group.
+Median/IQR scaling limits the influence of extreme sizes. **HDBSCAN** finds dense regions without a
+preselected number of clusters and marks isolated proteins as **noise**. Here noise means “no stable
+dense group,” not “corrupt” or “negative.” That is preferable to forcing unusual structures into an
+arbitrary family.
 
 Stability uses the adjusted Rand index (ARI). The ordinary Rand index (RI) counts how consistently
 two partitions place every pair of proteins together or apart. Chance agreement is removed as
 
-\[
+$$
 \operatorname{ARI}=\frac{\operatorname{RI}-\mathbb{E}[\operatorname{RI}]}
 {\max(\operatorname{RI})-\mathbb{E}[\operatorname{RI}]}.
-\]
+$$
 
-Here \(\mathbb{E}[\operatorname{RI}]\) is expected pair agreement between random partitions with
-comparable cluster sizes. ARI equals 1 for identical partitions, is near 0 for chance-level
-agreement, and can be negative for agreement worse than chance. WISDOM compares the chosen HDBSCAN
-partition with a small neighboring parameter grid. If fewer than two clusters survive or median
-ARI is below 0.60, every affected record becomes `G_NOISE` or `I_NOISE`; an unstable grouping is
-never renamed as a biological type. A large `G_NOISE` fraction is therefore not leakage, but it
-limits claims that the population contains cleanly separated phenotype families and is reported as
-a warning.
+The expectation term is pair agreement expected by chance. ARI is 1 for identical partitions, near
+0 at chance level, and can be negative. WISDOM compares nearby HDBSCAN settings; if fewer than two
+clusters survive or median ARI is below 0.60, it marks the result as noise instead of inventing a
+stable type. A large noise fraction limits phenotype claims but is not a leakage failure.
 
 Interface elongation is measured inside the interface plane. If `s1 >= s2 >= s3` are the principal
 spatial spreads of contacting residue centres, the aspect ratio is `s1/s2`; `s3` describes sheet
@@ -482,72 +588,89 @@ ID-only views of the same assignments stored in catalog.csv and final index.json
 `-labelled.txt` siblings add a tab-separated binary label and are checked against the catalog.
 Every training dilution has the same pair of views.
 
-More precisely, for split \(s\), let \(f_s\) be its requested fraction, \(n_s\) its observed size,
-and \(n\) the canonical size. For any category \(k\)—a label, phenotype, or positive origin—let
-\(n_{s,k}\) and \(n_k\) be its split and population counts. The optimizer minimizes a sum whose
+More precisely, for split $s$, let $f_s$ be its requested fraction, $n_s$ its observed size,
+and $n$ the canonical size. For any category $k$—a label, phenotype, or positive origin—let
+$n_{s,k}$ and $n_k$ be its split and population counts. The optimizer minimizes a sum whose
 count terms have the form
 
-\[
+$$
 J_{count}=\sum_s w_{size}\left(\frac{n_s-f_sn}{\max(f_sn,1)}\right)^2
 +\sum_s\sum_k w_k\left(\frac{n_{s,k}-f_sn_k}{\max(f_sn_k,1)}\right)^2.
-\]
+$$
 
-Each \(w\) is the corresponding YAML weight. Squaring penalizes large deviations more strongly;
+Each $w$ is the corresponding YAML weight. Squaring penalizes large deviations more strongly;
 normalization prevents a frequent category from dominating only because it has more members. For a
-technical variable \(t\), such as resolution or coordinate coverage, the additional term is
+technical variable $t$, such as resolution or coordinate coverage, the additional term is
 
-\[
+$$
 J_{technical}=\sum_s\sum_t w_{technical}
 \left(\frac{\bar{x}_{s,t}-\bar{x}_t}{\max(|\bar{x}_t|,1)}\right)^2,
-\]
+$$
 
-where \(\bar{x}_{s,t}\) and \(\bar{x}_t\) are its finite split and population means. This is a soft
+where $\bar{x}_{s,t}$ and $\bar{x}_t$ are its finite split and population means. This is a soft
 balancing preference, not permission to break a group. The persisted initial/final objective and
 accepted deterministic group moves make the compromise auditable.
 
-**Nested learning curves.** Dilutions alter training only. Each replicate orders complete training
-groups while prioritizing class, phenotype, and origin coverage. train-10 is a subset of train-25,
-then train-50 and so on through train-100, exactly the full training split. A realized fraction may
-differ slightly because a dependency group cannot be split. Validation/test identifiers and their
-SHA-256 membership fingerprints remain identical in every dilution.
+**Nested learning curves.** Dilutions alter training only and preserve complete dependency groups:
+`train-10` is contained in `train-25`, then `train-50`, up to `train-100`. Exact sizes may differ
+slightly because groups are indivisible. Validation and test stay identical.
 
-**Statistics and interpretation.** `REPORT.md` is generated from the same in-memory objects as the
-CSV/JSON evidence and explains each observed value and all nine plots for a non-specialist reader.
-The machine-readable reports include class counts; descriptor distributions;
-standardized mean differences (SMD); Kolmogorov–Smirnov (KS) and Mann–Whitney comparisons;
-normalized Wasserstein distances; contingency tables; Cramér's V; Benjamini–Hochberg
-false-discovery-rate corrections; source confounding; and technical-only logistic shortcut
-baselines evaluated with group-aware folds.
+> **Result after Phase B:** membership, labels, leakage groups, train/validation/test assignments,
+> and nested training subsets are fixed and audited. Phase C may add geometry, but it may not change
+> any of these decisions.
 
-For positive values \(x_+\) and negative values \(x_-\), WISDOM defines the pooled scale and SMD as
+### 3.5. Statistical audit and interpretation
 
-\[
+Phase B ends with a statistical audit. `REPORT.md`, CSV files, and JSON evidence are generated from
+the same results, so the prose, plots, and machine-readable values describe the same population.
+
+The audit includes the following families of questions before the equations define their exact
+measurements:
+
+- **balance:** do positives and negatives occur in the intended proportions in every split and
+  training dilution?
+- **leakage:** does any exact sequence, accepted sequence/structure similarity edge, PDB group, or
+  complete dependency component cross train, validation, and test?
+- **representation:** do the splits preserve the stable global shapes and positive-interface shapes
+  found in Phase B, rather than accidentally reserving one kind of protein for test only?
+- **technical shortcuts:** could measurement method, resolution, release year, coordinate coverage,
+  or source database predict the label without learning a molecular interaction?
+- **stability:** would a small, reasonable change to the phenotype-clustering parameters produce
+  almost the same grouping, or is the apparent pattern fragile?
+
+For positive values $x_+$ and negative values $x_-$, WISDOM defines the pooled scale and SMD as
+
+$$
 s_p=\sqrt{\frac{s_+^2+s_-^2}{2}},\qquad
 \operatorname{SMD}=\frac{\bar{x}_+-\bar{x}_-}{s_p}.
-\]
+$$
 
-The bars over \(x\) denote class means and \(s_+^2,s_-^2\) are sample variances. SMD zero means
-equal means; its sign says which class is larger, and its absolute size measures separation in
-pooled standard deviations. WISDOM flags \(|\mathrm{SMD}|\geq0.25\) and calls
-\(|\mathrm{SMD}|\geq0.50\) strong. These are audit thresholds, not universal biological laws. KS is
-\(\sup_x|F_+(x)-F_-(x)|\), the largest gap between the empirical cumulative distributions, from 0
-to 1. It can detect changes in spread or shape that equal means would hide. The normalized
-Wasserstein distance asks how far observations must move to turn one one-dimensional distribution
-into the other, divided by \(s_p\).
+The bars are class means and $s_+^2,s_-^2$ are sample variances. SMD zero means equal means; its sign
+shows which class is larger and its magnitude is separation in pooled standard deviations. WISDOM
+flags $|\mathrm{SMD}|\geq0.25$ and calls $|\mathrm{SMD}|\geq0.50$ strong; these are audit thresholds,
+not biological laws. KS is the largest gap between the two empirical cumulative distributions and
+therefore detects shape as well as mean changes. Normalized Wasserstein distance measures how far
+one distribution would need to move to match the other, divided by $s_p$.
 
-For a label-by-category table with chi-square statistic \(\chi^2\), \(n\) proteins, \(r\) rows and
-\(c\) columns, uncorrected Cramér's V is
+Mann–Whitney asks whether one class tends to rank higher without assuming a Gaussian distribution.
+Its p-value is evidence against “no shift,” not the size or biological importance of that shift.
+Benjamini–Hochberg corrects the many p-values to control the expected false-discovery fraction.
 
-\[
+For a label-by-category table with chi-square statistic $\chi^2$, $n$ proteins, $r$ rows and
+$c$ columns, uncorrected Cramér's V is
+
+$$
 V=\sqrt{\frac{\chi^2/n}{\min(r-1,c-1)}}.
-\]
+$$
 
-WISDOM uses its small-sample bias correction. V near 0 indicates little observed categorical
-association; V near 1 indicates almost deterministic separation. Benjamini–Hochberg adjusts the
-many p-values to control the expected false-discovery proportion, but neither a small adjusted
-p-value nor a large effect establishes biological cause. Positive-interface ground truth is
-excluded from label-prediction comparisons and model inputs. Every warning records its threshold,
-observed value, feature, and practical interpretation.
+WISDOM applies the small-sample correction. V near 0 means little observed association; V near 1
+means the category almost determines the label. Association is not causation. Local interface
+ground truth is excluded from these comparisons and from model inputs.
+
+Shortcut baselines use AUROC: the probability that a random positive ranks above a random negative.
+Values 0.5 and 1.0 mean chance and perfect ranking. Folds keep leakage groups intact. High AUROC from
+only acquisition or source variables warns that the label is technically predictable; it does not
+show protein–DNA recognition.
 
 **What the current preliminary artifact says.** The checked artifact in `test_dataset/` predates
 the 4 Å quality filter, the revised global HDBSCAN defaults, and the corrected in-plane interface
@@ -573,42 +696,47 @@ with negatively charged DNA, but plausibility does not prove that the benchmark 
 mechanism. The final production report must be reread after quality filtering and reselection; its
 machine-readable values, not this preliminary snapshot, govern release acceptance.
 
-### 3.3. Surface ground truth and sidecar contract
+> **Audit result:** the preliminary set is balanced and has no detected cross-split dependency, but
+> source origin strongly predicts the label and global phenotype coverage is incomplete. The next
+> production `REPORT.md` must therefore pass the same checks; this preliminary table is not a release
+> certificate.
 
-The universal NPZ describes the selected protein alone. It contains no `DNA`, `label`, `target`,
-`split`, or benchmark field. Consequently DNA cannot leak into atomic chemistry, surface geometry,
-or neural features. The annotator creates a separate sidecar on the **same ordered surface points**,
-does not regenerate a surface, and never rewrites the base file. It has two explicit local-target
-routes: DNA-envelope distance when reference DNA coordinates exist, and projection of DyProL
-binding-residue labels when they do not.
+### 3.6. Phase C — structural arrays and surface reference data
 
-The base surface is centered for numerical stability. If (s'_i) is stored point (i) and (o) is
-the stored `coordinate_origin`, its source-frame coordinate is (s_i=s'_i+o). For DNA atom (j),
-let (x_j) be its source-frame centre and (r_j) its Gemmi tabulated van der Waals radius. The
+Phase B fixed membership, labels, and splits but did not create model-ready geometry. Phase C writes
+two separate files per protein: a **universal NPZ** with atoms and surface geometry, and a DNA
+**sidecar** tied to that NPZ fingerprint and point order. The NPZ contains no label, split, DNA, or
+target field, so another task can reuse it without benchmark information. The current dataset
+derives every positive sidecar from observed DNA coordinates; it never silently substitutes the
+separate DyProL residue-mask compatibility route. Section 4 derives the universal arrays.
+
+The base surface is centered for numerical stability. If $s'_i$ is stored point $i$ and $o$ is
+the stored `coordinate_origin`, its source-frame coordinate is $s_i=s'_i+o$. For DNA atom $j$,
+let $x_j$ be its source-frame centre and $r_j$ its Gemmi-tabulated van der Waals radius. The
 physical surface gap is
 
-\[
+$$
 d_i=\min_j\left(\lVert s_i-x_j\rVert_2-r_j\right).
-\]
+$$
 
 Subtracting the DNA atom radius changes a centre distance into an approximate distance from the
-protein surface point to the DNA van der Waals envelope. With positive gap (a=1.4) Å and negative
-gap (b=3.0) Å, the primary arrays are defined as follows:
+protein surface point to the DNA van der Waals envelope. With positive gap $a=1.4$ Å and negative
+gap $b=3.0$ Å, the primary arrays are defined as follows:
 
-\[
+$$
 y_i^{hard}=\mathbb{1}[d_i\leq a],\qquad
 m_i=\mathbb{1}[d_i\leq a\ \lor\ d_i\geq b].
-\]
+$$
 
-Here (mathbb{1}) is one when its condition is true. `surface_target_hard` stores
-(y_i^{hard}); `surface_valid_mask` stores (m_i). Points with (a<d_i<b) form an ambiguity band:
+Here $\mathbb{1}$ is one when its condition is true. `surface_target_hard` stores
+$y_i^{hard}$; `surface_valid_mask` stores $m_i$. Points with $a<d_i<b$ form an ambiguity band:
 they remain available for visualization but are excluded from binary surface metrics. The soft
 target changes continuously rather than jumping at one cutoff. With
-(t_i=\operatorname{clip}((d_i-a)/(b-a),0,1)),
+$t_i=\operatorname{clip}((d_i-a)/(b-a),0,1)$,
 
-\[
+$$
 y_i^{soft}=\frac{1+\cos(\pi t_i)}{2}.
-\]
+$$
 
 Thus it is exactly one at or inside the confident interface, exactly zero beyond the confident
 negative boundary, and smooth between them. The sidecar also stores `surface_distance_to_dna`, a
@@ -617,69 +745,39 @@ schema/provenance JSON scalar, and the SHA-256 of the exact base NPZ. Curated gl
 hard/soft zero at every valid point. Their DNA distance is not computable, so it is NaN only where
 `surface_distance_valid` is false; it is never disguised as zero distance.
 
-For residue-mask projection, let (q_i) be surface point (i), (A(i)) the atoms connected to it
-by the preprocessed sparse atom–surface graph, and (ho(a)) atom (a)'s zero-based residue index.
-The nearest represented atom and target are
+For separately imported DyProL records, the compatibility route assigns each surface point the mask
+of its nearest represented residue and records `local_gt_method=binding_residue_mask`. It has no
+DNA-distance sensitivity thresholds and is not used by `wisdom-dna@4`.
 
-\[
-a_i^*=\arg\min_{a\in A(i)}\lVert q_i-x_a\rVert_2,
-\qquad
-y_i^{hard}=\mathbb{1}[\rho(a_i^*)\in B],
-\]
+Global and local eligibility differ. A reliable positive can train from its global label even when
+no local reference is usable. A positive with zero labelled surface points keeps `label=1`, receives
+an invalid local mask, is excluded from localization metrics, and is restricted to train; it never
+becomes an all-negative surface. Dilution views reuse the same NPZ/sidecar bytes and never change
+validation or test.
 
-where (B) is the set of `1` positions in DyProL's mask. This transfers a curated residue region
-to the fixed point discretization without using it as model input. If a point unexpectedly has no
-atom–surface edge, the nearest protein atom supplies a deterministic fallback. Distance-threshold
-sensitivity is not physically defined for this route, so metadata identifies
-`local_gt_method=binding_residue_mask`.
-
-Global and local eligibility are deliberately different. A reliable positive may train from its
-protein label even when `local_gt_expected=false`. After annotation, `local_gt_available` is true
-for a positive only if at least one surface point is positive. A zero-positive projection keeps
-global `label=1`, makes every local validity entry false, records
-`zero_positive_surface_points`, and is excluded from localization metrics—never converted into an
-all-negative surface. Partitioning then enforces the stricter rule: such a positive is train-only.
-No reserve-replacement mechanism changes evaluation membership after observing local targets.
-Learning curves use the absolute, nested train-only views from Section 3.2. Validation and test are
-identical for every view, so a curve changes training quantity rather than its evaluation question.
-For example, set `subset: replicate-00/train-25`; all views reuse the same NPZ and sidecar bytes.
-
-With dimensionless represented-area weights (w_i>0) normalized so that their sum is one, annotation
+With dimensionless represented-area weights $w_i>0$ normalized so that their sum is one, annotation
 records
 
-\[
+$$
 W_+=\sum_i w_i y_i^{hard},\qquad
 W=\sum_i w_i=1,\qquad
 f_{interface}=W_+/W.
-\]
+$$
 
 These are positive represented weight, total normalized weight, and interface fraction—not physical
 areas in Å². Connected components of positive points in the sparse surface graph give
 `number_of_positive_regions`, enabling site-size and single-/multi-region analyses without changing
 weakly supervised training.
 
-A globally positive protein may be usable for weakly supervised training even when it is excluded
-from surface-localization evaluation because no reliable local ground truth can be generated.
+Before publication, the sink rejects object arrays, length mismatches, invalid masks/probabilities,
+incorrect missing-distance values, and NPZ/sidecar fingerprint disagreement. `index.jsonl` then
+records each member's split, targets, statistics, and checksummed NPZ, sidecar, and source structure.
+Relative paths make the version movable; its content ID depends on membership and exact bytes, not
+the workstation or cluster path.
 
-The sink rejects object arrays, length mismatches, invalid probabilities/masks, finite values where
-distance is declared unavailable, and base-fingerprint disagreement before atomic publication. The
-sidecar itself stays small. For portability, the annotation dataset also packages a byte-identical
-copy of each universal NPZ under `annotations/base/<sha256>.npz`; it never rewrites the source.
-The resulting relative-path manifests join `file`, `annotation`, global `label`, explicit `split`,
-stable `identifier`, and `tier`, so the logical dataset can move to another mount. `WisdomDataset`
-verifies the sidecar fingerprint again at load time.
-
-The final `index.jsonl` expresses the same main-split collection in LambdaForge's canonical
-dataset model. Each train/validation/test protein is one member with `split` and `tier` partitions;
-`dna_binding` and
-`local_ground_truth` targets; scientific surface statistics; and checksummed `universal_npz`,
-`dna_annotation`, and selected `source_structure` assets. The complete design artifact separately
-retains the RAW/canonical catalogs, split manifests, leakage/phenotype evidence, dilutions, and
-statistical reports.
-Consequently the managed content ID depends on scientific
-membership and exact bytes, not on their workstation/cluster path. Intermediate design and
-geometry directories may later leave their Work caches without making the published version
-incomplete: its catalog-relative `structures/` paths, base NPZ files, and sidecars are all present.
+> **Result after Phase C:** every published member has a reusable label-free protein representation,
+> a separately verified DNA evaluation sidecar, fixed split metadata, and checksummed provenance.
+> This is the dataset consumed by WISDOM training.
 
 ## 4. Structural preprocessing
 
@@ -717,7 +815,7 @@ coordinate files. Copying all structures into one directory would make the datas
 audit, and reproduce. WISDOM therefore starts from a small **manifest**: a TXT file in which every
 non-comment line says where one protein comes from.
 
-A line can be a public PDB identifier such as `4hhb_AB`, in which case WISDOM can obtain the
+A line can be a public PDB identifier such as `4hhb_A`, in which case WISDOM can obtain the
 coordinate file from RCSB PDB, or a local path such as `../structures/model.cif.gz`. The manifest is
 the ordered definition of the dataset; the coordinate files are its physical inputs. This separation
 lets the same manifest work with an existing cache, download missing public entries, and report a
@@ -767,20 +865,19 @@ journey. Sections 4.3–4.7 then revisit the same arrows in scientific and mathe
 
 ### 4.2. Preparing, running, and inspecting a dataset
 
-DatasetDesign writes `catalog.csv` as label/split authority and derives `proteins.txt`, `train.txt`,
-`validation.txt`, and `test.txt` as readable views. The production YAML passes the complete managed
-design directory to `Preprocessing`; the user does not wire a second manifest path. Internally,
-Preprocessing projects the canonical catalog to one `protein_identifiers` checkpoint with one
-structure identifier per line. Empty/comment lines would be ignored and exact duplicates retain
-their first occurrence, but generated designs already validate uniqueness.
+DatasetDesign writes the complete portable contract under `data/dna/design`. The three
+`*-labelled.txt` manifests actively define label and split membership; `catalog.csv` supplies the
+structural and provenance fields needed after that selection. The independent preprocessing YAML
+stages this whole directory with one typed `{file: ...}` marker. Internally, Preprocessing verifies
+the TXT/catalog join and projects the accepted identifiers to one geometry checkpoint.
 
 The single complete manifest deliberately combines train, validation, and test. Molecular geometry
 does not depend on a supervised split, so processing the same structure once is both cheaper and
 safer than three independent runs. Split membership and labels remain in `catalog.csv` and later in
 `members.jsonl`; they are never inferred from filenames or inserted into the universal NPZ.
 `preprocessing-report.json` is the exact `identifier -> output` join used by annotation. Automated
-validation proves that the three split views are disjoint, their union equals `proteins.txt`, and
-each labelled view agrees with the catalog.
+validation proves that the three labelled split views are disjoint, cover the catalog exactly, and
+agree with its labels. Split metadata later enters `members.jsonl`, never the universal NPZ.
 
 **Remote entries.**
 
@@ -788,12 +885,14 @@ each labelled view agrees with the catalog.
 1abc
 4hhb_A
 4hhb_AB
+4hhb_A_B
 ```
 
 The four-character code `4hhb` is the public identifier assigned by the Protein Data Bank. An
-underscore introduces the optional chain selector described in Section 4.1: `4hhb_AB` means “use
-PDB entry `4hhb`, but retain only chains `A` and `B`.” Chain characters are concatenated because each
-character is one chain ID; commas and the former `#A,B` form are invalid. A selector on the line is
+underscore introduces the optional chain selector described in Section 4.1. A complete chain name
+occupies each underscore-separated field: `4hhb_AB` retains the single chain named `AB`, whereas
+`4hhb_A_B` retains two chains named `A` and `B`. This matters because PDBx/mmCIF permits chain names
+with several characters. Commas and the former `#A,B` form are invalid. A selector on the line is
 specific to that protein and therefore takes precedence over the global `config.chains` setting.
 
 **Local structures.**
@@ -820,8 +919,8 @@ XML, trajectories, and archive containers are outside the current input contract
 **Configuration and execution.**
 
 [`experiments/dna_preprocess.yaml`](experiments/dna_preprocess.yaml) is the human-editable structural
-description. Its LambdaForge 0.12 sequence configures the two Work classes, passes the named
-`dataset-design` output, and selects scientific parameters, concurrency, dataset identity, and resources.
+description. It runs only `Preprocessing`, stages the existing `data/dna/design` directory as a
+typed file input, and selects scientific parameters, concurrency, dataset identity, and resources.
 
 ```bash
 lf validate experiments/dna_preprocess.yaml
@@ -831,9 +930,9 @@ lf run experiments/dna_preprocess.yaml
 ```
 
 `validate` catches malformed arguments, missing staged inputs, and unavailable Python callables.
-`explain` reveals both Work signatures and their configured/default parameters. `--dry-run` submits
-nothing and transforms no proteins. The final command performs the
-complete journey from Section 4.1 and publishes only after the final index validates.
+`explain` reveals the Work signature and its configured/default parameters. `--dry-run` submits
+nothing and transforms no proteins. The final command generates geometry and annotations for the
+fixed design and publishes only after the final index validates.
 
 The three preprocessing concepts have narrow roles. `ProteinSource` reads the named
 `protein_identifiers` input and gives every unique TXT line a stable key. `PreprocessPipeline` is the
@@ -847,12 +946,13 @@ the final dataset identity.
 
 | Parameter | Default | Meaning |
 |---|---:|---|
-| `design` | no default | Exact fixed design artifact passed by `{from: design.dataset-design}`. |
+| `design` | no default | Existing fixed design directory staged by `{file: ../data/dna/design}`. |
 | `dataset_name` | `wisdom-dna` | Stable managed dataset name passed to `self.outputs.dataset`. |
 | `dataset_version` | `4` | Immutable release label; intended byte changes require a new value. |
 | `workers` | `36` | Spawned record processes, normally one per requested CPU. |
 | `requests_per_second` | `4.0` | Aggregate RCSB request starts per second across download threads. |
 | `retries` | `5` | Additional HTTP attempts after the first failed structure request. |
+| `progress_log_seconds` | `120.0` | Heartbeat interval for long parallel phases; exact counts remain in `lf top`. |
 | `surface_resolution`; `probe_radius` | `1.0`; `1.4` Å | Surface spacing and solvent-probe radius. |
 | `atom_radius`; `atom_surface_radius` | `6.0`; `6.0` Å | Sparse graph communication cutoffs. |
 | `curvature_scales` | `2.5, 5.0` | Curvature fit radii in surface-resolution units. |
@@ -878,11 +978,22 @@ where `h=surface_resolution`. Adding or removing scales changes
 `surface_curvatures` from `[M,S,3]` to the new number `S`; the WISDOMv1 YAML must then set
 `curvature_features=3S` and the surface projection input size to `hidden_dim+3S`.
 
+Preprocessing always publishes the complete canonical population once. It stores dilution
+membership in each dataset member rather than recomputing or duplicating NPZ files. Choose the
+training amount in `wisdom_v1.yaml` or `wisdom_v2.yaml` with `subset: full` or, for example,
+`subset: replicate-00/train-25`. Validation and test remain unchanged for every subset.
+
 The execution fields and scientific fields are intentionally separate. Changing `workers`, the
-download rate, retry count, or requested resources changes how the same records are scheduled;
+download rate, retry count, progress interval, or requested resources changes how the same records are scheduled;
 it must not change their NPZ bytes or dataset identity. Changing a scientific field changes the
 geometry and therefore invalidates reuse. WISDOM no longer carries paths, worker counts, resume
 flags, or failure policy inside `PreprocessConfig`.
+
+During each long parallel phase, `lf top` displays LambdaForge's exact completed/total counter.
+The Work log also emits one short heartbeat every `progress_log_seconds`, so a quiet protein cannot
+make the job look frozen. On a compatible retry, structure downloads come from dependency-checked
+LambdaForge cache entries. Existing geometry NPZ and DNA sidecars are opened and fully validated;
+only missing, corrupt, source-mismatched, or configuration-mismatched records are recomputed.
 
 **Inspecting the result.**
 

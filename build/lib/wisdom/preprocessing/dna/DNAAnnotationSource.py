@@ -1,4 +1,4 @@
-"""Join curated DNA labels to universal preprocessing outputs by exact identity."""
+"""Join fixed DatasetDesign labels/assemblies to universal geometry by exact identity."""
 
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ from wisdom.preprocessing.ProcessingWorkspace import ProcessingWorkspace
 
 
 class DNAAnnotationSource:
-    """Expose accepted catalog rows whose universal NPZ exists in the bound report."""
+    """Expose designed catalog rows whose universal NPZ exists in the bound report."""
 
     def __init__(
         self,
@@ -23,7 +23,7 @@ class DNAAnnotationSource:
         """Bind the curated catalog and exact upstream preprocessing report.
 
         Args:
-            catalog_input: Named input containing ``curated-catalog.csv`` from the curation Work.
+            catalog_input: Named input containing canonical ``catalog.csv`` from DatasetDesign.
             base_report_input: Named workflow-bound ``preprocessing-report.json`` input.
             structure_cache_input: Named directory containing geometry's downloaded RCSB
                 ``*.cif.gz`` files.
@@ -39,7 +39,7 @@ class DNAAnnotationSource:
         self.structure_cache_input = structure_cache_input
 
     def records(self, context: ProcessingWorkspace) -> Iterable[ProcessingRecord]:
-        """Yield one joined row per accepted protein without guessing filenames.
+        """Yield one joined row per designed protein without guessing filenames.
 
         Args:
             context: LambdaForge task context resolving the two declared inputs.
@@ -79,6 +79,10 @@ class DNAAnnotationSource:
                 "protein_chain",
                 "dna_chains",
                 "structure_sha256",
+                "assembly_id",
+                "protein_copy",
+                "assembly_rotation",
+                "assembly_translation",
             }
             if not required.issubset(reader.fieldnames or ()):
                 missing = sorted(required - set(reader.fieldnames or ()))
@@ -95,12 +99,15 @@ class DNAAnnotationSource:
                 value["binding_residue_indices"] = json.loads(
                     row["binding_residue_indices"] or "[]"
                 )
+                value["assembly_rotation"] = json.loads(row["assembly_rotation"])
+                value["assembly_translation"] = json.loads(row["assembly_translation"])
+                value["protein_copy"] = int(row["protein_copy"])
                 value["local_gt_expected"] = row["local_gt_expected"].lower() == "true"
                 value["base_npz"]           = str(outputs[identifier].resolve())
 
                 # Geometry already downloaded every selected PDB entry in parallel. The source
-                # only joins its archive path; decompression, hashing, and materialization remain
-                # per-record work and therefore execute inside the CPU worker pool.
+                # only joins its archive path. The transform content-addresses materialized bytes,
+                # so chains sharing one PDB reuse the same verified uncompressed structure.
                 pdb_id          = identifier.split("_", maxsplit=1)[0].lower()
                 compressed_path = structure_cache / f"{pdb_id}.cif.gz"
                 if not compressed_path.is_file():

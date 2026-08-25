@@ -31,7 +31,7 @@ class StructureSource:
         """Compose the deterministic output stem.
 
         Returns:
-            ``protein_id`` followed by ``_`` and concatenated remote chain IDs when a per-record
-            chain selector exists. Local filenames never acquire an inferred chain selector.
+            ``protein_id`` followed by complete underscore-separated remote chain IDs when a
+            per-record selector exists. Local filenames never acquire an inferred chain selector.
         """
-        return self.protein_id + ("_" + "".join(self.chains) if self.chains else "")
+        return self.protein_id + ("_" + "_".join(self.chains) if self.chains else "")

@@ -1,6 +1,6 @@
-"""Public WISDOM preprocessing entry points and their domain-specific internals."""
+"""Public WISDOM dataset-design and preprocessing Works."""
 
+from wisdom.preprocessing.DatasetDesign import DatasetDesign
 from wisdom.preprocessing.Preprocessing import Preprocessing
-from wisdom.preprocessing.Selection import Selection
 
-__all__ = ["Preprocessing", "Selection"]
+__all__ = ["DatasetDesign", "Preprocessing"]

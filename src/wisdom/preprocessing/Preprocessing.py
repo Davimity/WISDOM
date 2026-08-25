@@ -6,11 +6,14 @@ import csv
 import gzip
 import hashlib
 import json
+import math
 import os
 import shutil
+import time
 from collections.abc import Iterable, Mapping, Sequence
 from functools import partial
 from pathlib import Path
+from threading import Event, Thread
 from typing import Any
 from uuid import uuid4
 
@@ -45,6 +48,7 @@ class Preprocessing(lf.Work):
         workers             : int             = 36,
         requests_per_second : float           = 4.0,
         retries             : int             = 5,
+        progress_log_seconds: float           = 120.0,
         surface_resolution  : float           = 1.0,
         probe_radius        : float           = 1.4,
         atom_radius         : float           = 6.0,
@@ -71,6 +75,7 @@ class Preprocessing(lf.Work):
             workers: Spawned CPU workers for independent geometry and annotation records.
             requests_per_second: Aggregate RCSB request-start limit for missing structures.
             retries: Additional LambdaForge download attempts after the first failure.
+            progress_log_seconds: Seconds between concise heartbeat lines during parallel maps.
             surface_resolution: Target solvent-surface point spacing in ångströms.
             probe_radius: Solvent probe radius added to atom radii in ångströms.
             atom_radius: Sparse atom-graph neighborhood cutoff in ångströms.
@@ -114,8 +119,19 @@ class Preprocessing(lf.Work):
             raise ValueError(
                 f"workers={workers} exceeds LambdaForge cpu allocation={self.resources.cpu}"
             )
+        if not math.isfinite(progress_log_seconds) or progress_log_seconds <= 0.0:
+            raise ValueError("progress_log_seconds must be finite and positive")
 
-        catalog = self._catalog(design / "catalog.csv")
+        if self.resuming:
+            self.log(
+                "Compatible LambdaForge checkpoints were found; structures and scientifically "
+                "valid NPZ/sidecar files will be restored instead of recomputed"
+            )
+
+        # The compact labelled manifests actively define membership and labels. The catalog is
+        # joined only for assembly, contact, grouping, phenotype, and provenance fields that a
+        # two-column TXT cannot represent without becoming another ad-hoc serialization format.
+        catalog = self._catalog(design)
         identifiers = [str(row["identifier"]) for row in catalog]
 
         # LambdaForge downloads every unique selected PDB once before CPU-heavy geometry starts.
@@ -139,19 +155,30 @@ class Preprocessing(lf.Work):
             {"pdb_id": pdb_id, "expected_sha256": next(iter(structure_hashes[pdb_id]))}
             for pdb_id in sorted(structure_hashes)
         ]
-        print(
-            f"[Preprocessing] Fetching or restoring {len(structure_jobs)} unique structures "
-            f"with {workers} workers",
-            flush=True,
+        self.log(
+            f"Fetching or restoring {len(structure_jobs)} unique structures with {workers} "
+            "workers; lf top shows the exact completed/total count"
         )
-        structures = self.resume_map(
-            structure_jobs,
-            self._fetch_structure,
-            key="pdb_id",
-            workers=workers,
-            executor="thread",
-            name="preprocessing-structures",
+        heartbeat_stop = Event()
+        heartbeat      = Thread(
+            target=self._heartbeat,
+            args=(heartbeat_stop, "structure retrieval", progress_log_seconds),
+            daemon=True,
         )
+        heartbeat.start()
+        try:
+            structures = self.resume_map(
+                structure_jobs,
+                self._fetch_structure,
+                key="pdb_id",
+                workers=workers,
+                executor="thread",
+                name="preprocessing-structures",
+            )
+        finally:
+            heartbeat_stop.set()
+            heartbeat.join()
+        self.log(f"Structure retrieval complete: {len(structures)} verified archives are ready")
         structure_roots = {Path(structure).parent for structure in structures}
         if len(structure_roots) != 1:
             raise RuntimeError("managed structures do not share one LambdaForge cache directory")
@@ -160,13 +187,12 @@ class Preprocessing(lf.Work):
         manifest = self.checkpoints.path("geometry/protein-identifiers.txt")
         self._atomic_text(manifest, "".join(f"{identifier}\n" for identifier in identifiers))
 
-        print(
-            f"[Preprocessing] Generating geometry for {len(catalog)} designed proteins "
-            f"with {workers} workers",
-            flush=True,
+        self.log(
+            f"Generating geometry for {len(catalog)} designed proteins with {workers} workers; "
+            "lf top shows the exact completed/total count"
         )
         geometry_root = self.checkpoints.path("geometry")
-        geometry = ProcessingWorkspace(
+        geometry      = ProcessingWorkspace(
             self.run_dir,
             inputs={
                 "protein_identifiers": manifest,
@@ -189,12 +215,30 @@ class Preprocessing(lf.Work):
                 curvature_scales=tuple(curvature_scales),
             ),
         )
-        geometry_results = self.map(
-            protein_records,
-            partial(pipeline.process, context=geometry),
-            workers=workers,
-            executor="process",
-            name="protein-geometry",
+        heartbeat_stop = Event()
+        heartbeat      = Thread(
+            target=self._heartbeat,
+            args=(heartbeat_stop, "protein geometry", progress_log_seconds),
+            daemon=True,
+        )
+        heartbeat.start()
+        try:
+            geometry_results = self.map(
+                protein_records,
+                partial(pipeline.process, context=geometry),
+                workers=workers,
+                executor="process",
+                name="protein-geometry",
+            )
+        finally:
+            heartbeat_stop.set()
+            heartbeat.join()
+        geometry_statuses = [
+            str(ProcessingRecord(value).value["status"]) for value in geometry_results
+        ]
+        self.log(
+            f"Geometry complete: {geometry_statuses.count('processed')} generated and "
+            f"{geometry_statuses.count('skipped')} restored after scientific validation"
         )
         geometry_sink = ProteinSink()
         geometry_sink.records = {
@@ -204,9 +248,12 @@ class Preprocessing(lf.Work):
         }
         geometry_sink.finalize(geometry)
 
-        print(f"[Preprocessing] Projecting {len(catalog)} DNA target sidecars", flush=True)
+        self.log(
+            f"Projecting {len(catalog)} DNA target sidecars; lf top shows the exact "
+            "completed/total count"
+        )
         annotation_root = self.checkpoints.path("annotation")
-        annotation = ProcessingWorkspace(
+        annotation      = ProcessingWorkspace(
             self.run_dir,
             inputs={
                 "dataset_design": design,
@@ -227,13 +274,25 @@ class Preprocessing(lf.Work):
             sensitivity_gaps=tuple(sensitivity_gaps),
             structure_output="resolved-structures",
         )
-        annotation_results = self.map(
-            annotation_records,
-            partial(annotation_pipeline.process, context=annotation),
-            workers=workers,
-            executor="process",
-            name="dna-annotations",
+        heartbeat_stop = Event()
+        heartbeat      = Thread(
+            target=self._heartbeat,
+            args=(heartbeat_stop, "DNA annotation", progress_log_seconds),
+            daemon=True,
         )
+        heartbeat.start()
+        try:
+            annotation_results = self.map(
+                annotation_records,
+                partial(annotation_pipeline.process, context=annotation),
+                workers=workers,
+                executor="process",
+                name="dna-annotations",
+            )
+        finally:
+            heartbeat_stop.set()
+            heartbeat.join()
+        self.log(f"DNA annotation complete: {len(annotation_results)} sidecars are ready")
         annotation_sink = DNAAnnotationSink(
             annotation_output="annotations",
             report_output="annotation-report",
@@ -302,6 +361,30 @@ class Preprocessing(lf.Work):
             "validation_verdict": validation["verdict"],
         }
 
+    def _heartbeat(self, stop: Event, phase: str, interval_seconds: float) -> None:
+        """Emit one race-free liveness line while a LambdaForge parallel map is active.
+
+        LambdaForge already writes exact aggregate map progress for ``lf top`` from the parent
+        process. This lightweight thread only adds an occasional timestamped log line so a tailed
+        log also proves that a long CPU phase remains alive. It never counts worker completions,
+        writes scientific state, or competes with process workers.
+
+        Args:
+            stop: Thread event set by the parent immediately after the map exits or fails.
+            phase: Human-readable name of the active preprocessing phase.
+            interval_seconds: Positive delay in seconds between heartbeat lines.
+
+        Returns:
+            ``None`` after ``stop`` is set.
+        """
+        started = time.monotonic()
+        while not stop.wait(interval_seconds):
+            elapsed_minutes = (time.monotonic() - started) / 60.0
+            self.log(
+                f"{phase} is still active after {elapsed_minutes:.1f} min; "
+                "open lf top for exact aggregate progress"
+            )
+
     def _fetch_structure(self, job: Mapping[str, Any]) -> ManagedFile:
         """Fetch one selected RCSB entry through LambdaForge's managed cache.
 
@@ -358,18 +441,23 @@ class Preprocessing(lf.Work):
             return False
 
     @staticmethod
-    def _catalog(path: Path) -> list[dict[str, Any]]:
-        """Read and validate the fixed canonical design catalog.
+    def _catalog(design: Path) -> list[dict[str, Any]]:
+        """Join labelled split manifests to the fixed scientific design catalog.
 
         Args:
-            path: DatasetDesign ``catalog.csv``.
+            design: DatasetDesign directory containing ``catalog.csv`` and the three labelled
+                split manifests in ``RCSB_CHAIN<TAB>0|1`` format.
 
         Returns:
-            Identifier-sorted rows with nested JSON fields and scalar types restored.
+            Identifier-sorted catalog rows whose membership, labels, and splits exactly match the
+            labelled manifests, with nested JSON fields and scalar types restored.
 
         Raises:
-            ValueError: If required fields, IDs, labels, splits, groups, or selected flags fail.
+            ValueError: If catalog fields, IDs, labels, splits, groups, selected flags, main
+                manifests, or dilution manifests disagree.
+            OSError: If a required catalog or labelled manifest cannot be read.
         """
+        path = design / "catalog.csv"
         required = {
             "identifier",
             "label",
@@ -427,7 +515,87 @@ class Preprocessing(lf.Work):
         identifiers = [str(row["identifier"]) for row in rows]
         if not rows or len(identifiers) != len(set(identifiers)):
             raise ValueError("design catalog must contain unique non-empty identifiers")
+
+        # Split TXT files are the compact researcher-facing contract. Requiring exact equality with
+        # catalog.csv catches accidental edits before any structure download or surface generation.
+        by_identifier = {str(row["identifier"]): row for row in rows}
+        manifested: dict[str, tuple[int, str]] = {}
+        for split in ("train", "validation", "test"):
+            for identifier, label in Preprocessing._labelled_manifest(
+                design / f"{split}-labelled.txt"
+            ).items():
+                if identifier in manifested:
+                    raise ValueError(f"labelled split manifests repeat identifier {identifier!r}")
+                if identifier not in by_identifier:
+                    raise ValueError(
+                        f"{split}-labelled.txt contains unknown identifier {identifier!r}"
+                    )
+                row = by_identifier[identifier]
+                if int(row["label"]) != label or str(row["split"]) != split:
+                    raise ValueError(
+                        f"{split}-labelled.txt contradicts catalog.csv for {identifier!r}"
+                    )
+                manifested[identifier] = (label, split)
+        if set(manifested) != set(by_identifier):
+            missing = sorted(set(by_identifier) - set(manifested))
+            raise ValueError(f"labelled split manifests omit canonical identifiers: {missing}")
+
+        # Dilutions are labelled training views, not independent datasets. They may select only
+        # canonical train members and must preserve the label fixed by the main manifests.
+        dilution_paths = sorted(
+            (design / "dilutions").glob("replicate-*/train-*-labelled.txt")
+        )
+        if not dilution_paths:
+            raise ValueError("design contains no labelled training dilution manifests")
+        train_identifiers = {
+            identifier for identifier, (_label, split) in manifested.items() if split == "train"
+        }
+        for dilution_path in dilution_paths:
+            dilution = Preprocessing._labelled_manifest(dilution_path)
+            unknown  = sorted(set(dilution) - train_identifiers)
+            changed  = sorted(
+                identifier
+                for identifier, label in dilution.items()
+                if identifier in manifested and label != manifested[identifier][0]
+            )
+            if unknown or changed:
+                raise ValueError(
+                    f"invalid labelled dilution {dilution_path.relative_to(design)}: "
+                    f"non-train={unknown}, changed-label={changed}"
+                )
         return rows
+
+    @staticmethod
+    def _labelled_manifest(path: Path) -> dict[str, int]:
+        """Read one deterministic two-column protein-label manifest.
+
+        Args:
+            path: UTF-8 TXT containing exactly ``RCSB_CHAIN<TAB>0|1`` per non-empty line.
+
+        Returns:
+            Identifier-to-binary-label mapping in source order.
+
+        Raises:
+            ValueError: If a line has the wrong number of columns, an invalid label, an empty
+                identifier, or a duplicate identifier.
+            OSError: If the manifest cannot be read.
+        """
+        values: dict[str, int] = {}
+        for line_number, raw in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+            if not raw.strip():
+                continue
+            fields = raw.split("\t")
+            if len(fields) != 2 or not fields[0].strip() or fields[1].strip() not in {"0", "1"}:
+                raise ValueError(
+                    f"{path.name} line {line_number} must be RCSB_CHAIN<TAB>0|1"
+                )
+            identifier = fields[0].strip()
+            if identifier in values:
+                raise ValueError(f"{path.name} repeats identifier {identifier!r}")
+            values[identifier] = int(fields[1].strip())
+        if not values:
+            raise ValueError(f"{path.name} cannot be empty")
+        return values
 
     @staticmethod
     def _write_index(root: Path, catalog: Sequence[Mapping[str, Any]]) -> None:
@@ -449,13 +617,11 @@ class Preprocessing(lf.Work):
         if set(annotation_rows) != {str(row["identifier"]) for row in catalog}:
             raise ValueError("annotation report and fixed design catalog have different members")
         dilution_members = {
-            f"{replicate.name}/{path.stem}": {
-                value.strip()
-                for value in path.read_text(encoding="utf-8").splitlines()
-                if value.strip()
-            }
+            f"{replicate.name}/{path.stem.removesuffix('-labelled')}": set(
+                Preprocessing._labelled_manifest(path)
+            )
             for replicate in sorted((root / "design" / "dilutions").glob("replicate-*"))
-            for path in sorted(replicate.glob("train-*.txt"))
+            for path in sorted(replicate.glob("train-*-labelled.txt"))
         }
         members: list[DatasetMember] = []
         for row in catalog:

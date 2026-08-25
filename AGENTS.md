@@ -39,6 +39,12 @@ project contract, not optional style suggestions.
   how it is obtained, what transformation follows, and how its output becomes the next step's
   input. Use explicit transitions between subsections; do not present pipeline stages as isolated
   facts.
+- Prefer direct sentences and concrete verbs. Remove ceremonial framing, repeated conclusions, and
+  inflated wording that does not add a definition, decision, result, limitation, or usable action.
+  Scientific rigor does not require formal-sounding filler.
+- Introduce a multi-stage workflow with one clean diagram or compact summary table when it shortens
+  the explanation. End each substantial stage with a concise statement of the data or decision now
+  available and what the next stage may do with it.
 - Assume that readers may know neither software engineering nor structural chemistry. Define a
   specialized term at first use, state what practical role it has in WISDOM, and avoid relying on
   unexplained abbreviations, file-format fields, enum names, or implementation jargon. Refresh a
@@ -144,6 +150,14 @@ project contract, not optional style suggestions.
   cluster-specific absolute data paths into model parameters.
 - Use LambdaForge managed runners and portable resource requests instead of project-owned SSH,
   scheduler, GPU allocation, subprocess, or SLURM wrappers.
+- Declare project-native command-line dependencies once in `[tool.lambdaforge.environment]`, backed
+  by one repository-contained Conda environment file or explicit lock. Keep executable names bare;
+  never install native packages from a Work or encode machine-specific Conda paths in WISDOM.
+- Resolve and version-probe every external program at the beginning of the Work that actually uses
+  it, before downloads or expensive computation. A failure must identify the tool and tell local
+  users to run `./install.sh` and managed-cluster users to run
+  `lf clusters bootstrap <cluster> --project .`. Do not impose unrelated tool requirements on a
+  Work that never executes those programs.
 - Treat LambdaForge as an external, read-only dependency. Never modify its source tree, installed
   package, metadata, tests, or documentation without explicit permission from the user for that
   specific change.
@@ -269,9 +283,11 @@ project contract, not optional style suggestions.
 ## Scientific and data invariants
 
 - Use Gemmi for PDB/mmCIF parsing. No custom coordinate-file parser may be introduced.
-- Input TXT records are either remote identifiers such as `XYZ_ABC` (protein `XYZ`, chains A/B/C)
-  or complete local `.pdb`, `.cif`, `.mmcif`, and optionally `.gz` paths. Do not infer chains from a
-  local filename and do not accept the old `#`/comma syntax.
+- Input TXT records are either remote identifiers such as `XYZ_AQ` (protein `XYZ`, one chain named
+  `AQ`) or `XYZ_A_Q` (two chains named `A` and `Q`), or complete local `.pdb`, `.cif`, `.mmcif`, and
+  optionally `.gz` paths. The first underscore separates the PDB ID from a complete chain name;
+  every later underscore introduces another complete chain name. Do not infer chains from a local
+  filename and do not accept the old `#`/comma syntax.
 - Keep atom and surface graph construction sparse. Never materialize dense `N x N` or `M x M`
   distance matrices.
 - Persist each undirected graph pair once with `src < dst`. Preserve covalent edges outside spatial

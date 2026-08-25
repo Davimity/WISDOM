@@ -1,0 +1,71 @@
+{
+  "simple_global_model_visible": {
+    "auprc_mean": 0.8244599053725304,
+    "auprc_std": 0.025268557255663855,
+    "auroc_mean": 0.8403546942298628,
+    "auroc_std": 0.0235797623107769,
+    "available": true,
+    "balanced_accuracy_mean": 0.7524710096533301,
+    "balanced_accuracy_std": 0.02592685848219649,
+    "categorical_features": [],
+    "cross_validation": "StratifiedGroupKFold",
+    "folds": 5,
+    "model": "LogisticRegression",
+    "numeric_features": [
+      "sequence_length",
+      "theoretical_isoelectric_point",
+      "net_charge_at_pH_7",
+      "gravy",
+      "positive_residue_fraction",
+      "negative_residue_fraction",
+      "polar_residue_fraction",
+      "hydrophobic_residue_fraction",
+      "aromatic_fraction",
+      "radius_of_gyration_normalized",
+      "aspect_ratio",
+      "compactness",
+      "packing_density"
+    ]
+  },
+  "technical_with_origin": {
+    "auprc_mean": 1.0,
+    "auprc_std": 7.021666937153402e-17,
+    "auroc_mean": 1.0,
+    "auroc_std": 0.0,
+    "available": true,
+    "balanced_accuracy_mean": 1.0,
+    "balanced_accuracy_std": 0.0,
+    "categorical_features": [
+      "origin",
+      "experimental_method"
+    ],
+    "cross_validation": "StratifiedGroupKFold",
+    "folds": 5,
+    "model": "LogisticRegression",
+    "numeric_features": [
+      "resolution",
+      "coordinate_coverage",
+      "release_year"
+    ]
+  },
+  "technical_without_origin": {
+    "auprc_mean": 0.6750741020588303,
+    "auprc_std": 0.03033216175848748,
+    "auroc_mean": 0.6851675565683042,
+    "auroc_std": 0.037962239203039344,
+    "available": true,
+    "balanced_accuracy_mean": 0.6345516362090948,
+    "balanced_accuracy_std": 0.027499327640877147,
+    "categorical_features": [
+      "experimental_method"
+    ],
+    "cross_validation": "StratifiedGroupKFold",
+    "folds": 5,
+    "model": "LogisticRegression",
+    "numeric_features": [
+      "resolution",
+      "coordinate_coverage",
+      "release_year"
+    ]
+  }
+}

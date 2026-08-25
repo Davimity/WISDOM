@@ -363,6 +363,18 @@ def test_selection_delegates_runtime_infrastructure_to_lambdaforge() -> None:
         assert managed_api in source
 
 
+def test_external_tools_are_resolved_before_structure_analysis() -> None:
+    """A missing specialist executable must fail before any expensive PDB retrieval begins."""
+    run_source = inspect.getsource(DatasetDesign.run)
+
+    assert run_source.index("self.tools.require(") < run_source.index("self._read_records(")
+    assert run_source.index("self.tools.require(") < run_source.index("self.resume_map(")
+    assert "stopped before structure retrieval" in run_source
+    assert "lf clusters bootstrap <cluster> --project ." in run_source
+    assert "except (FileNotFoundError, RuntimeError)" in run_source
+    assert "live aggregate progress is available in lf top" in run_source
+
+
 def test_balancing_keeps_all_negatives_and_exact_positive_target() -> None:
     """Default selection keeps negatives and returns the requested 1:1 class count."""
     rows = [row(f"N{i}", 0, f"n{i}") for i in range(3)] + [

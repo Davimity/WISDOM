@@ -1,11 +1,14 @@
 # Design WISDOM-DNA from explicit immutable evidence records; this does not generate surface NPZs.
+# Native packages come from pyproject.toml/environment.yml. Before a managed-cluster run, execute
+# `lf clusters bootstrap <cluster> --project .`; DatasetDesign then preflights both executables
+# before downloading or analysing any structure.
 name: wisdom-dna-design                                  # Stable LambdaForge Work identity.
 run: wisdom.preprocessing.DatasetDesign.DatasetDesign    # Single Work owning the complete design phase.
 
 with:                                                    # Arguments passed directly to DatasetDesign.run(...).
-  raw_records: {file: ../data/dna/raw/raw.jsonl}          # One typed candidate/evidence object per UTF-8 line.
-  workers: 36                                            # Concurrent PDB analyses and threads for each specialist tool.
-  requests_per_second: 4.0                               # Select four aggregate RCSB request starts per second.
+  raw_records: {file: ../data/dna/raw/raw.jsonl}         # One typed candidate/evidence object per UTF-8 line.
+  workers: 64                                            # Concurrent PDB analyses and threads for each specialist tool.
+  requests_per_second: 60.0                              # Allow sixty aggregate RCSB request starts per second.
   retries: 5                                             # Retry a failed RCSB transfer five times after its first attempt.
   output_directory: data/dna/design                      # Publish a verified convenient copy below the project root.
   overwrite_output: true                                 # Replace that copy atomically only after a successful Work.
@@ -53,8 +56,7 @@ with:                                                    # Arguments passed dire
   foldseek_executable: foldseek                          # Foldseek binary available in the Work environment.
 
 # DatasetDesign.run option reference:
-# Every public parameter is selected above. Its true default equals the shown value except
-# requests_per_second=60.0; this production recipe deliberately selects 4.0 to be courteous to RCSB.
+# Every public parameter is selected above and its true constructor default equals the shown value.
 # raw_records has no default and accepts canonical .jsonl or legacy two-line .fasta/.fa/.faa input;
 # JSONL is preferred because label evidence, assembly identity, provenance, and sequence are typed.
 # output_directory=null keeps results only in LambdaForge; overwrite_output=false refuses a
@@ -69,10 +71,12 @@ with:                                                    # Arguments passed dire
 # fractions summing to one; non-negative objective weights; and dilutions in (0,1] including 1.0.
 # Invalid values fail naturally in LambdaForge, MMseqs2, Foldseek, clustering, or split construction.
 # Executable values accept a binary name or path; LambdaForge records their resolved paths, versions,
-# commands, bounded logs, and thread environments in Work provenance.
+# commands, bounded logs, and thread environments in Work provenance. WISDOM resolves and probes
+# both programs before the first structure transfer, while pyproject.toml declares the bare names
+# that managed bootstrap must install and verify.
 
 resources:                                               # Portable reservation for this design Work.
-  cpu: 36                                                # Match the 36 concurrent jobs and specialist-tool threads.
+  cpu: 36                                                # Reserve 36 CPUs while 64 I/O-heavy retrieval jobs overlap waits.
   memory: 96GiB                                          # Descriptor matrices, assemblies, and clustering headroom.
   storage: 100GiB                                        # Cached mmCIFs plus MMseqs2/Foldseek temporary databases.
   time: 24h                                              # Scheduler wall-time ceiling.
