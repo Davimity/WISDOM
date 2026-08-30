@@ -1,6 +1,6 @@
-"""Public WISDOM dataset-design and preprocessing Works."""
+"""Public WISDOM selection and preprocessing Works."""
 
-from wisdom.preprocessing.DatasetDesign import DatasetDesign
-from wisdom.preprocessing.Preprocessing import Preprocessing
+from wisdom.preprocessing.dna.selection.Selection import Selection
+from wisdom.preprocessing.dna.preprocessing.Preprocessing import Preprocessing
 
-__all__ = ["DatasetDesign", "Preprocessing"]
+__all__ = ["Preprocessing", "Selection"]

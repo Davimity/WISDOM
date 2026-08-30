@@ -1,8 +1,9 @@
-"""WISDOM v2 with controlled protein-level pooling alternatives."""
+"""WISDOM v2 controlled pooling hypotheses on the fixed DiffusionNet backbone."""
 
 from __future__ import annotations
 
 from typing import Any, ClassVar
+from collections.abc import Mapping, Sequence
 
 import torch
 from lambdaforge.nn import Scatter
@@ -16,10 +17,11 @@ from torch import Tensor
 
 from wisdom.models.PoolingType import PoolingType
 from wisdom.models.WisdomV1 import WisdomV1
+from wisdom.models.DiffusionSurfaceEncoder import DiffusionSurfaceEncoder
 
 
 class WisdomV2(WisdomV1):
-    """Keep the v1 backbone fixed while varying only the weak MIL pooling rule."""
+    """Keep the complete v1 representation fixed while varying only protein pooling."""
 
     output_schema: ClassVar[dict[str, Any]] = {
         "logits": "Tensor[B]",
@@ -33,62 +35,73 @@ class WisdomV2(WisdomV1):
 
     def __init__(
         self,
-        hidden_dim          : int               = 128,
-        embedding_dim       : int               = 32,
-        use_residue_type    : bool              = True,
-        atomic_layers       : int               = 2,
-        projection_depth    : int               = 1,
-        surface_layers      : int               = 2,
-        dropout             : float             = 0.2,
-        atomic_number_count : int               = 119,
-        residue_type_count  : int               = 21,
-        curvature_features  : int               = 6,
-        pooling_type        : PoolingType | str = PoolingType.MAX,
-        topk_fraction       : float             = 0.05,
-        attention_hidden_dim: int               = 32,
-        regional_levels     : int               = 1,
-        log_sum_exp_beta    : float             = 5.0,
+        hidden_dim               : int = 128,
+        embedding_dim            : int = 32,
+        use_residue_type         : bool = True,
+        atomic_layers            : int = 2,
+        projection_depth         : int = 1,
+        surface_layers           : int = 2,
+        dropout                  : float = 0.2,
+        atomic_number_count      : int = 119,
+        residue_type_count       : int = 21,
+        curvature_features       : int = 6,
+        atom_spatial_k           : int = 16,
+        surface_atom_k           : int = 16,
+        diffusion_spectral_modes : int = 128,
+        surface_atom_radius      : float = 6.0,
+        surface_chunk_size       : int = 8192,
+        atomic_message_chunk_size: int = 65536,
+        pooling_type             : PoolingType | str = PoolingType.MAX,
+        topk_fraction            : float = 0.05,
+        attention_hidden_dim     : int = 32,
+        regional_diffusion_scale : float = 2.5,
+        log_sum_exp_beta         : float = 5.0,
     ) -> None:
-        """Construct the v1 encoder and exactly one configured pooling hypothesis.
-
-        The graph encoders, feature families, local head, and optimization interface are inherited
-        unchanged from v1. MAX is therefore an exact control. Mean uses represented surface area;
-        attention learns normalized weights from surface embeddings; TOP-K averages a fixed
-        fraction of local logits; local-mean/MAX smooths area-weighted graph neighborhoods before
-        taking a maximum; and normalized log-sum-exp is a differentiable maximum approximation.
+        """Construct v1 exactly and select one multiple-instance pooling rule.
 
         Args:
-            hidden_dim: Shared atomic and surface latent width.
-            embedding_dim: Width of element and optional residue embeddings.
-            use_residue_type: Include the residue-category atom embedding when true.
-            atomic_layers: Relation-aware atomic graph-convolution count.
-            projection_depth: Curvature/atom projection MLP depth.
-            surface_layers: Surface graph-convolution count.
-            dropout: Shared encoder/projection dropout probability.
+            hidden_dim: Fixed reviewed v1 latent width.
+            embedding_dim: Fixed reviewed v1 embedding width.
+            use_residue_type: Fixed reviewed v1 residue-feature switch.
+            atomic_layers: Fixed reviewed v1 atomic depth.
+            projection_depth: Fixed reviewed v1 pointwise projection depth.
+            surface_layers: Fixed reviewed v1 DiffusionNet depth.
+            dropout: Fixed reviewed v1 dropout.
             atomic_number_count: Element embedding table size.
-            residue_type_count: Residue-category embedding table size.
-            curvature_features: Flattened curvature input width.
-            pooling_type: Closed v2 hypothesis from :class:`PoolingType`.
-            topk_fraction: Fraction of points retained by TOP-K mean pooling.
-            attention_hidden_dim: Hidden score width for sparse attention pooling.
-            regional_levels: Number of graph-neighborhood smoothing rounds before local MAX.
-            log_sum_exp_beta: Positive inverse temperature for normalized log-sum-exp.
+            residue_type_count: Residue embedding table size.
+            curvature_features: Dataset-derived flattened curvature width.
+            atom_spatial_k: Fixed reviewed runtime K.
+            surface_atom_k: Fixed reviewed runtime J.
+            diffusion_spectral_modes: Fixed reviewed runtime spectral budget.
+            surface_atom_radius: Transfer geometry normalization radius in Å.
+            surface_chunk_size: Atom-transfer point chunk size.
+            atomic_message_chunk_size: RGCN edge-message chunk size.
+            pooling_type: Closed v2 pooling hypothesis.
+            topk_fraction: Point fraction retained by top-k mean.
+            attention_hidden_dim: Hidden width of learned attention scoring.
+            regional_diffusion_scale: Physical diffusion length in Å before regional MAX.
+            log_sum_exp_beta: Positive normalized log-sum-exp inverse temperature.
 
         Raises:
-            ValueError: If a pooling name or pooling-specific numeric bound is invalid.
-            TypeError: Propagated from v1 for an invalid feature switch.
+            ValueError: If a pooling name or pooling-specific value is invalid.
         """
         super().__init__(
-            hidden_dim=hidden_dim,
-            embedding_dim=embedding_dim,
-            use_residue_type=use_residue_type,
-            atomic_layers=atomic_layers,
-            projection_depth=projection_depth,
-            surface_layers=surface_layers,
-            dropout=dropout,
-            atomic_number_count=atomic_number_count,
-            residue_type_count=residue_type_count,
-            curvature_features=curvature_features,
+            hidden_dim                = hidden_dim,
+            embedding_dim             = embedding_dim,
+            use_residue_type          = use_residue_type,
+            atomic_layers             = atomic_layers,
+            projection_depth          = projection_depth,
+            surface_layers            = surface_layers,
+            dropout                   = dropout,
+            atomic_number_count       = atomic_number_count,
+            residue_type_count        = residue_type_count,
+            curvature_features        = curvature_features,
+            atom_spatial_k            = atom_spatial_k,
+            surface_atom_k            = surface_atom_k,
+            diffusion_spectral_modes  = diffusion_spectral_modes,
+            surface_atom_radius       = surface_atom_radius,
+            surface_chunk_size        = surface_chunk_size,
+            atomic_message_chunk_size = atomic_message_chunk_size,
         )
         try:
             self.pooling_type = PoolingType(pooling_type)
@@ -96,53 +109,64 @@ class WisdomV2(WisdomV1):
             raise ValueError(f"unsupported WISDOM v2 pooling type: {pooling_type!r}") from error
         if not 0.0 < topk_fraction <= 1.0:
             raise ValueError("topk_fraction must lie in (0,1]")
-        if attention_hidden_dim < 1 or regional_levels < 1 or log_sum_exp_beta <= 0.0:
+        if (
+            attention_hidden_dim < 1
+            or regional_diffusion_scale <= 0.0
+            or log_sum_exp_beta <= 0.0
+        ):
             raise ValueError(
-                "attention width, regional levels, and log-sum-exp beta must be positive"
+                "attention width, regional scale, and log-sum-exp beta must be positive"
             )
 
-        self.topk_fraction    = float(topk_fraction)
-        self.regional_levels  = int(regional_levels)
-        self.log_sum_exp_beta = float(log_sum_exp_beta)
-        self.sparse_max       = SparseMaxPooling()
+        self.topk_fraction            = float(topk_fraction)
+        self.regional_diffusion_scale = float(regional_diffusion_scale)
+        self.log_sum_exp_beta         = float(log_sum_exp_beta)
+        self.sparse_max               = SparseMaxPooling()
         self.attention_pooling = (
             SparseAttentionPooling(hidden_dim, attention_hidden_dim, dropout=dropout)
             if self.pooling_type is PoolingType.ATTENTION
             else None
         )
-        self.topk_pooling = FractionalTopKMeanPooling(fraction=topk_fraction)
+        self.topk_pooling       = FractionalTopKMeanPooling(fraction=topk_fraction)
         self.log_sum_exp_pooling = LogSumExpPooling(beta=log_sum_exp_beta, normalize=True)
 
     def forward(
         self,
-        atomic_numbers          : Tensor,
-        residue_type_ids        : Tensor,
-        atom_edge_index         : Tensor,
-        atom_edge_types         : Tensor,
-        surface_curvatures      : Tensor,
-        surface_edge_index      : Tensor,
-        surface_atom_edge_index : Tensor,
-        surface_area_weights    : Tensor,
-        surface_batch           : Tensor,
+        atomic_numbers                    : Tensor,
+        residue_type_ids                  : Tensor,
+        atom_edge_index                   : Tensor,
+        atom_edge_types                   : Tensor,
+        surface_curvatures                : Tensor,
+        surface_atom_neighbors            : Tensor,
+        surface_atom_distances            : Tensor,
+        surface_atom_normal_offsets       : Tensor,
+        surface_atom_tangential_distances : Tensor,
+        surface_atom_mask                 : Tensor,
+        surface_area_weights              : Tensor,
+        surface_batch                     : Tensor,
+        surface_operators                 : Sequence[Mapping[str, Tensor]],
+        surface_ptr                       : Tensor,
     ) -> dict[str, Tensor]:
-        """Encode the fixed graphs, pool local logits, and expose map diagnostics.
+        """Encode the fixed v1 backbone, pool local logits, and expose map diagnostics.
 
         Args:
-            atomic_numbers: Integer element IDs with shape ``[N]``.
-            residue_type_ids: Integer residue categories with shape ``[N]``.
-            atom_edge_index: Bidirectional atomic edges with shape ``[2,Ea]``.
-            atom_edge_types: R-GCN relations with shape ``[Ea]``.
-            surface_curvatures: Multiscale invariants with shape ``[M,S,3]``.
-            surface_edge_index: Bidirectional surface edges with shape ``[2,Es]``.
-            surface_atom_edge_index: Surface-to-atom incidence with shape ``[2,Esa]``.
-            surface_area_weights: Positive represented-area weights with shape ``[M]``.
-            surface_batch: Ordered point-to-protein owner IDs with shape ``[M]``.
+            atomic_numbers: Element IDs ``[N]``.
+            residue_type_ids: Residue IDs ``[N]``.
+            atom_edge_index: Active bidirectional atomic topology ``[2,Ea]``.
+            atom_edge_types: Atomic relations ``[Ea]``.
+            surface_curvatures: Curvature invariants ``[M,S,3]``.
+            surface_atom_neighbors: Atom IDs ``[M,J]``.
+            surface_atom_distances: Atom distances ``[M,J]``.
+            surface_atom_normal_offsets: Signed normal offsets ``[M,J]``.
+            surface_atom_tangential_distances: Tangential magnitudes ``[M,J]``.
+            surface_atom_mask: Valid transfer entries ``[M,J]``.
+            surface_area_weights: Positive represented-area weights ``[M]``.
+            surface_batch: Point-to-protein ownership ``[M]``.
+            surface_operators: Per-protein intrinsic operator packs.
+            surface_ptr: Point prefix boundaries ``[B+1]``.
 
         Returns:
-            Protein/local logits, normalized localization scores, and area/entropy diagnostics.
-
-        Raises:
-            ValueError: If inherited graph validation or pooling output validation fails.
+            Protein/local logits and localization diagnostics.
         """
         protein_count = self.validate_surface_bags(
             surface_area_weights,
@@ -150,20 +174,26 @@ class WisdomV2(WisdomV1):
             len(surface_curvatures),
         )
         embeddings, surface_logits = self.encode_surface(
-            atomic_numbers=atomic_numbers,
-            residue_type_ids=residue_type_ids,
-            atom_edge_index=atom_edge_index,
-            atom_edge_types=atom_edge_types,
-            surface_curvatures=surface_curvatures,
-            surface_edge_index=surface_edge_index,
-            surface_atom_edge_index=surface_atom_edge_index,
+            atomic_numbers,
+            residue_type_ids,
+            atom_edge_index,
+            atom_edge_types,
+            surface_curvatures,
+            surface_atom_neighbors,
+            surface_atom_distances,
+            surface_atom_normal_offsets,
+            surface_atom_tangential_distances,
+            surface_atom_mask,
+            surface_operators,
+            surface_ptr,
         )
         pooled = self.pool_surface_logits(
             surface_logits,
             embeddings,
-            surface_edge_index,
             surface_area_weights,
             surface_batch,
+            surface_operators,
+            surface_ptr,
         )
 
         epsilon         = torch.finfo(surface_logits.dtype).eps
@@ -191,8 +221,11 @@ class WisdomV2(WisdomV1):
             surface_batch,
             protein_count,
         )
-        entropy_scale = counts.log().clamp_min(epsilon)
-        entropy = torch.where(counts > 1.0, entropy / entropy_scale, torch.zeros_like(entropy))
+        entropy = torch.where(
+            counts > 1.0,
+            entropy / counts.log().clamp_min(epsilon),
+            torch.zeros_like(entropy),
+        )
 
         output = {
             "logits": pooled["logits"],
@@ -209,26 +242,25 @@ class WisdomV2(WisdomV1):
 
     def pool_surface_logits(
         self,
-        surface_logits       : Tensor,
-        surface_embeddings   : Tensor,
-        surface_edge_index   : Tensor,
-        surface_area_weights : Tensor,
-        surface_batch        : Tensor,
+        surface_logits      : Tensor,
+        surface_embeddings  : Tensor,
+        surface_area_weights: Tensor,
+        surface_batch       : Tensor,
+        surface_operators   : Sequence[Mapping[str, Tensor]],
+        surface_ptr         : Tensor,
     ) -> dict[str, Tensor]:
-        """Apply the configured v2 pooling to already encoded surface instances.
+        """Apply exactly one configured v2 pooling hypothesis.
 
         Args:
-            surface_logits: Local scalar logits with shape ``[M]``.
-            surface_embeddings: Fixed-backbone embeddings with shape ``[M,H]``.
-            surface_edge_index: Bidirectional surface graph with shape ``[2,E]``.
-            surface_area_weights: Positive represented-area weights with shape ``[M]``.
-            surface_batch: Ordered point-to-protein owners with shape ``[M]``.
+            surface_logits: Local logits ``[M]``.
+            surface_embeddings: Fixed-backbone embeddings ``[M,H]``.
+            surface_area_weights: Positive represented-area weights ``[M]``.
+            surface_batch: Point-to-protein owners ``[M]``.
+            surface_operators: Per-protein diffusion operators.
+            surface_ptr: Point prefix boundaries ``[B+1]``.
 
         Returns:
-            Protein logits ``[B]`` and attention weights ``[M]`` when attention is selected.
-
-        Raises:
-            ValueError: If the tensor shapes or selected attention module are inconsistent.
+            Protein logits ``[B]`` plus optional learned attention weights ``[M]``.
         """
         point_count = len(surface_logits)
         if surface_logits.ndim != 1 or surface_embeddings.shape != (point_count, self.hidden_dim):
@@ -245,12 +277,13 @@ class WisdomV2(WisdomV1):
         area_sum        = Scatter.sum(surface_area_weights, surface_batch, protein_count)
         normalized_area = surface_area_weights / area_sum[surface_batch]
         if self.pooling_type is PoolingType.MEAN:
-            logits = Scatter.sum(
-                surface_logits * normalized_area,
-                surface_batch,
-                protein_count,
-            )
-            return {"logits": logits}
+            return {
+                "logits": Scatter.sum(
+                    surface_logits * normalized_area,
+                    surface_batch,
+                    protein_count,
+                )
+            }
         if self.pooling_type is PoolingType.ATTENTION:
             if self.attention_pooling is None:
                 raise ValueError("attention pooling module is unavailable")
@@ -259,24 +292,17 @@ class WisdomV2(WisdomV1):
                 surface_batch,
                 protein_count,
             )
-            logits = Scatter.sum(surface_logits * weights, surface_batch, protein_count)
-            return {"logits": logits, "attention_weights": weights}
+            return {
+                "logits": Scatter.sum(surface_logits * weights, surface_batch, protein_count),
+                "attention_weights": weights,
+            }
         if self.pooling_type is PoolingType.LOCAL_MEAN_MAX:
-            smoothed = surface_logits
-            source   = surface_edge_index[0]
-            target   = surface_edge_index[1]
-            for _ in range(self.regional_levels):
-                numerator = Scatter.sum(
-                    smoothed[source] * surface_area_weights[source],
-                    target,
-                    point_count,
-                ) + smoothed * surface_area_weights
-                denominator = Scatter.sum(
-                    surface_area_weights[source],
-                    target,
-                    point_count,
-                ) + surface_area_weights
-                smoothed = numerator / denominator
+            smoothed = DiffusionSurfaceEncoder.diffuse_scalar(
+                surface_logits,
+                surface_operators,
+                surface_ptr,
+                time=self.regional_diffusion_scale**2,
+            )
             logits = self.sparse_max(smoothed[:, None], surface_batch, protein_count)[:, 0]
             return {"logits": logits}
 
@@ -293,15 +319,15 @@ class WisdomV2(WisdomV1):
         surface_batch: Tensor,
         protein_count: int,
     ) -> tuple[Tensor, Tensor]:
-        """Pad only scalar logits for LambdaForge dense set-pooling operators.
+        """Pad scalar logits only for LambdaForge dense set-pooling primitives.
 
         Args:
-            logits: Local values with shape ``[M]``.
-            surface_batch: Ordered owner IDs with shape ``[M]``.
-            protein_count: Number of non-empty protein bags.
+            logits: Local values ``[M]``.
+            surface_batch: Ordered owner IDs ``[M]``.
+            protein_count: Non-empty protein bag count ``B``.
 
         Returns:
-            Dense logits ``[B,M_max,1]`` and Boolean validity mask ``[B,M_max]``.
+            Dense values ``[B,Mmax,1]`` and validity mask ``[B,Mmax]``.
         """
         counts    = torch.bincount(surface_batch, minlength=protein_count)
         starts    = torch.cumsum(counts, dim=0) - counts

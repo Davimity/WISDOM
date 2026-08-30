@@ -1,0 +1,39 @@
+{
+  "global": {
+    "clusters": 51,
+    "eligible": 4248,
+    "features": [
+      "log_sequence_length",
+      "radius_of_gyration_normalized",
+      "aspect_ratio",
+      "packing_density",
+      "theoretical_isoelectric_point",
+      "charge_density",
+      "hydrophobic_residue_fraction",
+      "polar_residue_fraction",
+      "aromatic_fraction"
+    ],
+    "noise_fraction": 0.6435969868173258,
+    "reason": "clustered"
+  },
+  "interface": {
+    "clusters": 2,
+    "eligible": 3245,
+    "features": [
+      "binding_residue_fraction",
+      "interface_region_count",
+      "largest_interface_region_fraction",
+      "interface_radius_normalized",
+      "interface_aspect_ratio",
+      "interface_positive_residue_fraction",
+      "interface_negative_residue_fraction",
+      "interface_polar_residue_fraction",
+      "interface_hydrophobic_residue_fraction",
+      "interface_aromatic_residue_fraction",
+      "contacted_dna_chain_count",
+      "contact_density"
+    ],
+    "noise_fraction": 0.02903322358575277,
+    "reason": "clustered"
+  }
+}

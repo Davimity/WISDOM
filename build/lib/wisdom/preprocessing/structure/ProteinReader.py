@@ -7,16 +7,17 @@ from dataclasses import replace
 import gemmi
 import numpy as np
 
+from wisdom.utils.structure.models.Atom import Atom
+from wisdom.utils.structure.models.Chain import Chain
+from wisdom.utils.structure.models.Protein import Protein
+from wisdom.utils.structure.models.Residue import Residue
+from wisdom.utils.structure.enums.BondType import BondType
+from wisdom.utils.structure.ProteinStructure import ProteinStructure
+from wisdom.preprocessing.structure.StructureSource import StructureSource
+from wisdom.utils.structure.enums.ConnectionType import ConnectionType
 from wisdom.preprocessing.structure.chemical_data import METAL_ELEMENTS
-from wisdom.preprocessing.structure.dataclasses.Atom import Atom
-from wisdom.preprocessing.structure.dataclasses.Chain import Chain
-from wisdom.preprocessing.structure.dataclasses.Protein import Protein
-from wisdom.preprocessing.structure.dataclasses.ProteinMetadata import ProteinMetadata
-from wisdom.preprocessing.structure.dataclasses.Residue import Residue
-from wisdom.preprocessing.structure.dataclasses.StructureSource import StructureSource
-from wisdom.preprocessing.structure.enums.BondType import BondType
-from wisdom.preprocessing.structure.enums.ConnectionType import ConnectionType
 from wisdom.preprocessing.structure.PreprocessConfig import PreprocessConfig
+from wisdom.preprocessing.structure.PreprocessingProvenance import PreprocessingProvenance
 
 
 class ProteinReader:
@@ -34,7 +35,7 @@ class ProteinReader:
         """
         self.config = config
 
-    def read(self, source: StructureSource) -> tuple[Protein, ProteinMetadata]:
+    def read(self, source: StructureSource) -> tuple[Protein, PreprocessingProvenance]:
         """Parse, filter, normalize, center, and detach one coordinate structure from Gemmi.
 
         Alternate conformations are reduced to one atom per name by occupancy and a deterministic
@@ -46,16 +47,17 @@ class ProteinReader:
             source: Validated local/cached structure path, chain selector, format, and source hash.
 
         Returns:
-            A normalized ``Protein`` hierarchy and separate source/coordinate ``ProteinMetadata``.
+            A normalized ``Protein`` hierarchy and separate processing provenance.
 
         Raises:
             ValueError: If Gemmi cannot parse the structure, the model/chains are invalid, a residue
                 lacks a numeric sequence ID, coordinates are non-finite, or filtering removes every
                 atom/heavy atom.
         """
-        # Gemmi owns all format-specific parsing and decompression behavior.
+        # The shared deposition object owns Gemmi parsing, entity setup, assemblies, sequences,
+        # and experimental attributes. This reader only applies preprocessing-specific filters.
         try:
-            structure = gemmi.read_structure(str(source.path))
+            structure = ProteinStructure(source.path).structure
         except (RuntimeError, ValueError) as error:
             raise ValueError(f"Gemmi could not parse {source.path}: {error}") from error
         if self.config.model_index >= len(structure):
@@ -223,7 +225,7 @@ class ProteinReader:
                 structure, source, address_to_index, normalized_atoms
             ),
         )
-        metadata = ProteinMetadata(
+        provenance = PreprocessingProvenance(
             source_identifier=source.identifier,
             source_path=str(source.path),
             source_hash=source.sha256,
@@ -231,7 +233,7 @@ class ProteinReader:
             selected_chains=tuple(selected),
             coordinate_origin=(float(origin[0]), float(origin[1]), float(origin[2])),
         )
-        return protein, metadata
+        return protein, provenance
 
     def _explicit_connections(
         self,

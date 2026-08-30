@@ -2,24 +2,22 @@
 
 **English** | [Español](README.es.md)
 
-WISDOM builds a defensible protein–DNA-binding benchmark, converts protein structures into universal
-geometric representations, projects DNA-interface reference data onto those fixed surfaces, and
-trains the first two WISDOM models. “Geometric” means that the model reasons about molecular and
-surface graphs instead of treating a protein as a rectangular image. Structural preprocessing is
-strictly problem-independent: DNA labels live in separate catalogs and annotation sidecars.
+WISDOM studies whether a protein binds DNA from its three-dimensional structure. The project first
+builds a balanced benchmark with reliable positive and negative labels. It then converts every
+protein into atoms plus sampled surface points and trains models that connect internal chemistry to
+the exposed molecular surface.
 
-The preprocessor converts PDB or PDBx/mmCIF structures into one deterministic, compact NPZ file per
-protein. An NPZ is a compressed container of named numerical arrays. It is kept pickle-free: it does
-not embed arbitrary serialized Python objects that could execute code when loaded. Each file combines
-normalized atomic data, one spatial/covalent atomic graph, a fixed solvent-accessible surface point
-cloud, local surface geometry, a surface graph, and surface-to-atom communication edges. Section 4.1
-builds a plain-language picture of all these objects before the mathematical detail begins.
+Preprocessing writes one compressed NPZ file per protein. An NPZ contains named numeric arrays:
+atom coordinates and bonds, surface points and normals, small local-neighbour tables, and the
+operators needed to diffuse information over the surface. DNA labels are stored separately, so the
+same structural NPZ can be reused for another scientific question. Section 4 introduces every array
+before giving its equations.
 
-WISDOMv1 performs binary protein classification while producing local surface scores from only a
-whole-protein training label. WISDOMv2 keeps the same atom/surface encoder and compares pooling
-rules, which combine many point-level scores into one protein-level prediction.
-Neither version implements the later chemistry, bidirectional, quasi-geodesic, dMaSIF-inspired,
-contrastive, or language-model stages in the roadmap.
+The three model versions answer separate questions. V1 searches the basic atom-to-surface
+architecture. V2 keeps that architecture fixed and compares ways of combining point scores into one
+protein prediction. V3 keeps the atomic part and final combination fixed and compares surface
+encoders. Training uses only the whole-protein label; known DNA-contact points are used only to
+measure whether the learned surface map is meaningful.
 
 ## 0. Table of contents
 
@@ -30,7 +28,7 @@ contrastive, or language-model stages in the roadmap.
   - [2.3. Activation, updates, and installation checks](#23-activation-updates-and-installation-checks)
 - [3. DNA-binding benchmark and annotations](#3-dna-binding-benchmark-and-annotations)
   - [3.1. Why DNA binding is the first WISDOM problem](#31-why-dna-binding-is-the-first-wisdom-problem)
-  - [3.2. Phase A — constructing and freezing raw evidence](#32-phase-a--constructing-and-freezing-raw-evidence)
+  - [3.2. Phase A — constructing and freezing the source evidence](#32-phase-a--constructing-and-freezing-the-source-evidence)
   - [3.3. From frozen evidence to a managed dataset](#33-from-frozen-evidence-to-a-managed-dataset)
   - [3.4. Phase B — designing a balanced benchmark without leakage](#34-phase-b--designing-a-balanced-benchmark-without-leakage)
   - [3.5. Statistical audit and interpretation](#35-statistical-audit-and-interpretation)
@@ -49,16 +47,33 @@ contrastive, or language-model stages in the roadmap.
   - [5.1. Dataset index and graph batching](#51-dataset-index-and-graph-batching)
   - [5.2. WISDOMv1 models, equations, and tensor shapes](#52-wisdomv1-models-equations-and-tensor-shapes)
   - [5.3. WISDOMv2 pooling and localization diagnostics](#53-wisdomv2-pooling-and-localization-diagnostics)
-  - [5.4. Training, evaluation, and artifacts](#54-training-evaluation-and-artifacts)
+  - [5.4. WISDOMv3 surface-encoder comparison](#54-wisdomv3-surface-encoder-comparison)
+  - [5.5. Training, evaluation, and artifacts](#55-training-evaluation-and-artifacts)
 - [6. Bibliography](#6-bibliography)
 
 ## 1. Quick start
 
-WISDOM builds the DNA benchmark with two independent commands. `dna_design.yaml` turns frozen
-public evidence into balanced, leakage-safe splits and nested training subsets under
-`data/dna/design`. After that succeeds once, `dna_preprocess.yaml` reads that directory directly,
-creates geometric arrays, validates them, and publishes the LambdaForge dataset. Preprocessing never
-reruns design or public-data discovery.
+WISDOM has three ordered actions:
+
+1. `Selection` decides which proteins belong to train, validation, and test.
+2. `Preprocessing` converts those proteins into NPZ files and publishes `wisdom-dna@5`.
+3. `Visualization` reads the published dataset and creates interactive three-dimensional views.
+
+All three actions are declared in `experiments/dna_preprocess.yaml`. Their first argument is
+`skip`: `false` runs an action and `true` omits it. The checked-in values reuse a prior design,
+run Preprocessing, and request Visualization. The table below shows the safer single-purpose modes;
+the YAML contains their alternative values as comments beside each step:
+
+| Intended action | `select.skip` | `preprocess.skip` | `visualize.skip` | Required input |
+|---|---:|---:|---:|---|
+| Rebuild the selection only | `false` | `true` | `true` | `select.raw_path` points to `raw.jsonl`. |
+| Reuse a complete design and build `wisdom-dna@5` | `true` | `false` | `true` | Set `select.existing_design`; the directory must include the labelled splits, catalog, dilutions, and `structures/index.json` snapshot. |
+| Visualize an existing `wisdom-dna@5` | `true` | `true` | `false` | No design directory; the dataset is resolved by name and version. |
+
+The complete `true/false/false` workflow can build and then visualize a new version in one command:
+Visualization receives `{from: preprocess.dataset}`, so LambdaForge waits for the publication.
+Visualization-only instead uses `{dataset: wisdom-dna@5}`, which requires that exact version to
+exist in the Registry before the workflow starts.
 
 WISDOM is installed through Conda. The repository's installer can use an existing Conda
 installation or install Miniforge without administrator privileges, create the `wisdom` environment
@@ -73,28 +88,26 @@ conda activate wisdom
 lf clusters bootstrap citius-ctgpgpu12 --project . --dry-run
 lf clusters bootstrap citius-ctgpgpu12 --project .
 
-lf validate experiments/dna_design.yaml
-lf explain experiments/dna_design.yaml
-lf run experiments/dna_design.yaml --dry-run
-
-# Preprocess the already published conventional design directory; design is not rerun.
+# Choose one documented YAML mode first. Visualization-only requires an existing wisdom-dna@5.
 lf validate experiments/dna_preprocess.yaml
 lf explain experiments/dna_preprocess.yaml
 lf run experiments/dna_preprocess.yaml --dry-run
-lf validate experiments/validate_dna.yaml  # after wisdom-dna@4 exists
+lf run experiments/dna_preprocess.yaml --on citius-ctgpgpu12
+
+lf validate experiments/validate_dna.yaml  # after wisdom-dna@5 exists
 lf validate experiments/wisdom_v1.yaml
 lf run experiments/wisdom_v1.yaml --dry-run
 lf validate experiments/wisdom_v2.yaml
+lf validate experiments/wisdom_v3.yaml
 ```
 
-`validate` checks the compact YAML, `Work.run()` signature, imports, and resolvable arguments.
-`explain` shows the exact classes, parameter types, configured values, and defaults under
-LambdaForge 0.12. `run` executes the selected Work classes and publishes one immutable placement
-only after every member and the canonical index validate. A local
-publication has this shape:
+`validate` checks the YAML, method arguments, imports, and dataset/file references. `explain` shows
+the resolved parameters and defaults. `run` executes the enabled actions. Preprocessing publishes a
+dataset only after all members and the index pass validation. A local publication has this logical
+shape; LambdaForge chooses its physical root:
 
 ```text
-runs/datasets/published/wisdom-dna/4/<content-id-prefix>/
+runs/datasets/published/wisdom-dna/5/<content-id-prefix>/
 ├── index.jsonl
 ├── dataset-artifact.json
 └── assets/
@@ -104,33 +117,31 @@ runs/datasets/published/wisdom-dna/4/<content-id-prefix>/
     │   ├── source_structure
     │   └── dataset_design/
     │       ├── catalog.csv
+    │       ├── preprocessing/{train,val,test}.jsonl
     │       ├── train.txt, validation.txt, test.txt
-    │       ├── clusters/{sequence,structure}-pairs.tsv
-    │       ├── clusters/{sequence,structure,exact}-edges.csv
-    │       ├── clusters/{global,positive-interface}-phenotypes.csv
     │       ├── dilutions/replicate-00/train-<percent>.txt
-    │       └── {selection,split,dilution}-audit.json
+    │       └── provenance.json
     └── <other-protein>/{universal_npz,dna_annotation,source_structure}
 ```
 
-`index.jsonl` is the authoritative streaming index: each line names one protein, its split and
-tier, its global DNA target, whether local ground truth is available, and checksummed base/sidecar
-assets. Dilution membership is member metadata, so a smaller view reuses the same arrays. The
-complete design artifact remains a reusable upstream contract. LambdaForge stores the global audit
-tables once as the first member's `dataset_design` directory asset; it does not duplicate them for
-every protein. The managed dataset therefore contains the final pair, phenotype, split, and dilution
-evidence needed to audit every decision.
-`dataset-artifact.json` stores the content ID and build provenance.
-Open a universal representation without pickle as follows; Section 4.2 explains how to discover the
-actual Registry placement before Sections 4.4–4.6 define every array in detail.
+`index.jsonl` is the dataset index: each line names one protein, its partition, difficulty category
+(`tier`), global DNA label, availability of local reference data, and files (`assets`) with recorded
+SHA-256 fingerprints. Dilution membership is member metadata, so a smaller view reuses the same arrays. The
+three preprocessing manifests remain a reusable upstream contract. LambdaForge stores their compact
+catalog/views once as the first member's `dataset_design` directory asset; it does not duplicate
+them for every protein. The complete similarity tables and statistical selection report remain in
+the separately managed `select` output under `data/dna/design`, where they can be audited without
+being staged again for NPZ generation.
+`dataset-artifact.json` stores the content identity and build record. Use
+`lf datasets member wisdom-dna@5 MEMBER_ID` to find one member's `universal_npz` asset. Open the
+reported path without pickle as follows; Sections 4.4–4.6 define every array.
 
 ```python
 import json
 
 import numpy as np
 
-with np.load("runs/datasets/published/wisdom-dna/4/<content-id-prefix>/base/<hash>.npz",
-             allow_pickle=False) as protein:
+with np.load("/path/reported/by/lambdaforge/universal_npz", allow_pickle=False) as protein:
     atom_positions    = protein["atom_positions"]
     atom_edges        = protein["atom_edge_index"]
     surface_positions = protein["surface_positions"]
@@ -152,15 +163,17 @@ with np.load("runs/datasets/published/wisdom-dna/4/<content-id-prefix>/base/<has
 
 The reproducible package list is [environment.yml](environment.yml). It creates Python 3.11 and
 installs Biopython, MMseqs2, and Foldseek from `conda-forge`/`bioconda`; Python dependencies such as
-NumPy, SciPy, scikit-learn, Gemmi, PyTorch, and LambdaForge are then resolved while WISDOM is
-installed. Gemmi, MMseqs2, and Foldseek are introduced scientifically in Sections 3.2 and 3.4.
+NumPy, SciPy, scikit-learn, Gemmi, PyTorch, `robust_laplacian`, and LambdaForge are then resolved
+while WISDOM is installed. `robust_laplacian` provides the sparse point-cloud operator in Section
+4.6; Gemmi, MMseqs2, and Foldseek are introduced scientifically in Sections 3.2 and 3.4.
 
 The `[tool.lambdaforge.environment]` table in [pyproject.toml](pyproject.toml) declares this same
 `environment.yml` and names `mmseqs` and `foldseek` as mandatory native executables. “Native” here
 means a command-line program installed outside Python's wheel mechanism. The declaration is part of
 the managed-environment identity; it is not repeated in each experiment YAML.
 
-WISDOM targets LambdaForge `0.12.0`. Every executable action is a direct `Work` subclass with one
+WISDOM requires LambdaForge `>=0.13.0` and deliberately sets no upper version bound while the
+project follows the current framework release. Every executable action is a direct `Work` subclass with one
 `run()` method. LambdaForge is the source of truth for typed file/dataset resolution, bounded maps,
 safe JSON checkpoints, progress, immutable dataset publication, the placement Registry, logs,
 resources, seeds, search, and run management. WISDOM remains responsible for protein
@@ -183,7 +196,7 @@ unexpected LambdaForge directory. In order, it:
 2. creates the `wisdom` environment, or offers to update an existing one with `--prune`;
 3. reuses `./LambdaForge` or `../LambdaForge`, asks for another checkout, or clones the official
    repository;
-4. verifies that LambdaForge is in the supported range `>=0.12.0,<0.13.0`;
+4. verifies that LambdaForge satisfies the minimum version `>=0.13.0`;
 5. installs LambdaForge and `wisdom[dev]` in editable mode inside the Conda environment;
 6. optionally checks Python, dependency consistency, LambdaForge, MMseqs2, Foldseek, Biopython, and
    the WISDOM import.
@@ -242,21 +255,20 @@ PyTorch/CUDA build; then it verifies the Conda inventory and both required execu
 environment can be reused. A later `lf run ... --on citius-ctgpgpu12` discovers the same project
 declaration automatically.
 
-`DatasetDesign` performs a second, immediate executable and version preflight at the beginning of
+`Selection` performs a second, immediate executable and version preflight at the beginning of
 the Work, before requesting any RCSB structure or starting descriptor computation. If bootstrap was
 not applied, a tool disappeared, or its version command is unusable, `work.log` identifies the
 failing executable and prints the exact local and managed-cluster remediation commands. The later
-`Preprocessing` Work does not require MMseqs2 or Foldseek: it consumes the already fixed design and
-uses Python/Gemmi for geometry, so imposing those unrelated tools there would make standalone
-geometry processing unnecessarily fragile.
+`Preprocessing` Work does not require MMseqs2 or Foldseek: it consumes the three already fixed
+manifests and uses Python/Gemmi for geometry, so native tools are checked only before selection.
 
-LambdaForge 0.12 imports only classes derived from `Work`; function targets and the former
-`Task`/`TaskContext`/`PreprocessingTask` stack no longer exist. `DatasetDesign` uses
-`self.resume_map` for dependency-aware record reuse, while `Preprocessing` uses bounded maps plus
-WISDOM's numerical NPZ revalidation. Both use managed cache files for downloaded coordinates,
+LambdaForge 0.13 imports only classes derived from `Work`; function targets and the former
+`Task`/`TaskContext`/`PreprocessingTask` stack no longer exist. `Selection` uses
+`self.resume_map` for dependency-aware record reuse, and `Preprocessing` uses the same service with
+WISDOM validators for universal NPZs and DNA sidecars. Both use managed cache files for coordinates,
 validated checkpoints for specialist tables, and managed outputs for all-or-nothing publication.
 LambdaForge also resolves and executes external tools, captures their versions/logs, and provides
-HDBSCAN plus clustering-stability evidence. WISDOM does not implement another downloader lock,
+the HDBSCAN clustering backend. WISDOM does not implement another downloader lock,
 atomic-cache protocol, subprocess runner, clustering backend, Registry, or publisher. Section 4.7
 explains this boundary.
 
@@ -271,6 +283,10 @@ the model must relate internal atoms to the shape and chemistry exposed to anoth
 A **benchmark** is a fixed population with explicit labels, train/validation/test partitions, and
 an evaluation protocol. These rules let different models answer the same question under the same
 conditions.
+
+The **training partition** adjusts model weights. The **validation partition** compares settings and
+selects a checkpoint. The **test partition** is held back until those choices are complete and gives
+the final estimate. WISDOM never creates these partitions randomly during model loading.
 
 There are two different answers associated with each accepted protein, and confusing them would
 invalidate the experiment:
@@ -310,8 +326,8 @@ flowchart LR
     A["BTD-Combo + dated RCSB evidence"] --> B["Phase A<br/>freeze raw.jsonl"]
     B --> C["Phase B<br/>revalidate and group all candidates"]
     C --> D["Balance, split, and create<br/>nested training subsets"]
-    D --> E["Phase C<br/>universal NPZ + DNA sidecar"]
-    E --> F["Validate and publish<br/>wisdom-dna@4"]
+    D --> E["Phase C<br/>universal NPZ + DNA reference file"]
+    E --> F["Validate and publish<br/>wisdom-dna@5"]
 ```
 
 | Phase | Main operation | Result used by the next phase |
@@ -320,11 +336,12 @@ flowchart LR
 | B | Revalidate evidence, group related proteins, balance, split, and audit. | Fixed catalog, train/validation/test files, and nested train subsets. |
 | C | Generate protein geometry and a separate DNA-interface reference. | Validated immutable dataset for training and evaluation. |
 
-### 3.2. Phase A — constructing and freezing raw evidence
+### 3.2. Phase A — constructing and freezing the source evidence
 
-Phase A is an infrequent **preanalysis**: it converts public sequence annotations and experimental
-structures into a frozen candidate table. Normal design and preprocessing reuse that table. Rebuild
-it explicitly with:
+Phase A is an infrequent preparation step. It converts public sequence annotations and experimental
+structures into a fixed candidate table. “Source evidence” means these collected records before
+balancing or splitting; it does not mean unverified data. Normal dataset design and preprocessing
+reuse the resulting table. Rebuild it explicitly with:
 
 ```bash
 python scripts/create_fasta.py --workers 36
@@ -335,9 +352,10 @@ The input is `scripts/btd_combo.fasta`, a local BTD-Combo export. In FASTA, a li
 structure identity and evidence to these sequence-only records.
 
 The output is `data/dna/raw/raw.jsonl`, with one JSON object per candidate: identifier, chain,
-biological assembly and copy, label, evidence, source, and amino-acid sequence. The current frozen
-**RAW** population has about 4,484 candidates (3,529 positive and 955 negative). It is evidence,
-not yet a balanced training set. `raw.fasta` is only a compatibility view for sequence tools.
+biological assembly and copy, label, evidence, source, and amino-acid sequence. Reports call this
+unbalanced collection the **RAW population**. The current frozen file has about 4,484 candidates
+(3,529 positive and 955 negative). It is evidence, not yet a training set. `raw.fasta` is only a
+compatibility view for sequence tools.
 
 **A1 — make BTD-Combo compatible with surface evaluation.** BTD-Combo is sequence based, whereas
 WISDOM requires a specific three-dimensional chain. The script removes ambiguous and duplicate
@@ -382,58 +400,68 @@ full RAW population so even an omitted protein can reveal a similarity link betw
 
 ### 3.3. From frozen evidence to a managed dataset
 
-[`experiments/dna_design.yaml`](experiments/dna_design.yaml) runs Phase B alone. It revalidates all
-RAW candidates, computes similarity and physical descriptors, forms dependency groups, and selects
-the balanced **CANONICAL** population used for splitting. RAW remains larger because even an omitted
-candidate may connect two selected proteins. The production 4 Å resolution ceiling leaves a target
-of 907 members per class for the current RAW file. All valid but excluded records remain explained
-in `catalog-all.csv`; exclusion means “outside this benchmark,” not “biologically invalid.”
+The `select` step in [`experiments/dna_preprocess.yaml`](experiments/dna_preprocess.yaml) revalidates all RAW candidates,
+computes similarity and physical descriptors, forms dependency groups, and selects the balanced
+population that reports call **CANONICAL**. This is the population assigned to partitions. RAW
+remains larger because even an omitted candidate
+may connect two selected proteins. The production 4 Å resolution ceiling leaves a target of 907
+members per class for the current RAW file. All valid but excluded records remain explained in
+`catalog-all.csv`; exclusion means “outside this benchmark,” not “biologically invalid.”
 
-[`experiments/dna_preprocess.yaml`](experiments/dna_preprocess.yaml) runs Phase C only. Its typed
-file input points to the already completed `data/dna/design` directory. The Work cannot change
-membership or splits and publishes `wisdom-dna@4` only after scientific validation passes.
-
-The preprocessing input has this compact front door:
+After `select` succeeds, LambdaForge passes six named outputs to `preprocess`: the three labelled
+split files, catalog, dilution directory, and immutable coordinate snapshot. Each path is
+fingerprinted as an exact Phase C input:
 
 ```text
 data/dna/design/
-├── catalog.csv
 ├── train-labelled.txt
 ├── validation-labelled.txt
 ├── test-labelled.txt
-└── dilutions/
-    └── replicate-00/
-        ├── train-10-labelled.txt
-        ├── train-25-labelled.txt
-        ├── train-50-labelled.txt
-        ├── train-75-labelled.txt
-        └── train-100-labelled.txt
+├── catalog.csv
+├── dilutions/
+└── structures/
+    ├── index.json
+    └── <pdb-id>.cif.gz
 ```
 
-Each labelled TXT line is `RCSB_CHAIN<TAB>LABEL`; for example, `1ABC_A<TAB>1`. Labels are `0` or
-`1`, and chain groups use the underscore convention described in Section 4.2. These manifests
-actively define membership and labels. Preprocessing checks them against `catalog.csv` before any
-download. The catalog remains necessary because a two-column TXT cannot represent the biological
-assembly, transformed chain copy, source-structure hash, DNA chains, contact evidence, leakage
-group, phenotype, and provenance needed for correct annotation and auditing.
+The `*-labelled.txt` files contain `RCSB_CHAIN<TAB>LABEL`; for example,
+`1ABC_A<TAB>1`. They define exactly which proteins and labels enter each split. Two columns cannot
+also store the selected biological assembly, repeated chain copy, coordinate digest, contact
+evidence, leakage group, or phenotype. That information remains in `catalog.csv`.
 
-The canonical filename is `validation-labelled.txt`, not `val-labelled.txt`; the training loader
-later exposes that split through the shorter API value `val`.
+Selection also writes three self-contained JSONL files for portable programmatic inspection. Each
+line carries the TXT identity and label plus every required catalog field and dilution membership.
+The public pipeline deliberately uses the compact, human-editable representation:
+
+- the three JSONL files need no catalog join;
+- the three existing `*-labelled.txt` files require `catalog.csv`, and the optional `dilutions/`
+  directory restores the nested training views.
+
+In both cases the split files, not the catalog, choose membership and labels. The catalog only
+completes the structural identity needed to reproduce the selected assembly and DNA annotation.
+The `structures/` directory supplies the bytes themselves. Selection stores each selected PDB once,
+even when several selected chains use it.
+
+The file is called `val.jsonl` because it is a direct workflow input; its records retain the
+canonical partition value `validation`, which the training API exposes through the shorter `val`.
+No manifest contains a machine-specific `structure_path`: preprocessing derives it from the
+portable snapshot. Requiring an attempt-local path from `catalog.csv` caused the former failure and
+is not part of the contract.
 
 A LambdaForge **Work** is one executable step. A dataset **version** identifies immutable logical
 content; a **placement** is a verified physical copy of that version on one machine. The Registry
 tracks those placements. The YAML requests resources, while `workers` limits concurrent records;
 reserving 36 CPUs does not by itself create 36 workers.
 
-The intended production commands make the artifact boundary explicit:
+LambdaForge 0.13 has no `lf run --step` option. Edit the first `skip` parameter of each step in the
+single YAML. The checked-in configuration has `true/false/false`: Selection forwards the declared
+`data/dna/design` directory, Preprocessing builds and publishes version 5, and Visualization consumes
+the named `preprocess.dataset` output. The third step starts only after successful publication, so
+version 5 does not have to exist beforehand. In visualization-only mode, replace that output
+reference with the commented Registry selector `{dataset: wisdom-dna@5}`.
 
 ```bash
-# Inspect or run dataset design alone before expensive geometry.
-lf validate experiments/dna_design.yaml
-lf explain experiments/dna_design.yaml
-lf run experiments/dna_design.yaml --dry-run
-
-# Preprocess the existing data/dna/design directory and publish the dataset.
+# Validate and run the selected combination.
 lf validate experiments/dna_preprocess.yaml
 lf explain experiments/dna_preprocess.yaml
 lf run experiments/dna_preprocess.yaml --dry-run
@@ -444,44 +472,60 @@ lf top --history 300
 lf logs wisdom-dna-preprocess --follow
 
 # Inspect the immutable version and its selected local placement.
-lf datasets show wisdom-dna@4
-lf datasets stats wisdom-dna@4
-lf datasets members wisdom-dna@4 --partition split=train --limit 20
-lf datasets verify wisdom-dna@4
+lf datasets show wisdom-dna@5
+lf datasets stats wisdom-dna@5
+lf datasets members wisdom-dna@5 --partition split=train --limit 20
+lf datasets verify wisdom-dna@5
 
 # Repeat the complete scientific audit without modifying the immutable dataset.
 lf validate experiments/validate_dna.yaml
 lf run experiments/validate_dna.yaml --on citius-ctgpgpu12
 ```
 
-`dataset-design` is one checksummed directory containing catalogs, similarity evidence, phenotypes,
-split manifests, dilutions, and reports. LambdaForge records each mmCIF and specialist-tool result
-used by a map item, so a compatible retry reuses valid downloads and checkpoints. `--restart`
-explicitly discards run checkpoints.
+When `select.skip` is true, Selection performs no downloads, similarity search, clustering,
+balancing, or splitting. With `existing_design: null` it declares no design input or output. If a
+later active Preprocessing step needs the prior design, set `existing_design` to that complete
+directory and restore the six `{from: select.<output>}` bindings; Selection then registers those
+paths without recomputing them. When `preprocess.skip` is true, Preprocessing reads no manifests and
+publishes no dataset. LambdaForge records each input, mmCIF, and map result, so a compatible retry
+reuses valid snapshot checks and per-record checkpoints. `--restart` explicitly discards the
+selected Run's checkpoints; `--rerun` deliberately asks for a new Execution and should not be used
+merely to continue.
 
-The Work also copies the complete result atomically to the configured `output_directory` (by
-default `data/dna/design`). `REPORT.md` explains its audit; `*.txt` files contain IDs and
-`*-labelled.txt` files contain `RCSB_CHAIN<TAB>0|1`. `catalog.csv` remains authoritative for labels,
-assemblies, and provenance.
+`existing_design` is deliberately `null` while `skip=false`. Existing `train-labelled.txt` files
+do not modify a fresh Selection: labels and membership are recomputed from `raw_path`, and the
+complete output directory is replaced only after success. Leaving a large prior design declared
+while rebuilding would make LambdaForge stage an input that no algorithm reads.
+
+The Work also copies the complete result atomically to the configured `output_directory`. The YAML
+spells this as `../data/dna/design` because LambdaForge resolves publication paths from the
+`experiments/` directory; the resulting project path is `data/dna/design`. `REPORT.md` explains its
+audit; `*.txt` files contain IDs and
+`*-labelled.txt` files contain `RCSB_CHAIN<TAB>0|1`. `catalog.csv` is a convenient full audit view;
+current Selection additionally emits the equivalent self-contained JSONL inputs and the exact
+compressed coordinate snapshot listed by `structures/index.json`.
 
 To place the same valid dataset on another cluster, copy the immutable version rather than rerunning
 discovery, mapping, geometry, and annotation:
 
 ```bash
 # Let LambdaForge choose a verified source placement and copy it to the target cluster.
-lf datasets materialize wisdom-dna@4 --on OTHER_CLUSTER --strategy replicate --apply
+lf datasets materialize wisdom-dna@5 --on OTHER_CLUSTER --strategy replicate --apply
 
 # Or name both ends explicitly.
-lf datasets replicate wisdom-dna@4 --from citius-ctgpgpu12 --to OTHER_CLUSTER --apply
+lf datasets replicate wisdom-dna@5 --from citius-ctgpgpu12 --to OTHER_CLUSTER --apply
 ```
 
-Both commands verify bytes and register another placement of the same version. Transfer the complete
-`dataset-design` output for preprocessing elsewhere; an ID-only file lacks assembly and provenance
-information. `lf top` and `lf logs ... --follow` expose progress and durable `work.log` output.
+Both commands verify bytes and register another placement of the same version. To reproduce
+preprocessing elsewhere, transfer the complete design: manifests, `catalog.csv`, `dilutions/`, and
+`structures/`. A list of identifiers cannot reproduce the coordinates audited by Selection.
+`lf top` shows exact map counts; normal logs
+announce each phase and periodic liveness, while `verbose: true` adds one start/completion line per
+evidence or protein record.
 
-> **Operational result:** run `dna_design.yaml` once to create the inspectable design directory,
-> then run `dna_preprocess.yaml` independently as often as needed. A compatible successful Run is
-> reused; the design Work is never part of the preprocessing execution.
+> **Operational result:** the first two Works create the self-contained design and immutable
+> DatasetVersion. Later preprocessing-only runs reuse the complete design; visualization can then
+> consume the Registry version independently, without contacting RCSB.
 
 ### 3.4. Phase B — designing a balanced benchmark without leakage
 
@@ -525,7 +569,7 @@ adds an edge for identity ≥ 0.30, bidirectional coverage ≥ 0.80, and E-value
 matching fraction of an alignment, coverage is the aligned fraction of each complete sequence, and
 smaller E-values mean fewer matches of this strength are expected by chance. Foldseek requires
 probability ≥ 0.90, normalized TM-score ≥ 0.75 and coverage ≥ 0.80 in both directions, and E-value
-≤ 0.001. Exact sequences, shared provenance, and by default a shared PDB entry add hard edges.
+≤ 0.001. Exact sequences and, by default, a shared PDB entry add hard edges.
 
 The connected components of the union of all edges are indivisible **leakage groups**. Thus A–B and
 B–C keep A, B, and C together even without an A–C edge. This grouping is a safety constraint, not a
@@ -534,7 +578,7 @@ thresholds remain under `clusters/` and `provenance.json`.
 
 **Physical phenotypes measure representation.** Unlike leakage groups, phenotype clusters describe
 similar measured profiles; they do not constrain independence or define biological functions.
-Global phenotypes use size, shape, composition, compactness, and experimental descriptors.
+Global phenotypes use size, shape, composition, and compactness descriptors.
 Positive-interface phenotypes separately use contact density, interface extent, region count, and
 contacted composition. They help distribute observed diversity across splits but never break a
 leakage group or become a model input.
@@ -552,19 +596,6 @@ preselected number of clusters and marks isolated proteins as **noise**. Here no
 dense group,” not “corrupt” or “negative.” That is preferable to forcing unusual structures into an
 arbitrary family.
 
-Stability uses the adjusted Rand index (ARI). The ordinary Rand index (RI) counts how consistently
-two partitions place every pair of proteins together or apart. Chance agreement is removed as
-
-$$
-\operatorname{ARI}=\frac{\operatorname{RI}-\mathbb{E}[\operatorname{RI}]}
-{\max(\operatorname{RI})-\mathbb{E}[\operatorname{RI}]}.
-$$
-
-The expectation term is pair agreement expected by chance. ARI is 1 for identical partitions, near
-0 at chance level, and can be negative. WISDOM compares nearby HDBSCAN settings; if fewer than two
-clusters survive or median ARI is below 0.60, it marks the result as noise instead of inventing a
-stable type. A large noise fraction limits phenotype claims but is not a leakage failure.
-
 Interface elongation is measured inside the interface plane. If `s1 >= s2 >= s3` are the principal
 spatial spreads of contacting residue centres, the aspect ratio is `s1/s2`; `s3` describes sheet
 thickness and is deliberately not the denominator. A nearly collinear interface with `s2` close to
@@ -574,16 +605,15 @@ preliminary report, where a planar patch had mistakenly been divided by its near
 **CANONICAL selection and fixed splits.** Only after full-RAW groups, the quality eligibility flag,
 and phenotypes exist does the default policy retain all eligible negatives and choose the same
 number of positives. It preserves available
-core positives, then increases leakage-group, phenotype, and origin coverage while matching
-technical nuisance distributions and using a seeded SHA-256 tie-break. catalog-all.csv preserves
+core positives, then increases leakage-group, phenotype, and origin coverage while using a seeded
+SHA-256 tie-break. catalog-all.csv preserves
 every valid RAW candidate; catalog.csv contains selected members; selection-audit.json explains all
 counts; omitted-positives.txt lists valid positives not needed by the requested ratio.
 
-A deterministic weighted objective assigns entire leakage groups toward 70% train, 15% validation,
-and 15% test. It penalizes deviations in size, class count, phenotype distributions, positive
-origin, and nuisance-variable means. Hard checks require one split per group and both labels in
-validation and test. Stable phenotypes backed by at least three movable groups are seeded across all
-splits when feasible; missing coverage is reported. train.txt, validation.txt, and test.txt are
+A deterministic greedy objective assigns entire leakage groups toward 70% train, 15% validation,
+and 15% test. It penalizes deviations in size, class count, phenotype distributions, and origin.
+Hard checks require one split per group and both labels in validation and test. train.txt,
+validation.txt, and test.txt are
 ID-only views of the same assignments stored in catalog.csv and final index.jsonl. Their
 `-labelled.txt` siblings add a tab-separated binary label and are checked against the catalog.
 Every training dilution has the same pair of views.
@@ -598,18 +628,11 @@ J_{count}=\sum_s w_{size}\left(\frac{n_s-f_sn}{\max(f_sn,1)}\right)^2
 +\sum_s\sum_k w_k\left(\frac{n_{s,k}-f_sn_k}{\max(f_sn_k,1)}\right)^2.
 $$
 
-Each $w$ is the corresponding YAML weight. Squaring penalizes large deviations more strongly;
-normalization prevents a frequent category from dominating only because it has more members. For a
-technical variable $t$, such as resolution or coordinate coverage, the additional term is
-
-$$
-J_{technical}=\sum_s\sum_t w_{technical}
-\left(\frac{\bar{x}_{s,t}-\bar{x}_t}{\max(|\bar{x}_t|,1)}\right)^2,
-$$
-
-where $\bar{x}_{s,t}$ and $\bar{x}_t$ are its finite split and population means. This is a soft
-balancing preference, not permission to break a group. The persisted initial/final objective and
-accepted deterministic group moves make the compromise auditable.
+The implementation gives class terms more weight than phenotype/origin terms. Squaring penalizes
+large deviations more strongly, while normalization prevents a frequent category from dominating
+only because it has more members. The algorithm maintains incremental counters, so placing one
+group does not rescan the full dataset. These are soft balancing preferences, never permission to
+break a leakage group.
 
 **Nested learning curves.** Dilutions alter training only and preserve complete dependency groups:
 `train-10` is contained in `train-25`, then `train-50`, up to `train-100`. Exact sizes may differ
@@ -621,91 +644,35 @@ slightly because groups are indivisible. Validation and test stay identical.
 
 ### 3.5. Statistical audit and interpretation
 
-Phase B ends with a statistical audit. `REPORT.md`, CSV files, and JSON evidence are generated from
-the same results, so the prose, plots, and machine-readable values describe the same population.
-
-The audit includes the following families of questions before the equations define their exact
-measurements:
+Phase B ends with a compact statistical audit. `REPORT.md`, CSV files, and JSON evidence are
+generated from the same results, so the prose and machine-readable values describe the same
+population. It answers four questions:
 
 - **balance:** do positives and negatives occur in the intended proportions in every split and
   training dilution?
 - **leakage:** does any exact sequence, accepted sequence/structure similarity edge, PDB group, or
   complete dependency component cross train, validation, and test?
-- **representation:** do the splits preserve the stable global shapes and positive-interface shapes
+- **representation:** do the splits preserve the observed global and positive-interface shapes
   found in Phase B, rather than accidentally reserving one kind of protein for test only?
-- **technical shortcuts:** could measurement method, resolution, release year, coordinate coverage,
-  or source database predict the label without learning a molecular interaction?
-- **stability:** would a small, reasonable change to the phenotype-clustering parameters produce
-  almost the same grouping, or is the apparent pattern fragile?
+- **dilutions:** is each smaller train set contained in every larger one and composed of complete
+  leakage groups only?
 
-For positive values $x_+$ and negative values $x_-$, WISDOM defines the pooled scale and SMD as
-
-$$
-s_p=\sqrt{\frac{s_+^2+s_-^2}{2}},\qquad
-\operatorname{SMD}=\frac{\bar{x}_+-\bar{x}_-}{s_p}.
-$$
-
-The bars are class means and $s_+^2,s_-^2$ are sample variances. SMD zero means equal means; its sign
-shows which class is larger and its magnitude is separation in pooled standard deviations. WISDOM
-flags $|\mathrm{SMD}|\geq0.25$ and calls $|\mathrm{SMD}|\geq0.50$ strong; these are audit thresholds,
-not biological laws. KS is the largest gap between the two empirical cumulative distributions and
-therefore detects shape as well as mean changes. Normalized Wasserstein distance measures how far
-one distribution would need to move to match the other, divided by $s_p$.
-
-Mann–Whitney asks whether one class tends to rank higher without assuming a Gaussian distribution.
-Its p-value is evidence against “no shift,” not the size or biological importance of that shift.
-Benjamini–Hochberg corrects the many p-values to control the expected false-discovery fraction.
-
-For a label-by-category table with chi-square statistic $\chi^2$, $n$ proteins, $r$ rows and
-$c$ columns, uncorrected Cramér's V is
-
-$$
-V=\sqrt{\frac{\chi^2/n}{\min(r-1,c-1)}}.
-$$
-
-WISDOM applies the small-sample correction. V near 0 means little observed association; V near 1
-means the category almost determines the label. Association is not causation. Local interface
-ground truth is excluded from these comparisons and from model inputs.
-
-Shortcut baselines use AUROC: the probability that a random positive ranks above a random negative.
-Values 0.5 and 1.0 mean chance and perfect ranking. Folds keep leakage groups intact. High AUROC from
-only acquisition or source variables warns that the label is technically predictable; it does not
-show protein–DNA recognition.
-
-**What the current preliminary artifact says.** The checked artifact in `test_dataset/` predates
-the 4 Å quality filter, the revised global HDBSCAN defaults, and the corrected in-plane interface
-aspect ratio; it is evidence for refinement, not the final `wisdom-dna@4` result. Its main findings
-are nevertheless concrete:
-
-| Observation | Preliminary value | Scientific reading |
-|---|---:|---|
-| Canonical class balance | 955 positive / 955 negative | Exactly 1:1, so plain accuracy cannot benefit from a majority class. |
-| Fixed splits | 669/669 train; 143/143 validation; 143/143 test | Every split is class-balanced. No leakage group, exact sequence, PDB group, accepted MMseqs2 edge, or accepted Foldseek edge crosses a split. |
-| Largest full-RAW dependency group | 271 proteins (270 positive, 1 negative); 6.04% of RAW | Larger than the 5% warning. CANONICAL retained only one positive plus its negative from this group, so it did not dominate training. Keeping both in one split is safer than obtaining prettier sizes by leaking homologues. |
-| Global phenotype HDBSCAN | 30 clusters; 76.45% noise; median ARI 0.835 | The surviving clusters are stable, but too many proteins lack dense support. Discrete global-family coverage must not be overclaimed. The production `(15, 2)` setting is less conservative and will be judged from the next generated report. |
-| Positive-interface HDBSCAN | 3 clusters; 2.64% noise; median ARI 0.976 | Very stable, broad interface modes with little unsupported data; this is useful diversity evidence, not proof of three biological mechanisms. |
-| Origin versus label | bias-corrected V 0.887 | Serious source confounding: provenance almost reveals the label and must never be supplied to WISDOM. |
-| Technical shortcut without origin | AUROC 0.638 ± 0.036 | Resolution, coverage, year, and method retain modest predictive information, below the configured 0.75 red flag but not negligible. |
-| Technical shortcut with origin | AUROC 0.960 ± 0.007 | Confirms the source warning; this diagnostic is intentionally not a trainable WISDOM input. |
-| Simple global physicochemical baseline | AUROC 0.836 ± 0.013 | Global protein properties separate much of the task. This may combine genuine DNA-binding biology with source/selection bias, so model gains require group-aware controls. |
-
-The strongest continuous shifts were positive-residue fraction (SMD 0.991), theoretical
-isoelectric point (0.939), net charge at pH 7 (0.720), GRAVY hydropathy (-0.655), and packing density
-(-0.522). Positive charge and high isoelectric point are biologically plausible for interaction
-with negatively charged DNA, but plausibility does not prove that the benchmark learned the intended
-mechanism. The final production report must be reread after quality filtering and reselection; its
-machine-readable values, not this preliminary snapshot, govern release acceptance.
-
-> **Audit result:** the preliminary set is balanced and has no detected cross-split dependency, but
-> source origin strongly predicts the label and global phenotype coverage is incomplete. The next
-> production `REPORT.md` must therefore pass the same checks; this preliminary table is not a release
-> certificate.
+`design-summary.json` records the exact counts by split, class, origin and phenotype. It reports a
+warning when a split differs by more than ten percentage points between classes, when one RAW
+leakage group contains at least 5% of all candidates, or when a stable phenotype is absent from one
+split despite appearing in several indivisible groups. A warning asks for interpretation; a hard
+failure (duplicate identity, crossed group, missing class, non-nested dilution or fragmented group)
+prevents publication. Phenotype coverage remains a soft representativeness objective because the
+mere presence of three groups does not prove that all class, group and phenotype constraints can be
+satisfied simultaneously. `REPORT.md` explains these same values in ordinary language. It deliberately
+does not claim ARI stability, technical-only AUROC, SMD, KS or Cramér's V because the simplified
+selection does not compute those analyses.
 
 ### 3.6. Phase C — structural arrays and surface reference data
 
 Phase B fixed membership, labels, and splits but did not create model-ready geometry. Phase C writes
 two separate files per protein: a **universal NPZ** with atoms and surface geometry, and a DNA
-**sidecar** tied to that NPZ fingerprint and point order. The NPZ contains no label, split, DNA, or
+**sidecar**, meaning a small companion file, tied to that NPZ fingerprint and point order. The NPZ contains no label, split, DNA, or
 target field, so another task can reuse it without benchmark information. The current dataset
 derives every positive sidecar from observed DNA coordinates; it never silently substitutes the
 separate DyProL residue-mask compatibility route. Section 4 derives the universal arrays.
@@ -745,9 +712,26 @@ schema/provenance JSON scalar, and the SHA-256 of the exact base NPZ. Curated gl
 hard/soft zero at every valid point. Their DNA distance is not computable, so it is NaN only where
 `surface_distance_valid` is false; it is never disguised as zero distance.
 
+The sidecar is itself a pickle-free NPZ. Here `M` is the number of points in the base surface and
+`T` is the number of configured sensitivity cutoffs. Boolean masks answer whether a value may be
+used; they must always be consulted before interpreting a distance or local target.
+
+| Sidecar array | Shape | Dtype | Meaning |
+|---|---:|---|---|
+| `surface_target_hard` | `[M]` | `uint8` | Binary contact target at the primary positive gap. |
+| `surface_valid_mask` | `[M]` | Boolean | Points eligible for primary local metrics. |
+| `surface_target_soft` | `[M]` | `float32` | Smooth target between the positive and negative gaps. |
+| `surface_distance_to_dna` | `[M]` | `float32` | Signed DNA-envelope gap in Å, or NaN when unavailable. |
+| `surface_distance_valid` | `[M]` | Boolean | Whether the corresponding distance is meaningful. |
+| `surface_target_hard_sensitivity` | `[M,T]` | `uint8` | Binary targets under every sensitivity cutoff. |
+| `local_gt_available` | scalar | Boolean | Whether this protein has usable local reference data. |
+| `sensitivity_gaps` | `[T]` | `float32` | Sensitivity cutoffs in Å, in column order. |
+| `base_npz_sha256` | scalar | fixed Unicode | Fingerprint of the exact universal NPZ and point order. |
+| `annotation_metadata_json` | scalar | fixed Unicode | Assembly, thresholds, method, counts, and provenance. |
+
 For separately imported DyProL records, the compatibility route assigns each surface point the mask
 of its nearest represented residue and records `local_gt_method=binding_residue_mask`. It has no
-DNA-distance sensitivity thresholds and is not used by `wisdom-dna@4`.
+DNA-distance sensitivity thresholds and is not used by `wisdom-dna@5`.
 
 Global and local eligibility differ. A reliable positive can train from its global label even when
 no local reference is usable. A positive with zero labelled surface points keeps `label=1`, receives
@@ -765,7 +749,7 @@ f_{interface}=W_+/W.
 $$
 
 These are positive represented weight, total normalized weight, and interface fraction—not physical
-areas in Å². Connected components of positive points in the sparse surface graph give
+areas in Å². Connected components of positive points in the bounded surface-neighbour table give
 `number_of_positive_regions`, enabling site-size and single-/multi-region analyses without changing
 weakly supervised training.
 
@@ -821,7 +805,7 @@ the ordered definition of the dataset; the coordinate files are its physical inp
 lets the same manifest work with an existing cache, download missing public entries, and report a
 failure for one protein without losing successful results for the others.
 
-**Why WISDOM creates three graphs.**
+**Why WISDOM uses three different geometric representations.**
 
 A later geometric model needs more than an unordered table of atoms. It needs to know which objects
 may exchange information. WISDOM represents those possible exchanges with **graphs**. A graph is a
@@ -829,35 +813,35 @@ set of nodes plus a set of edges; an edge says that two nodes are related. The e
 chemical force or a learned message. It is a fixed structural connection on which a future model may
 operate.
 
-WISDOM creates three complementary graphs:
+The three relations do not have the same physical meaning, so WISDOM does not force all of them
+into generic edge lists:
 
-1. The **atomic graph** uses atoms as nodes. It joins atoms that are spatially close, chemically
-   bonded, or both. It therefore describes both three-dimensional neighborhoods and molecular
-   connectivity.
-2. The **surface graph** uses sampled molecular-surface points as nodes. It joins nearby points that
-   plausibly belong to the same local sheet of the surface. It gives a future surface model a sparse
-   neighborhood without constructing every possible point pair.
-3. The **surface-to-atom graph** is bipartite: its left nodes are surface points and its right nodes
-   are atoms. It joins a surface point to nearby atoms so future computation can move information
-   between the molecular interior and its boundary. “Bipartite” simply means that edges cross
-   between two different node types.
+1. The **atomic graph** uses atoms as nodes. Chemical bonds are discrete relations, so every required
+   covalent edge is retained. Spatial context is limited to the nearest `Kmax` atoms inside a
+   physical cutoff, preventing a dense radius graph.
+2. The **atom-to-surface table** gives each surface point the nearest `Jmax` atoms inside a physical
+   cutoff. It stores a rectangular, masked local neighborhood because proximity is not a chemical
+   bond. A model chooses any prefix `J<=Jmax` without preprocessing again.
+3. The **surface differential operators** describe how a scalar value can spread over the sampled
+   boundary and how it changes along that boundary. They play the role that derivatives play on a
+   smooth surface. DiffusionNet uses them directly, so it does not need to send a learned message
+   through every nearby point pair.
 
-The NPZ output contains node measurements and these edge lists, but no neural-network activations,
-embeddings, attention values, or predictions.
+The NPZ contains fixed measurements, bounded neighborhoods, and deterministic numerical operators,
+but no neural-network activations, embeddings, attention values, or predictions.
 
 **The complete data journey.**
 
 With those objects in mind, one manifest line follows this path:
 
-```text
-manifest line
-    -> existing local file or safely downloaded PDBx/mmCIF file
-    -> selected model, chains, residues, and atoms
-    -> Protein -> Chain -> Residue -> Atom hierarchy
-    -> compact atom arrays and atomic graph
-    -> sampled solvent-accessible boundary and its local geometry
-    -> surface graph and surface-to-atom graph
-    -> validated, compressed NPZ plus provenance metadata
+```mermaid
+flowchart LR
+    A["Manifest entry"] --> B["PDB or mmCIF coordinates"]
+    B --> C["Selected model and chains"]
+    C --> D["Atoms and covalent/spatial relations"]
+    D --> E["Sampled molecular surface"]
+    E --> F["Nearest-atom tables and surface operators"]
+    F --> G["Validated NPZ"]
 ```
 
 Each arrow consumes the result immediately above it. Section 4.2 explains how to run and inspect this
@@ -865,19 +849,42 @@ journey. Sections 4.3–4.7 then revisit the same arrows in scientific and mathe
 
 ### 4.2. Preparing, running, and inspecting a dataset
 
-DatasetDesign writes the complete portable contract under `data/dna/design`. The three
-`*-labelled.txt` manifests actively define label and split membership; `catalog.csv` supplies the
-structural and provenance fields needed after that selection. The independent preprocessing YAML
-stages this whole directory with one typed `{file: ...}` marker. Internally, Preprocessing verifies
-the TXT/catalog join and projects the accepted identifiers to one geometry checkpoint.
+`Selection` writes its audit directory under `data/dna/design`. The simplest preprocessing inputs
+are `train-labelled.txt`, `validation-labelled.txt`, and `test-labelled.txt`. Each line contains a
+protein identifier, a tab, and its binary label. `catalog.csv` supplies the assembly, leakage group,
+phenotype, and evidence fields that do not fit in those two columns. New Selection runs also create
+equivalent `preprocessing/{train,val,test}.jsonl` files, where one JSON object on each line already
+contains that complete record. Preprocessing accepts either representation.
 
-The single complete manifest deliberately combines train, validation, and test. Molecular geometry
-does not depend on a supervised split, so processing the same structure once is both cheaper and
-safer than three independent runs. Split membership and labels remain in `catalog.csv` and later in
-`members.jsonl`; they are never inferred from filenames or inserted into the universal NPZ.
-`preprocessing-report.json` is the exact `identifier -> output` join used by annotation. Automated
-validation proves that the three labelled split views are disjoint, cover the catalog exactly, and
-agree with its labels. Split metadata later enters `members.jsonl`, never the universal NPZ.
+The manifests say **which** proteins to process; the `structures/` snapshot says **which exact
+coordinate bytes** were approved. A reusable complete design therefore also contains
+`structures/index.json` and one compressed mmCIF per selected PDB entry. If those files are absent,
+rerun Selection once instead of downloading current structures and pretending they are the original
+selection evidence.
+
+The `data/dna/design` directory currently present in this workspace was produced before structural
+snapshots were added. Its labelled TXT files and catalog remain useful for auditing membership, but
+the directory cannot by itself build schema 3.0 because it has no `structures/index.json`. Run
+Selection once with the current code to create a complete design; compatible later preprocessing
+runs can then reuse it without querying RCSB.
+
+When Selection runs on a cluster, its optional `output_directory` is written to that cluster's
+project mirror; LambdaForge does not silently copy a gigabyte-scale directory back to the local
+machine. A later `{file: ../data/dna/design}` input therefore requires the local and remote copies
+to contain exactly the same filenames and bytes. The directory fingerprint uses relative names and
+file contents, not timestamps. If Selection produced the complete snapshot remotely, synchronize
+that directory locally once before using the skipped-Selection mode. Copy into a separate staging
+directory and rename it to `data/dna/design` only after the transfer finishes; submitting while the
+live directory is still growing fingerprints a partial copy. This check prevents local manifests
+from being combined accidentally with a different remote coordinate snapshot.
+
+The files are separate so their supervised roles are visible, but preprocessing concatenates their
+records and deduplicates source PDB entries before geometry. Molecular geometry does not depend on a
+label or split, so every selected identifier is processed once. Split membership and labels enter
+only the final `members.jsonl` and DNA sidecar metadata; they are never inferred from filenames or
+inserted into the universal NPZ. `preprocessing-report.json` is the exact `identifier -> NPZ` join
+used by annotation. Automated validation proves that the three manifests are disjoint and that every
+published member retains its declared label, leakage group, and split.
 
 **Remote entries.**
 
@@ -918,9 +925,14 @@ XML, trajectories, and archive containers are outside the current input contract
 
 **Configuration and execution.**
 
-[`experiments/dna_preprocess.yaml`](experiments/dna_preprocess.yaml) is the human-editable structural
-description. It runs only `Preprocessing`, stages the existing `data/dna/design` directory as a
-typed file input, and selects scientific parameters, concurrency, dataset identity, and resources.
+[`experiments/dna_preprocess.yaml`](experiments/dna_preprocess.yaml) is the public DNA data entry
+point. It contains `select`, `preprocess`, and `visualize`; the first parameter of each step is
+`skip`. Selection reuse for an active Preprocessing step requires the complete existing design and
+`raw_path: null`; the current input bindings pass its six named outputs to Preprocessing.
+The checked-in complete mode uses `true/false/false` and passes `{from: preprocess.dataset}` to
+Visualization. Preprocessing-only uses `true/false/true`. Visualization-only uses
+`true/true/false`, leaves the design and preprocessing inputs null, and switches the dataset value
+to the commented `{dataset: wisdom-dna@5}` selector. Neither form contains a physical dataset path.
 
 ```bash
 lf validate experiments/dna_preprocess.yaml
@@ -929,54 +941,63 @@ lf run experiments/dna_preprocess.yaml --dry-run
 lf run experiments/dna_preprocess.yaml
 ```
 
-`validate` catches malformed arguments, missing staged inputs, and unavailable Python callables.
+`validate` catches malformed arguments, invalid output references, missing RAW evidence, and
+unavailable Python callables.
 `explain` reveals the Work signature and its configured/default parameters. `--dry-run` submits
 nothing and transforms no proteins. The final command generates geometry and annotations for the
 fixed design and publishes only after the final index validates.
 
-The three preprocessing concepts have narrow roles. `ProteinSource` reads the named
-`protein_identifiers` input and gives every unique TXT line a stable key. `PreprocessPipeline` is the
-transform: it receives one line and returns one validated in-memory protein representation.
-`ProteinSink` is the only publication boundary: it atomically writes the NPZ, decides whether an
-existing NPZ is scientifically reusable, and produces the protein-specific report. LambdaForge
-surrounds those three classes with iteration, processes, checkpoints, record errors, manifests, and
-the final dataset identity.
+The central `Preprocessing.run()` reads like five stages: read split files, validate snapshots,
+generate universal geometry, project DNA sidecars, then validate and publish.
+Sibling modules contain each detailed operation. Within geometry, `ProteinSource` assigns stable
+keys, `ProteinPreprocessor` builds one representation, and `ProteinSink` writes/revalidates its NPZ.
+LambdaForge owns bounded maps, per-item JSON checkpoints, progress, attempts, cache files, and final
+dataset identity.
 
-**Configuration reference.**
+**Configuration reference.** “Value in this YAML” reports the checked-in choice, not necessarily
+the Python default. The exact defaults and accepted ranges remain documented beside each YAML
+section.
 
-| Parameter | Default | Meaning |
+| Parameter | Value in this YAML | Meaning |
 |---|---:|---|
-| `design` | no default | Existing fixed design directory staged by `{file: ../data/dna/design}`. |
+| Three `skip` fields | `true`; `false`; `false` | Reuse Selection output, run Preprocessing, and visualize the dataset output after publication. |
+| `select.existing_design` | `{file: ../data/dna/design}` | Complete prior Selection directory forwarded without recomputation. Set it to null for visualization-only or while rebuilding Selection. |
+| `train`; `validation`; `test` | `{from: select.train}` and equivalent outputs | Three complete JSONL files or three `identifier<TAB>label` split files. The current workflow receives the labelled outputs forwarded by `select`. |
+| `catalog` | `{from: select.catalog}` | Required with labelled TXT inputs; supplies assembly, contact, group, phenotype, and source-evidence fields. |
+| `dilutions` | `{from: select.dilutions}` | Directory of `replicate-*/train-*-labelled.txt` views stored as dataset subset membership. |
+| `structures` | `{from: select.structures}` | Selection snapshot containing one exact compressed mmCIF per selected PDB plus `index.json`. The three labelled TXT files cannot replace it. |
 | `dataset_name` | `wisdom-dna` | Stable managed dataset name passed to `self.outputs.dataset`. |
-| `dataset_version` | `4` | Immutable release label; intended byte changes require a new value. |
+| `dataset_version` | `5` | Immutable schema-3 release label; intended byte changes require a new value. |
 | `workers` | `36` | Spawned record processes, normally one per requested CPU. |
-| `requests_per_second` | `4.0` | Aggregate RCSB request starts per second across download threads. |
-| `retries` | `5` | Additional HTTP attempts after the first failed structure request. |
+| `requests_per_second` (Selection) | `60.0` | Aggregate RCSB request starts per second while designing; Preprocessing performs no downloads. |
+| `verbose` | `false` | Add per-record debug lines; normal mode keeps phase summaries and heartbeats. |
+| `retries` (Selection) | `5` | Additional HTTP attempts after a failed structure request during design only. |
 | `progress_log_seconds` | `120.0` | Heartbeat interval for long parallel phases; exact counts remain in `lf top`. |
 | `surface_resolution`; `probe_radius` | `1.0`; `1.4` Å | Surface spacing and solvent-probe radius. |
-| `atom_radius`; `atom_surface_radius` | `6.0`; `6.0` Å | Sparse graph communication cutoffs. |
-| `curvature_scales` | `2.5, 5.0` | Curvature fit radii in surface-resolution units. |
+| `atom_spatial_radius`; `atom_spatial_k_max` | `6.0 Å`; `32` | Physical atom cutoff and largest ranked spatial-neighbor budget persisted once. |
+| `surface_atom_radius`; `surface_atom_k_max` | `6.0 Å`; `32` | Physical transfer cutoff and largest nearest-atom table width persisted once. |
+| `diffusion_spectral_modes_max`; `surface_neighbor_k_max` | `128`; `24` | Maximum low-frequency modes and bounded local neighbors used to construct differential operators. |
+| `curvature_scales` | `1.0, 2.0, 3.0, 5.0, 10.0` | Curvature fit radii in surface-resolution units; the Python default is `2.5, 5.0`. |
 | `positive_gap`; `negative_gap` | `1.4`; `3.0` Å | Confident positive/negative DNA surface-gap boundaries. |
 | `sensitivity_gaps` | `1.0, 1.4, 2.0` Å | Evaluation-only alternative positive boundaries. |
-| `resources` | `36 CPU, 128 GiB, 150 GiB storage, 24 h` | Geometry/annotation Work allocation. |
-| internal `model_index` | `0` | Zero-based structural model selected from the coordinate file. |
-| `chains` | `[]` | Global chain filter, overridden by a remote line selector. |
-| `include_hydrogens` | `false` | Retain explicit hydrogen atoms. No hydrogens are invented. |
-| `include_waters` | `false` | Retain crystallographic water residues. |
-| `include_nonpolymer` | `false` | Retain non-polymer residues such as ligands. |
-| `include_metals` | `false` | Retain metal atoms/residues. |
-| `center_coordinates` | `true` | Subtract the filtered atom centroid and store it as provenance. |
-| `atom_radius` | `6.0 Å` | Spatial atomic graph cutoff. |
-| `surface_resolution` | `1.0 Å` | Main surface sampling length scale, denoted below by `h`. |
-| `probe_radius` | `1.4 Å` | Radius added to vdW spheres for the solvent-accessible surface. |
-| `atom_surface_radius` | `6.0 Å` | Surface-to-atom communication cutoff. |
-| `curvature_scales` | `[2.5, 5.0]` | Positive radius multipliers for independently fitted curvature triplets. |
+| `dataset` (visualization) | `{from: preprocess.dataset}` | Consume the dataset produced earlier in this workflow. For visualization-only, use `{dataset: wisdom-dna@5}` to resolve an existing Registry version. The Python default is null. |
+| `identifiers`; `splits`; `labels` | `()`; all three splits; `(0,1)` | Exact IDs override automatic sampling; otherwise the gallery cycles deterministically across eligible split/class strata. |
+| `maximum_proteins` | `12` | Automatic gallery size; zero renders all eligible members. Explicit IDs are never truncated. |
+| `maximum_surface_points`; `maximum_mesh_points` | `6000`; `2500` | Browser payload bounds for the authoritative cloud and server-built diagnostic alpha-complex mesh. |
+| `maximum_edges`; `normal_stride`; `normal_length` | `5000`; `25`; `1.5` Å | Display-only graph and normal-vector limits. |
+| `mesh_alpha` | `4.0` Å | Largest retained Delaunay-tetrahedron circumsphere radius; it changes only the diagnostic mesh. |
+| `maximum_vdw_atoms` | `1500` | Deterministic cap for physical-radius icosahedra; every atom remains selectable as a marker. |
+| `resources` | `36 CPU, 128 GiB, 100 GiB storage, 24 h` | Geometry/annotation Work allocation. |
+| `model_index`; `chains` | `0`; `[]` | Select one zero-based coordinate model and, optionally, named chains. A chain written in an identifier takes precedence. |
+| `include_hydrogens`; `include_waters` | `false`; `false` | Keep explicit hydrogen atoms or crystallographic water. WISDOM never invents missing hydrogens. |
+| `include_nonpolymer`; `include_metals` | `false`; `false` | Keep ligands/other non-polymers or metal atoms instead of restricting geometry to the protein polymer. |
+| `center_coordinates` | `true` | Subtract the selected atoms' centroid and record the removed origin so source coordinates remain recoverable. |
 
-`surface_resolution` controls candidate density, voxel size, and the surface graph radius. Curvature
+`surface_resolution` controls candidate density, voxel size, and operator length scales. Curvature
 scales are independently configurable: a value `s` fits one `[H,K,C]` triplet inside radius `s h`,
-where `h=surface_resolution`. Adding or removing scales changes
-`surface_curvatures` from `[M,S,3]` to the new number `S`; the WISDOMv1 YAML must then set
-`curvature_features=3S` and the surface projection input size to `hidden_dim+3S`.
+where `h=surface_resolution`. Adding or removing scales changes `surface_curvatures` from
+`[M,S,3]` to the new number `S`. No model-width field needs manual editing: training derives `3S`
+from the managed dataset and rejects inconsistent splits.
 
 Preprocessing always publishes the complete canonical population once. It stores dilution
 membership in each dataset member rather than recomputing or duplicating NPZ files. Choose the
@@ -992,10 +1013,48 @@ flags, or failure policy inside `PreprocessConfig`.
 During each long parallel phase, `lf top` displays LambdaForge's exact completed/total counter.
 The Work log also emits one short heartbeat every `progress_log_seconds`, so a quiet protein cannot
 make the job look frozen. On a compatible retry, structure downloads come from dependency-checked
-LambdaForge cache entries. Existing geometry NPZ and DNA sidecars are opened and fully validated;
-only missing, corrupt, source-mismatched, or configuration-mismatched records are recomputed.
+LambdaForge cache entries. Geometry and annotation both use `resume_map`; restored JSON checkpoints
+are accepted only after the referenced NPZ or sidecar is reopened and scientifically validated.
+Only missing, corrupt, source-mismatched, or configuration-mismatched records are recomputed.
 
-**Inspecting the result.**
+**Inspecting the DatasetVersion with LambdaForge.**
+
+LambdaForge inspects logical membership, immutable identity, placements, and bytes; it does not
+interpret molecular geometry. Add `--on citius-ctgpgpu12` when the desired placement exists only on
+that cluster, and add `--json` when another program will consume the answer.
+
+```bash
+lf datasets list --all
+lf datasets show wisdom-dna@5 --on citius-ctgpgpu12
+lf datasets show wisdom-dna@5 --on citius-ctgpgpu12 --schema
+lf datasets stats wisdom-dna@5 --on citius-ctgpgpu12
+lf datasets locations wisdom-dna@5
+lf datasets lineage wisdom-dna@5
+lf datasets verify wisdom-dna@5 --on citius-ctgpgpu12
+lf datasets members wisdom-dna@5 --on citius-ctgpgpu12 --partition split=train --limit 20
+lf datasets member wisdom-dna@5 MEMBER_ID --on citius-ctgpgpu12
+lf datasets diff wisdom-dna@4 wisdom-dna@5 --on citius-ctgpgpu12
+```
+
+`show` reports identity, metadata, schema, and selected placement; `stats` summarizes partitions,
+targets, assets, and size; `locations` lists physical copies without making their paths part of the
+scientific identity; `lineage` reports recorded build ancestry; `verify` rehashes the placement;
+`members` pages/filter members; `member` exposes one member's targets, partitions, metadata, and
+assets; and `diff` compares two immutable versions.
+
+The exact stored size is the `size_bytes` field returned by `stats`. To print only a binary
+human-readable value such as `5.9GiB`, use:
+
+```bash
+lf datasets stats wisdom-dna@5 --on citius-ctgpgpu12 --json \
+  | jq -r '.size_bytes' \
+  | numfmt --to=iec-i --suffix=B
+```
+
+This is the size of that verified physical placement, not the transient Work cache, downloaded HTML
+gallery, or another replicated placement.
+
+**Inspecting protein geometry.**
 
 Each successful input produces exactly one **NPZ**, a compressed container holding several named
 NumPy arrays in one file. Section 4.6 describes every stored array. `preprocessing-report.json` is a
@@ -1010,21 +1069,71 @@ an audit record of where the
 coordinates came from, which settings transformed them, and which software versions performed the
 work. Provenance does not change molecular geometry; it makes that geometry traceable.
 
-The hexadecimal directory names are not arbitrary temporary names. Each is the first part of a
-SHA-256 fingerprint for one exact combination of task definition and declared input bytes. Keeping
-different fingerprints in separate immutable-looking directories prevents a newer experiment from
-silently overwriting older scientific evidence. The following commands provide a readable index and
-an HTML page, so finding a run does not require opening every directory by hand:
+Set `visualize.skip: false`, keep its `{dataset: wisdom-dna@5}` selector, and run the same YAML on a
+machine that has a verified placement. Empty `identifiers` creates a deterministic 12-protein sample
+that cycles through train/validation/test and labels 0/1. Supplying exact IDs renders all of them in
+the requested order. The managed artifact is also copied atomically to the configured
+`data/dna/visualizations`; on remote execution that conventional path is in the remote project
+mirror, not the workstation filesystem.
 
-```bash
-lambdaforge results runs/tasks --no-archived
-lambdaforge dashboard runs/tasks --output runs/index.html
-```
+Open `data/dna/visualizations/index.html`. Every protein page provides:
 
-The result list shows each attempt, status, fingerprint, and `result.json` path. The dashboard groups
-the same information visually. Once a result is used for training or publication, retain its exact
-fingerprint rather than a moving “latest” alias; `config.yaml` and `result.json` inside that directory
-explain what produced it.
+- independently closable, reopenable, and expandable control/detail sidebars, collapsible sections,
+  queued WebGL updates, and explicit presets for surface, solid mesh, atoms, van der Waals envelopes,
+  backbone, bonds, and complete graph inspection;
+- a depth-buffered, rotatable surface cloud and a scalar selector for every curvature radius,
+  surface area weight, component, normal component, signed envelope gap, hard/soft DNA target,
+  DNA distance, validity mask, and sensitivity target present in its NPZ/sidecar;
+- independently selectable gradients, reversible colour order, and editable robust minimum/maximum
+  ranges for both surface and atom channels; point size and opacity are adjustable, while full
+  opacity is the default so foreground samples occlude background samples where their markers
+  overlap;
+- a fully opaque, uniformly coloured mesh by default, with controls for material colour, opacity,
+  or optional colouring by the selected scientific channel; uniform colouring makes shape and
+  depth legible without visually fragmenting the surface into many scalar-coloured triangles;
+- atom markers recolourable by element number, residue type, role, formal charge, chain, residue, or
+  van der Waals radius, plus bounded icosahedral envelopes whose radii use the stored physical vdW
+  values rather than screen-space marker sizes;
+- independent layers for the C-alpha backbone, outward normals, bounded surface-neighbour links, and spatial,
+  covalent, or combined atomic edges;
+- click inspection of every available scalar on an atom or authoritative surface point, and a
+  two-click Euclidean distance tool reporting centre-to-centre distance in ångströms;
+- the complete base/sidecar array inventory, shapes, dtypes, numerical summaries, provenance, and
+  automatic flying/interior-point, normal, curvature, and connectivity checks;
+- a full-order ASCII PLY plus companion NPZ for external tools such as ParaView.
+
+The mesh is computed once by WISDOM before writing the page, rather than repeatedly inside the
+browser. For each Delaunay tetrahedron with vertices `q_0,...,q_3`, let `c` be the centre and `r` the
+radius of its circumsphere. They satisfy
+
+$$
+\lVert \mathbf{c}-\mathbf{q}_0 \rVert_2
+=\lVert \mathbf{c}-\mathbf{q}_1 \rVert_2
+=\lVert \mathbf{c}-\mathbf{q}_2 \rVert_2
+=\lVert \mathbf{c}-\mathbf{q}_3 \rVert_2=r.
+$$
+
+WISDOM retains the tetrahedron when `r <= mesh_alpha`; a triangular face is part of the displayed
+boundary when it occurs in exactly one retained tetrahedron. Plotly receives those explicit faces,
+so showing or recolouring the mesh no longer recomputes an alpha shape. Before rendering a face with
+vertices `a`, `b`, and `c`, WISDOM computes its directed geometric normal
+
+$$
+\mathbf{n}_f=(\mathbf{b}-\mathbf{a})\times(\mathbf{c}-\mathbf{a}).
+$$
+
+The three stored outward surface normals are averaged to obtain the face reference direction. If
+their dot product with `n_f` is negative, WISDOM exchanges `b` and `c`. All triangles consequently
+use the same outward winding, preventing neighbouring faces from receiving contradictory front/back
+lighting. If numerical degeneracy or an empty complex prevents this boundary, the page visibly
+reports a convex-hull fallback.
+
+The mesh result helps perceive depth and gross morphology but is not guaranteed to reproduce
+molecular-surface topology: bounded sampling can bridge a narrow pocket or omit a weakly sampled
+sheet. The point markers are opaque, but rear markers can remain visible through real gaps between
+front markers; increasing point size reduces those gaps and the solid mesh provides continuous
+occlusion. The mesh is visibly marked as derived, is never stored in the managed dataset, and is
+never supplied to a model.
 
 Useful inspection code:
 
@@ -1038,15 +1147,14 @@ with np.load("protein.npz", allow_pickle=False) as archive:
     print("atoms:", archive["atom_positions"].shape[0])
     print("atomic edges:", archive["atom_edge_index"].shape[1])
     print("surface points:", archive["surface_positions"].shape[0])
-    print("surface edges:", archive["surface_edge_index"].shape[1])
+    print("nearest atoms per point:", archive["surface_atom_neighbors"].shape[1])
+    print("stored diffusion modes:", archive["diffusion_eigenvalues"].shape[0])
     print(json.loads(str(archive["metadata_json"].item())))
 ```
 
-LambdaForge 0.12 deliberately concentrates on Work execution and immutable DatasetVersions; the
-former generic artifact-inspection command family is no longer a public API. The pickle-free Python
-example above inventories arrays directly. WISDOM's validator and interactive protein viewer in
-Section 4.7 remain responsible for domain checks such as signed surface gaps, normal orientation,
-curvature identities, and the relationship between atomic and surface graphs.
+LambdaForge 0.13 deliberately concentrates on Work execution and immutable DatasetVersions; it has
+no built-in molecular point-cloud/mesh viewer. The commands above inspect the dataset contract and
+bytes, while WISDOM's third Work performs the domain-specific 3D interpretation.
 
 ### 4.3. From manifest entry to normalized coordinates
 
@@ -1076,40 +1184,33 @@ would require a square table that grows rapidly with molecule size. WISDOM inste
 found without enumerating all pairs. The KD-tree changes search efficiency only: every accepted
 edge or neighborhood is still decided by the Euclidean distance above.
 
-**Obtaining coordinate files.**
+**Obtaining and freezing coordinate files.**
 
-The first program stage turns every manifest line from Section 4.2 into a readable local file. Local
-paths already satisfy that requirement. For remote identifiers, `Preprocessing` first deduplicates
-the PDB part—so `1abc_A` and `1abc_B` require one coordinate archive—and asks LambdaForge's
-identity-scoped cache for `structures/1abc.cif.gz`. A missing entry comes from
-`https://files.rcsb.org/download/<PDB_ID>.cif.gz`, the compressed PDBx/mmCIF endpoint documented by
-RCSB PDB. “Reconstructible” means that this cache may be deleted to recover space because its bytes
-can be downloaded and verified again; it is not itself the published scientific dataset.
+Selection, not Preprocessing, obtains coordinates. It deduplicates the PDB part—so `1abc_A` and
+`1abc_B` require one coordinate file—and asks LambdaForge's reconstructible cache for the current
+RCSB PDBx/mmCIF entry. `Work.cache.fetch` owns request limiting, retries, writer locking, temporary
+files, and atomic cache publication. Gemmi then parses those bytes before any contact, assembly,
+descriptor, Foldseek, balancing, or split decision is made.
 
-LambdaForge and WISDOM divide the work as follows:
+After final membership is known, Selection copies only the PDB entries used by CANONICAL into
+`structures/`. The uncompressed mmCIF bytes are compressed with an empty filename and timestamp
+zero, making gzip output deterministic. `structures/index.json` records, for every PDB, its safe
+filename, byte count, SHA-256 of the compressed archive, and SHA-256 of the uncompressed mmCIF.
 
-1. `Preprocessing.resume_map` assigns one stable PDB key to each unique download and uses a bounded
-   thread pool to overlap network waits.
-2. `Work.cache.fetch` applies the shared `requests_per_second` limiter, bounded exponential retries,
-   a cross-process single-writer lock, temporary-file construction, and atomic cache publication.
-3. Gemmi validates every candidate archive before LambdaForge records its SHA-256, byte count, and
-   logical cache dependency; an invalid or missing dependency cannot satisfy map resume.
-4. `ProteinSource` parses the designed manifest and gives each protein-chain record a stable key.
-5. The CPU process map resolves only an already managed structure, hashes its exact source bytes,
-   performs the scientific transformation, and asks `ProteinSink` to publish one validated NPZ.
+Preprocessing consequently performs no RCSB request. Its flow is:
 
-The rate is global to the Work's download threads: with 36 workers and the default `4.0`, at most
-four request attempts start per second. More threads can hide latency but cannot violate that public-
-service ceiling. LambdaForge, rather than WISDOM, owns cache locks and retry state, eliminating a
-second competing cache protocol. A compatible retry restores successful PDB results only while the
-referenced managed bytes still match their recorded content evidence.
+1. compare the PDB set in `structures/index.json` with the selected catalog;
+2. verify compressed and uncompressed SHA-256 values in parallel;
+3. ask Gemmi to parse every stored archive and require at least one coordinate model;
+4. let `ProteinSource` assign stable protein-chain keys;
+5. resolve each key inside this validated snapshot and generate the NPZ in CPU processes.
 
-The format label is inferred from the validated suffix; coordinate interpretation itself is
-delegated to Gemmi. WISDOM also computes a per-source SHA-256, a content fingerprint that maps exact
-file bytes to a fixed-length hexadecimal value. If even one compressed source byte changes, the
-digest is expected to change, allowing Section 4.7 to reject stale NPZ output. LambdaForge's managed
-digest establishes cache-byte identity; the WISDOM digest stored in NPZ provenance independently
-binds the scientific representation to the bytes Gemmi actually read.
+A SHA-256 here is deliberately exact, but it no longer creates a dependency on the future public
+PDB. It answers “are these still the bytes Selection audited?”, not “does RCSB still serve the same
+file?”. RCSB may revise `5H8W` next year without affecting an existing design. Updating to that
+revision is an explicit scientific action: rerun Selection, revalidate contacts/descriptors and
+splits, and publish a new intended dataset version. Silently mixing new coordinates with old
+selection decisions would be less reproducible and potentially change the benchmark.
 
 **The Gemmi boundary.**
 
@@ -1119,10 +1220,13 @@ atoms, coordinates, charges, and source-declared connections through one program
 This boundary matters because format parsing has many edge cases that are unrelated to WISDOM's
 scientific representation.
 
-No Gemmi object is stored after reading. WISDOM copies the selected information into its simpler
-`Protein -> Chain -> Residue -> Atom` ownership hierarchy. It places audit information in the
-separate `ProteinMetadata` object; “metadata” here means information *about* the representation,
-such as source hash and coordinate origin, rather than atoms belonging to the molecule.
+`ProteinStructure` owns the Gemmi deposition while it is being inspected. Experimental resolution,
+release year, experimental method, entity sequences, and biological assemblies are direct
+attributes or operations of that object rather than a disconnected metadata container. The
+preprocessing-specific reader then copies the selected coordinates into the simpler
+`Protein -> Chain -> Residue -> Atom` hierarchy. Source hash and coordinate origin are kept in a
+separate `PreprocessingProvenance` value because they describe how the representation was produced,
+not the deposited molecule.
 
 **Models, chains, residues, and filtering.**
 
@@ -1270,25 +1374,29 @@ The union symbol means “present in either set or in both.” The graph is undi
 `(j,i)` mean the same relationship; WISDOM stores only the version with `i<j`. A covalent pair is not
 discarded merely because unusual coordinates place it beyond the spatial cutoff.
 
-One pair can carry both meanings. `atom_edge_relation_mask` is a compact bit mask: `1` means only
-spatial, `2` only covalent, and `3=1+2` means both. This avoids duplicating the same pair in two graph
-files while preserving why it exists.
+One pair can carry both meanings. `atom_edge_is_covalent` records whether it is a chemical bond.
+`atom_edge_spatial_rank` stores its deterministic one-based nearest-neighbour rank, or `0` when the
+pair is retained only because it is covalent. This stores one generous candidate topology while allowing
+training to choose any `K<=K_max` without regenerating the dataset.
 
 **Spatial edges.**
 
-Let `r_a` denote the configured `atom_radius`, and let `x_i` and `x_j` be the coordinates of atoms
-`i` and `j`. A spatial edge exists exactly when the two indices are distinct and ordered (`i<j`) and
-their Euclidean distance from Section 4.3 does not exceed `r_a`:
+Let `r_a` denote `atom_spatial_radius`, `K_max` the stored neighbour limit, and `x_i`, `x_j` the
+coordinates of atoms `i`, `j`. Atom `j` is a spatial candidate for `i` only when it is among the
+`K_max` closest atoms inside the physical radius. Distances are ranked by `(distance, atom index)`,
+which makes exact-distance ties reproducible. The stored undirected candidate pair exists when
 
 ```math
-(i,j)\in E_{spatial}
-\iff i<j \text{ and } \lVert\mathbf{x}_i-\mathbf{x}_j\rVert_2\le r_a.
+(i,j)\in E_{spatial}^{max}
+\iff i<j,
+\quad \lVert\mathbf{x}_i-\mathbf{x}_j\rVert_2\le r_a,
+\quad \min(\rho_i(j),\rho_j(i))\le K_{max},
 ```
 
-In ordinary language, each atom connects to every other atom inside a sphere of radius `r_a` around
-it. The KD-tree enumerates these pairs without an `N x N` distance table. Distances are computed with
-`float64` working precision and stored as `float32`, which halves storage relative to 64-bit values
-while retaining more precision than the input structures normally justify.
+where `rho_i(j)` is the rank of `j` around `i`. At runtime a model selecting `K` keeps spatial pairs
+whose stored rank is at most `K`, plus every covalent pair irrespective of rank. The KD-tree avoids
+an `N x N` distance table, so memory grows as `O(N K_max)`. Distances use `float64` while ranking and
+`float32` in the archive.
 
 **Covalent edges and evidence precedence.**
 
@@ -1383,13 +1491,13 @@ This is an **implicit field** because its zero value defines a boundary without 
 Outside the union it is the exact distance to the nearest expanded sphere. Inside overlapping
 spheres, however, the most negative sphere gap is not always the shortest route back to the union
 boundary. WISDOM therefore does not claim that this is an exact signed-distance field (SDF)
-everywhere. It evaluates gaps only where needed, stores no three-dimensional SDF grid, and does not
-use marching cubes to extract a mesh.
+everywhere. It evaluates gaps only where needed, stores no regular three-dimensional distance array,
+and does not extract a triangle mesh from such a volume.
 
 **Fibonacci candidate points.**
 
-The boundary now exists mathematically, but WISDOM still needs finitely many nodes for a surface
-graph. It first places candidate directions around every expanded sphere using a spherical Fibonacci
+The boundary now exists mathematically, but WISDOM still needs finitely many sample points for the
+model. It first places candidate directions around every expanded sphere using a spherical Fibonacci
 pattern. This deterministic construction spreads points approximately uniformly without random
 sampling, so identical input produces identical output.
 
@@ -1658,12 +1766,13 @@ one-point surface receives weight one.
 
 ### 4.6. From surface points to the final NPZ
 
-**The surface graph.**
+**Temporary connectivity diagnostic.**
 
-The retained points and their geometry are now available, but the surface graph described in Section
-3.1.3 still needs edges. Connecting every pair would be dense and would join unrelated sides of the
-molecule. WISDOM first asks the KD-tree for pairs whose Euclidean separation `d_ij` is at most
-`2.5h`, where `h` is surface resolution. It then applies two orientation filters.
+The retained points need local connectivity while curvatures and diagnostics are computed. This
+temporary graph is never published and is never consumed by WISDOMv1/v2. Connecting every pair
+would be dense and could join opposite walls, so WISDOM asks a KD-tree only for pairs whose
+Euclidean separation `d_ij` is at most `2.5h`, where `h` is surface resolution, then applies two
+orientation filters.
 
 Let `n_i` and `n_j` be the outward normals at candidate points `i` and `j`. Their dot product is `1`
 when they point the same way, `0` when perpendicular, and `-1` when opposite. The pair is rejected
@@ -1688,8 +1797,8 @@ rather than along it. Reject when
 
 The right side is 80% of total displacement length. Therefore an edge survives only when its
 normal-direction component is not too dominant from either endpoint. Together the rules favor local
-tangent travel and reduce shortcuts between nearby opposite walls. Surviving undirected pairs are
-stored once with `src<dst`, as in the atomic graph.
+tangent travel and reduce shortcuts between nearby opposite walls. Surviving undirected pairs exist
+only during this diagnostic calculation.
 
 A **connected component** is a maximal set of nodes reachable from one another by following graph
 edges. WISDOM computes components on a sparse symmetric adjacency matrix: “symmetric” represents both
@@ -1706,40 +1815,83 @@ Two points in different components really do have no path made of accepted surfa
 them. That can be physically correct: two selected chains may not touch, and the wall of a sealed
 internal cavity is disconnected from the exterior boundary. It can also be a discretization
 artifact: voxel sampling may leave a small gap, or the normal filters may reject the only candidate
-edge near a sharp crease. A one-point component is an isolated point and receives no neighbor message
-from the surface GCN.
+edge near a sharp crease. A one-point component is an isolated sample in this temporary diagnostic.
 
-Multiple components are therefore permitted, but they are not declared harmless. The numerical
-validator separately proves that every point lies on the molecular envelope and has an outward
-normal; it then reports component count, isolated points and largest-component fraction as scientific
-warnings. In the currently validated 450-protein corpus, 4,280 of 5,389,038 points are isolated
-(`0.079%`) and the worst largest-component fraction is about `0.572`. This is geometrically valid but
-must be inspected before drawing localization conclusions. WISDOMv1/v2 cannot propagate a surface
-GCN message across components. They can nevertheless classify the whole protein because every point
-still receives nearby atomic information and final MIL pooling combines points from all components.
-If a task requires long-range communication across disconnected sheets, changing the model or graph
-criterion is a new scientific decision, not something validation should silently invent.
+Multiple temporary components are therefore permitted but reported. They diagnose sampling or
+geometry and are not interpreted as biological domains. The differential operator below is built
+directly from the point cloud rather than this diagnostic graph. If the geometry itself has separate
+components, diffusion also keeps them separate; it does not create a connection through empty space.
 
-**The surface-to-atom graph.**
+**The bounded surface-to-atom table.**
 
-The surface graph moves information across the boundary, but a future model also needs the third
-graph introduced in Section 4.1 to exchange information with atoms. Let `p_s` be surface point `s`, let
-`x_i` be atom `i`, and let `r_sa` denote configured `atom_surface_radius`. A bipartite edge exists
-when
+Every surface point must receive atomic context without materializing all atom–point pairs. Let
+`p_s` be point `s`, `x_i` atom `i`, `r_sa` the configured `surface_atom_radius`, and `J_max` the
+stored width. WISDOM stores distances as 32-bit floating-point numbers (`float32`). It therefore
+ranks atoms inside the physical cutoff by `(stored float32 distance, atom index)` and keeps at most
+`J_max`:
 
 ```math
-(s,i)\in E_{surface-atom}
-\iff \lVert\mathbf{p}_s-\mathbf{x}_i\rVert_2\le r_{sa},
+i\in A_{J_{max}}(s)
+\iff \lVert\mathbf{p}_s-\mathbf{x}_i\rVert_2\le r_{sa}
+\text{ and }\rho_s(i)\le J_{max}.
 ```
 
-In words, every surface point connects to **all** atoms within `r_sa`; the method is a radius graph,
-not a fixed-number nearest-neighbor graph. Neighbors are deterministically sorted. Each stored column
-contains `[surface_index, atom_index]` plus their Euclidean distance.
+The archive stores fixed `[M,J_max]` arrays `surface_atom_neighbors`, `surface_atom_distances`,
+`surface_atom_normal_offsets`, `surface_atom_tangential_distances`, and `surface_atom_mask`. Padding has mask zero and never participates. A
+runtime choice `J<=J_max` selects the first `J` valid entries. There is no fallback to a distant atom:
+if a point has no atom inside `r_sa`, preprocessing fails. Two distances that differ in the
+temporary 64-bit calculation can round to the same stored `float32` value. In that case the smaller
+atom index resolves the tie. Defining the order at storage precision ensures that generation and
+validation still agree after reopening the NPZ.
 
-There is intentionally no K-nearest-neighbor (KNN) fallback that would connect a point to a distant
-atom just to fill a quota. If a surface point has no atom within the scientific cutoff, its
-representation is inconsistent and preprocessing fails. These edges specify only where future
-communication is permitted; they contain no message, attention coefficient, or learned weight.
+For offset `o=x_i-p_s` and normalized surface normal `n_s`, the signed normal component is
+`z=o·n_s`. WISDOM computes tangential magnitude as `rho=||o-z n_s||`. This is mathematically equal
+to `sqrt(||o||²-z²)`, but the vector-projection form remains accurate when `o` is almost parallel to
+the normal; the squared form would subtract two nearly equal numbers. Generation and validation call
+the same 64-bit operation before the three scalars are stored as `float32`.
+
+**Sparse differential geometry.**
+
+DiffusionNet needs a numerical description of how values vary over the surface. The **mass** `A`
+assigns an area contribution to each sampled point. The **Laplacian** `L` is a sparse matrix that
+compares a value at one point with values in its local geometric neighbourhood; smooth fields have
+small variation under this operator. An **eigenvector** `phi_q` is a surface pattern whose shape is
+preserved by `L`, while its eigenvalue `lambda_q` tells how rapidly that pattern varies. Low
+eigenvalues describe broad changes and high eigenvalues describe fine oscillations.
+
+WISDOM computes these quantities with the MIT-licensed `robust_laplacian` point-cloud operator of
+Sharp and Crane, also used by the official DiffusionNet point-cloud pipeline. It constructs local
+planar triangulations internally and returns sparse stiffness and area-mass matrices without forming
+all `M x M` point distances. WISDOM solves `L phi_q = lambda_q A phi_q` and keeps at most `Q_max`
+low-frequency pairs. It also stores two sparse matrices that approximate change along two
+perpendicular directions tangent to the surface. COO means that only the row, column, and value of
+each non-zero matrix entry are stored.
+
+The eigensolver uses **shift-invert**, a numerical method that accelerates recovery of modes near
+zero without changing the eigenproblem. After symmetric mass normalization, the Laplacian has no
+negative eigenvalues. WISDOM places a small shift at `-1e-4 Å^-2`, just outside that spectrum, and
+asks the sparse solver for the transformed modes with largest magnitude. Those are exactly the
+original modes nearest zero. The negative shift also avoids trying to factor the constant mode at
+its singular value zero.
+
+Before constructing these intrinsic operators, WISDOM subtracts the surface-point centroid from
+the temporary coordinates. Distances and differential operators are unchanged by a common
+translation, but keeping values near zero prevents a large coordinate origin from consuming
+floating-point precision. This does not alter the stored `surface_positions`.
+
+Let `h` be one scalar feature over all points and place the retained eigenvectors in the columns of
+`Phi`. A diffusion time `t>=0` produces
+
+```math
+h_t=\Phi\,\operatorname{diag}(e^{-t\lambda_q})\,\Phi^\top A h.
+```
+
+The factor `exp(-t lambda_q)` is close to one for a broad, low-frequency pattern and becomes small
+for a rapidly varying pattern. Increasing `t` therefore smooths the field farther over the surface;
+at `t=0` the formula reproduces the part of `h` represented by the retained modes. The matrices are
+fixed geometry, while the model learns useful diffusion times. The point-cloud construction still
+depends on local planar triangulation and may fail on degenerate or nearly collinear samples; WISDOM
+then rejects that protein instead of publishing an invalid operator.
 
 **NPZ output schema.**
 
@@ -1752,12 +1904,14 @@ one column per stored pair. A **dtype** is the numeric storage type: for example
 |---|---|---|
 | Atoms | `atom_positions`, `atomic_numbers`, `residue_type_ids`, `atom_role_ids`, `residue_indices`, `chain_indices`, `formal_charges`, `vdw_radii`, `covalent_radii` | Compact structural atom features. |
 | Audit labels | `atom_names`, `residue_names` | Fixed-width Unicode labels. |
-| Atomic topology | `atom_edge_index`, `atom_edge_distance`, `atom_edge_relation_mask` | Spatial/covalent pair union. |
+| Atomic topology | `atom_edge_index`, `atom_edge_distance`, `atom_edge_is_covalent`, `atom_edge_spatial_rank` | Bounded spatial candidates plus all covalent pairs. |
 | Bond semantics | `atom_edge_bond_type`, `atom_edge_bond_order`, `atom_edge_bond_source`, `atom_edge_bond_confidence` | Chemical type, numeric order, evidence, and heuristic confidence. |
 | Atomic context | `atom_edge_same_residue`, `atom_edge_same_chain`, `atom_edge_residue_separation` | Ownership/topological context. |
-| Surface | `surface_positions`, `surface_normals`, `surface_curvatures`, `surface_area_weights`, `surface_component_ids` | Fixed point cloud and local geometry. |
-| Surface topology | `surface_edge_index`, `surface_edge_distance` | Filtered local undirected graph. |
-| Atom communication | `surface_atom_edge_index`, `surface_atom_distance` | Radius-based bipartite incidence. |
+| Surface | `surface_positions`, `surface_normals`, `surface_curvatures`, `surface_area_weights` | Fixed point cloud and local geometry. |
+| Atom transfer | `surface_atom_neighbors`, `surface_atom_distances`, `surface_atom_normal_offsets`, `surface_atom_tangential_distances`, `surface_atom_mask` | Padded bounded nearest-atom table. |
+| Diffusion spectrum | `diffusion_mass`, `diffusion_eigenvalues`, `diffusion_eigenvectors` | Generalized spectral basis up to `Q_max`. |
+| Tangent gradients | `diffusion_gradient_index`, `diffusion_gradient_x`, `diffusion_gradient_y` | Sparse directional derivative operators. |
+| V3 neighbourhood | `surface_neighbors`, `surface_neighbor_distances`, `surface_neighbor_mask` | Bounded deterministic point neighbourhood up to `K_s,max`; local direction scalars are derived from stored positions/normals. |
 | Provenance | `metadata_json` | Scalar JSON Unicode array, never pickle/object. |
 
 Graph indices are `int32`; categorical IDs and flags use compact integer dtypes; distances and
@@ -1783,21 +1937,20 @@ mistaken for molecular structure.
 **Validation and atomic publication.**
 
 Producing arrays is not enough: every stage assumes shapes and indices established by the preceding
-stage. `StorageManager` therefore checks the complete representation before any final filename is
+stage. `ProteinArchive` therefore checks the complete representation before any final filename is
 published. This turns silent corruption into a per-protein failure with a reportable reason.
 
-Before publication, `StorageManager` verifies:
+Before publication, `ProteinArchive` verifies:
 
 - nonempty finite `[N,3]` atomic coordinates and matching feature lengths;
 - valid atomic numbers and nonnegative residue indices;
 - `int32` graph indices, in-range endpoints, `src<dst`, no duplicates, and consistent distances;
-- relation masks in `{1,2,3}` and one value per atomic edge for every edge feature;
+- one covalent flag and spatial rank per atomic edge, with every covalent pair retained at runtime;
 - nonempty finite `[M,3]` surface positions and unit normals;
 - finite `[M,S,3]` curvatures, with `S` equal to the configured number of scales;
 - positive finite area weights summing to one;
-- nonnegative component IDs;
-- valid surface graph distances/endpoints;
-- valid bipartite endpoints/distances and at least one atom for every surface point;
+- valid padded surface-to-atom and surface-neighbour tables with deterministic masks and bounds;
+- finite nonnegative eigenvalues, mass, orthonormal eigenvectors, and valid sparse gradients;
 - absence of `dtype=object`.
 
 NPZ publication is **transactional**, meaning that the final path changes only after the whole new
@@ -1808,8 +1961,7 @@ atomically. A failed worker cannot leave an apparently valid final NPZ.
 
 **Run and record reuse.** A matching failed Run retries with LambdaForge's compatible Work
 checkpoints, not from filenames alone. WISDOM additionally revalidates molecular records before
-reusing their atomically written archives. Inspect the configured Works without starting them with
-Inspect the resolved call without starting work with
+reusing their atomically written archives. Inspect the resolved call without starting work with:
 
 ```bash
 lf explain experiments/dna_preprocess.yaml
@@ -1819,13 +1971,13 @@ Changing declared design bytes, code identity, or a scientific setting creates a
 identity. A successfully published `name@version` remains immutable, so intended new content needs a
 new explicit dataset version rather than overwriting an old placement.
 
-**Per-protein resume.** `DatasetDesign.resume_map` owns stable keys, dependency-aware structure-
-analysis reuse, bounded workers, progress, and safe JSON result checkpoints. Geometry and DNA maps
-use LambdaForge's stateless bounded `map` instead: every item reaches WISDOM's stricter scientific
-resume boundary, so a compact framework result can never bypass archive revalidation. Each worker
-writes one atomic NPZ under the Work checkpoint root and returns only a compact report. Before an
-expensive retry, `ProteinSink.resume` opens the exact candidate with `allow_pickle=False`, requires the complete array
-set, reruns all numerical checks, recomputes the coordinate-file hash, and also requires equality of:
+**Per-protein resume.** Selection, structure retrieval, geometry, and DNA annotation use
+LambdaForge `resume_map` with stable keys, bounded workers, live progress, and safe JSON result
+checkpoints. Restoring a geometry or annotation checkpoint does not bypass WISDOM validation: the
+map validator reopens the exact NPZ or sidecar, verifies source/configuration/base fingerprints, and
+reruns the numerical schema checks. Each worker writes one atomic archive under the Work checkpoint
+root and returns only a compact report. `ProteinSink.resume` resolves the one expected filename
+directly—the former directory-wide scan from every worker was removed—and requires:
 
 ```text
 source_hash
@@ -1847,8 +1999,8 @@ equal the bytes recorded by the task, while WISDOM's preprocessing sink checks t
 before publishing every NPZ. It opens the archive without pickle, validates the complete schema,
 recomputes counts and distances, verifies metadata/configuration/source hashes, and compares report
 values with loaded arrays. Scientific surface-fragmentation warnings remain visible without becoming
-schema errors. Section 4.2 shows LambdaForge's generic commands for inspecting arrays and explicit
-3D roles after publication; no second preprocessing experiment YAML is required.
+schema errors. Section 4.2 separates LambdaForge's dataset inspection commands from WISDOM's third,
+domain-specific visualization Work in the same YAML.
 
 Surface validation goes beyond array bookkeeping. For surface point `p`, atom centre `c_i`, van der
 Waals radius `r_i`, and probe radius `r_probe`, it recomputes the signed expanded-sphere gap
@@ -1866,31 +2018,36 @@ the curvature identity `C²=2H²-K`, bounds the dimensionless magnitude `C r` at
 and reports isolated points, connected components, the largest-component fraction, and longest
 surface edge. These quantities appear both per protein and as readable dataset extrema.
 
-Numerical tests can reveal errors invisible in a table, while LambdaForge's explicit-role 3D artifact
-viewer can reveal spatial patterns hidden by one summary number. It can render atomic positions,
-surface points, graph edges, and normal vectors directly from an NPZ as shown in Section 4.2. The
-viewer deliberately does not invent a triangle mesh: preprocessing stores a point cloud, and naïvely
-joining nearby points could draw false sheets across cavities.
+Numerical tests can reveal errors invisible in a table, while WISDOM's dataset-native viewer can
+reveal spatial patterns hidden by one summary number. Section 4.2 describes its atomic positions,
+surface points, graph edges, normals, targets, and derived alpha-complex mesh. The warning attached to
+that mesh matters: it aids depth perception but cannot prove topology that the NPZ never stores.
 
 **Parallelism, failures, and managed execution.**
 
 Proteins are independent records, so LambdaForge may transform several at once. `workers: 1` is the
-sequential reference behavior. `DatasetDesign` calls `self.resume_map(..., executor="thread")` to overlap
-public I/O; `Preprocessing` uses `executor="process"` for CPU-bound geometry and annotation. The
+sequential reference behavior. Selection and retrieval use
+`resume_map(..., executor="thread")` to overlap public I/O; geometry and annotation use
+`resume_map(..., executor="process")` for CPU-bound work. The
 framework bounds workers, preserves input order, updates progress, cancels pending work after an
 error, and checkpoints JSON results. This operational choice must not alter scientific content.
 
-The design Work requests 36 CPUs and uses at most 36 bounded I/O workers. A single thread-safe
-limiter caps request starts at four per second across all those threads. RCSB recommends beginning
-with only a handful of API requests per second and backing off on HTTP 429, so adding more threads
-would not raise the safe request rate. Inspecting tens of thousands of candidates can still require
-hours because remote-service latency and rate limits—not CPU computation—are the lower bound.
+The selection step requests 36 CPUs and uses at most 36 bounded I/O workers. A single thread-safe
+limiter applies the configured request-start ceiling (60 per second in the production YAML), while
+LambdaForge retries transient failures. Raising workers above the CPU allocation is rejected;
+raising the request rate must respect RCSB service policy. Inspecting many candidates can still
+require hours because remote latency and structure parsing—not CPU computation alone—set a lower
+bound.
 
 The heavy recipe first uses 36 bounded threads to fetch or restore distinct selected PDB entries,
 then 36 spawned processes—one per requested CPU—for geometry and, afterwards, annotation. Both CPU
 maps consume the same managed coordinate cache, so annotation does not repeat public downloads.
+When Selection supplies its measured heavy-atom counts, geometry submits larger proteins first.
+Workers still take records dynamically; this order merely avoids leaving one exceptionally large
+protein as a serial tail after the other workers have become idle. It does not change member order
+in the report or any scientific array.
 
-In LambdaForge 0.12, each sequence step's resource block determines its absolute reservation:
+In LambdaForge 0.13, each sequence step's resource block determines its absolute reservation:
 
 ```bash
 lf run experiments/dna_preprocess.yaml --on citius-ctgpgpu12
@@ -1903,84 +2060,66 @@ processes with a 36-CPU allocation; oversubscription normally increases context 
 pressure rather than throughput. MMseqs2 and Foldseek run sequentially at dataset level and receive
 all 36 threads, which avoids nested oversubscription with the per-PDB map.
 
-An exception from a map worker cancels pending work and fails the Run. Scientific candidate
-omissions are ordinary design rows, but an unexpected error or failure to produce geometry or
-annotation for a selected member blocks publication. Completed JSON map results and atomically
-validated scientific files remain available to compatible retry attempts.
+Geometry catches an ordinary per-protein exception as a failed record instead of terminating the
+pool immediately. Other proteins continue, every valid NPZ is checkpointed, and the final report
+names the failed identifier, exception type, message, and elapsed time. The Work then blocks dataset
+publication because a selected member is missing. A compatible retry revalidates successful NPZs
+and recomputes failed records; it never treats a failed result as reusable. Failures outside that
+record boundary, process termination, and annotation errors still fail the Run normally. Scientific
+candidate omissions made during Selection remain ordinary audited design rows.
 
 NumPy and SciPy may themselves start native math threads. If every Python process started another
 full thread pool, the machine could run far more active threads than allocated CPUs, a condition
 called **oversubscription**. WISDOM therefore sets `OMP_NUM_THREADS`, `MKL_NUM_THREADS`,
 `OPENBLAS_NUM_THREADS`, and `NUMEXPR_NUM_THREADS` to one before importing numerical work in workers.
 
-For LambdaForge 0.12 Works, each `resources` block requests CPU, RAM, GPU, and time
-portably. After a cluster profile such as `atlas` is
-registered, the managed runner stages the build and later exposes results and artifacts without a
-WISDOM-specific SLURM script:
+Each `resources` block requests CPU, RAM, GPU, storage, and time. A configured cluster runs the same
+YAML; WISDOM does not contain a separate SSH or scheduler script:
 
 ```bash
-lf run experiments/dna_preprocess.yaml --on atlas
+lf run experiments/dna_preprocess.yaml --on citius-ctgpgpu12
 lf jobs show latest
-lf datasets show wisdom-dna@4
+lf datasets show wisdom-dna@5
 ```
 
-With LambdaForge 0.12, each `environment: managed` cluster profile should normally leave PyTorch
-selection automatic:
-
-```yaml
-pytorch:
-  channel: auto
-  require_cuda: auto
-```
-
-Before creating or reusing the remote environment, LambdaForge inspects the cluster's configured
-Python, machine architecture, NVIDIA driver, and visible GPU compute capability. It then selects an
-official PyTorch CPU or CUDA wheel that is compatible with those facts and verifies CUDA with a real
-tensor operation when a GPU is required. The selected wheel becomes part of the environment
-identity, so a compatibility change produces a new managed environment instead of silently reusing
-an unsuitable one. This mechanism installs user-space PyTorch wheels; it never changes the NVIDIA
-driver or installs the system CUDA toolkit. On a scheduler login node that cannot expose the
-compute-node GPU, automatic detection cannot prove compatibility and an administrator-reviewed
-explicit policy is required.
-
-Physical dataset roots need not be identical between machines. DatasetRegistry records a separate
-placement for each verified copy of `wisdom-dna@4`, while the content ID remains unchanged. Training
-uses the versioned logical reference and LambdaForge selects a placement in the execution
-environment. DataCatalog is unnecessary for this managed version; it remains available for aliases,
-external datasets, loader definitions, and explicit institutional pins.
+For a managed environment, LambdaForge selects a PyTorch CPU or CUDA build compatible with the
+cluster profile and detected hardware. It does not install an NVIDIA driver. The same dataset may
+have a verified physical copy on several machines; those paths may differ, while the logical name
+`wisdom-dna@5` and its content identity remain the same.
 
 ### 4.8. Code architecture and testing
 
 **Code architecture.**
 
-All runtime code now lives under one `src/wisdom` package. Four public `Work` classes are the only
-actions a user needs to recognize: `DatasetDesign`, `Preprocessing`, `DNAValidation`, and `Training`. Their `run()`
-methods read like orchestration pseudocode; cohesive scientific details remain in the
-`preprocessing/dna`, `preprocessing/structure`, `data`, `models`, and `evaluation` subpackages.
-`PreprocessPipeline` still reads like the one-protein sequence in Section 4.1:
+All runtime code lives under `src/wisdom`. The five user-facing `Work` classes are `Selection`,
+`Preprocessing`, `Visualization`, `DNAValidation`, and `Training`. Selection and Preprocessing are
+short orchestration classes under `preprocessing/dna`; adjacent modules implement evidence,
+similarity, geometry, annotation, and publication.
 
-```text
-LambdaForge DatasetDesign / Preprocessing Work
-├── resume_map / map             stable keys, bounded workers, progress, JSON checkpoints
-├── ProteinSource               TXT records and stable keys
-├── PreprocessPipeline          one-protein scientific transform and atomic worker output
-│   ├── StructureCache          local/managed path resolution and source hashing
-│   ├── ProteinReader           Gemmi normalization and explicit connections
-│   ├── AtomicStructureBuilder  compact atom features and union graph
-│   └── SurfaceBuilder          surface, normals, curvature, graphs
-└── ProteinSink                   scientific resume and atomic publication
-    └── StorageManager              exact NPZ schema and numerical validation
+Shared structural concepts live under `utils/structure`. `ProteinStructure` represents a complete
+PDB/mmCIF deposition and its assemblies; `BiologicalAssembly` exposes the selected protein and DNA
+chains; and the hierarchy `Protein -> Chain -> Residue -> Atom` represents the filtered molecule.
+The benchmark-independent conversion from that hierarchy to WISDOM arrays remains under
+`preprocessing/structure`, together with exact NPZ validation. This separation lets selection and
+annotation share assembly rules without mixing DNA labels into universal geometry.
 
-Protein
-└── Chain
-    └── Residue
-        └── Atom
+`ProteinPreprocessor` still reads like the one-protein sequence in Section 4.1:
+
+```mermaid
+flowchart LR
+    A[Labelled split TXT] --> B[ProteinSource]
+    B --> C[StructureResolver]
+    C --> D[ProteinReader]
+    D --> E[Protein → Chain → Residue → Atom]
+    E --> F[AtomicStructureBuilder]
+    F --> G[SurfaceBuilder]
+    G --> H[ProteinSink]
+    H --> I[ProteinArchive validation]
+    I --> J[Universal NPZ]
 ```
 
-Provenance, defined in Section 4.2, is carried separately by `ProteinMetadata`; the resolved path,
-hash, format, and requested chains are carried by `StructureSource`. Closed categories use enums
-(`AtomRole`, `BondType`, `BondSource`, `ConnectionType`, and `Relation`), which constrain values to a
-documented set instead of accepting arbitrary strings.
+`ProteinArchive` owns the schema and final validation. Closed categories such as atom role, bond
+type, and relation use enums, so misspelled free-text values cannot enter the archive.
 
 **Testing.**
 
@@ -1988,10 +2127,11 @@ documented set instead of accepting arbitrary strings.
 ruff check .
 mypy src/wisdom
 pytest -q
-lf validate experiments/dna_design.yaml
 lf validate experiments/dna_preprocess.yaml
+lf validate experiments/validate_dna.yaml
 lf validate experiments/wisdom_v1.yaml
 lf validate experiments/wisdom_v2.yaml
+lf validate experiments/wisdom_v3.yaml
 ```
 
 Tests are offline and cover PDB/mmCIF/gzip, input grammar, model and chain errors, filters, alternate
@@ -2004,9 +2144,10 @@ failure, scientific resume invalidation, dataset-artifact identity, and bounded 
 
 These limits define what conclusions may safely be drawn from the output:
 
-- BTD-Combo negatives are exclusion-derived benchmark inferences, not experimental proof that a
-  protein can never bind DNA. WISDOM maps them by exact full sequence, rejects direct-contact
-  contradictions, and records this evidence tier explicitly. Gene Ontology `NOT enables DNA
+- BTD-Combo calls a sequence negative after excluding proteins known to bind DNA; this is a useful
+  benchmark label, not experimental proof that the protein can never bind DNA. WISDOM maps these
+  records by exact full sequence, rejects direct-contact contradictions, and records how each label
+  was obtained. Gene Ontology `NOT enables DNA
   binding` would provide stronger explicit negative evidence, but such annotations are too sparse
   and structurally incomplete to replace the current negative class safely; missing annotation is
   never converted into a negative.
@@ -2046,16 +2187,17 @@ These limits define what conclusions may safely be drawn from the output:
 
 ## 5. Trainable WISDOM models
 
-WISDOMv1 answers one deliberately narrow question: can fixed internal atomic structure and fixed
-surface geometry predict one binary label for a whole protein while exposing a score at every
-surface point? A label `0` or `1` belongs to the protein, not to an atom or point. Consequently,
-local scores are **weakly supervised**: they are learned only through the global label and must not
-be interpreted as experimentally validated binding sites.
+WISDOM receives one label for a complete protein: `1` means DNA-binding and `0` means negative under
+the benchmark definition in Section 3. It does not receive a correct label for every surface point
+during training. The model nevertheless produces one score per point and combines those scores into
+the protein prediction. This setting is called **weak supervision**: the available label says what
+the whole protein does, but not which point caused it. Point scores can therefore be compared with
+known contacts after prediction, but they are not experimentally validated sites by themselves.
 
 ### 5.1. Dataset index and graph batching
 
 Universal geometry itself has no experimental label. The design/annotation flow adds those
-meanings when it publishes the managed dataset. In LambdaForge 0.12, `WisdomDataset` reads the
+meanings when it publishes the managed dataset. In LambdaForge 0.13, `WisdomDataset` reads the
 canonical `index.jsonl`: each member supplies an explicit `split` partition, a binary
 `dna_binding` target, `universal_npz` and `dna_annotation` assets, and optional dilution names such
 as `replicate-00/train-25`. No filename is interpreted as a label and no random split is invented. The older
@@ -2065,22 +2207,18 @@ After filtering the requested split/view, `WisdomDataset` opens each NPZ with
 `allow_pickle=False`, checks the arrays and graph ranges required by the models, and converts only
 those arrays to tensors. It does not move points, recompute edges, or mutate preprocessing output.
 
-Proteins have different atom and surface counts, so a rectangular stack is impossible without
-padding. `WisdomCollator` instead constructs a **disjoint union**: it concatenates nodes and shifts
-each graph endpoint by the number of earlier nodes. Atomic endpoints receive atomic offsets;
-surface endpoints receive surface offsets; and the two rows of the bipartite surface-to-atom graph
-receive their respective offsets. `surface_batch[p]` records which protein owns surface point `p`.
-The preprocessing stores every undirected edge once with `src<dst`, whereas graph convolution sends
-directed messages, so the collator adds both `src→dst` and `dst→src` deterministically. Relation
-masks retain their meaning while becoming zero-based R-GCN IDs:
+Proteins have different atom and surface counts. `WisdomCollator` concatenates atom/point rows but
+keeps proteins mathematically separate. It offsets atomic endpoints, activates spatial ranks
+`<=K` plus every covalent edge, expands stored undirected atom pairs to both message directions,
+and slices each nearest-atom row to `J`. Spectra and sparse gradient operators remain a per-protein
+list aligned by `surface_ptr`; building one artificial block matrix would add memory without adding
+scientific information. `surface_batch[p]` records the owner of point `p`.
 
 Why is this class necessary? A normal image batch can use a tensor such as `[B,height,width]`
 because every image has the same rectangular axes. A protein with 2,000 atoms cannot be stacked
 directly with one containing 700 atoms, and their edge lists have different lengths as well. Padding
-all atomic and surface graphs to the largest protein would waste memory and create fake nodes that
-every graph operation would have to mask. LambdaForge's GNN layers instead accept one sparse graph,
-so the collator makes several proteins look like one larger graph while guaranteeing that no edge
-crosses from one protein to another.
+all proteins to the largest would waste memory and create fake nodes. LambdaForge's atomic GNN
+accepts one sparse disjoint graph, while surface operators remain separate per protein.
 
 Consider protein A with three atoms and two surface points, followed by protein B with two atoms and
 three surface points. Their local indices both start at zero:
@@ -2090,13 +2228,11 @@ three surface points. Their local indices both start at zero:
 atom indices             0, 1, 2         0, 1                         3, 4
 surface indices          0, 1            0, 1, 2                      2, 3, 4
 atom edge                (0, 2)          (0, 1)                       (3, 4)
-surface edge             (0, 1)          (0, 2)                       (2, 4)
-surface→atom edge        (1, 2)          (2, 1)                       (4, 4)
+surface→atom row         (1 → 2)         (2 → 1)                     (4 → 4)
 ```
 
-The atom offset for B is three and its surface offset is two. Notice that the bipartite edge needs
-**different offsets for its rows**: surface `2` becomes `4`, while atom `1` becomes `4`. Applying the
-same offset to both would silently connect the wrong domains. After concatenation,
+The atom offset for B is three and its surface offset is two. A table entry uses the surface offset
+for row ownership and the atom offset for its stored atom ID. After concatenation,
 `surface_batch=[0,0,1,1,1]` says that the first two surface rows belong to A and the next three to B;
 `atom_batch=[0,0,0,1,1]` records the analogous atomic ownership. Targets become `[y_A,y_B]`.
 WISDOMv1/v2 use `surface_batch` to reduce local predictions into exactly one protein logit. The
@@ -2107,56 +2243,88 @@ proteins during learning.
 distances, alter coordinates or allow information leakage. At the end of a batch the node rows are
 contiguous for efficiency, but the graphs remain mathematically disjoint.
 
-| Stored relation mask | R-GCN ID | Meaning |
+| Active state | R-GCN ID | Meaning |
 |---:|---:|---|
-| `1` | `0` | spatial proximity only |
-| `2` | `1` | covalent bond only |
-| `3` | `2` | both spatial and covalent |
+| rank `<=K`, not covalent | `0` | spatial proximity only |
+| covalent, rank absent or `>K` | `1` | covalent bond only |
+| covalent and rank `<=K` | `2` | both spatial and covalent |
 
 ### 5.2. WISDOMv1 models, equations, and tensor shapes
 
-`WisdomV1` is the only domain-specific neural composition in v1. It does not reimplement graph
-learning: its constructor builds LambdaForge `RelationalGCN`, `MLP`, `GCN`, indexed scatter, and
-sparse pooling components from independent conceptual parameters. Consequently HPO can change one
-embedding width or layer count without leaving a stale nested `in_channels` value in YAML.
+`WisdomV1` combines a bounded atomic encoder, learned atom-to-surface transfer, DiffusionNet surface
+blocks, and fixed MAX pooling. The model never constructs a trainable surface graph. Runtime choices
+`K`, `J`, and `Q` select prefixes of the larger immutable candidates stored during preprocessing,
+so HPO changes compute without changing dataset identity.
+
+This architecture is an enforced contract, not a selectable compatibility mode. A v1 run accepts
+only structural schema 3.0, constructs the exact `WisdomV1` class, and checks that its surface
+encoder is `DiffusionSurfaceEncoder` before training starts. It cannot fall back to the retired
+model that passed learned messages over a stored surface edge list. The collator likewise sends the
+model only covalent edges plus the first `K` ranked spatial neighbours, never the old full-radius
+atomic graph or a `surface_edge_index` array.
+
+In this chapter, `K` is the maximum number of spatial neighbours activated around one atom, `J` is
+the maximum nearby atoms consulted by one surface point, and `Q` is the number of low-frequency
+surface patterns retained by DiffusionNet. A **feature** is simply a numeric description supplied to
+or produced by a model. The full forward path is:
+
+```mermaid
+flowchart LR
+    A["Atom categories"] --> B["Relational atomic graph"]
+    B --> C["Atom embeddings"]
+    C --> D["Learned transfer to nearby surface points"]
+    D --> E["Curvature + chemical surface features"]
+    E --> F["DiffusionNet surface encoder"]
+    F --> G["One logit per surface point"]
+    G --> H["MAX pooling"]
+    H --> I["One protein logit"]
+```
 
 | Component | Implementation | Input → output | What it learns |
 |---|---|---|---|
 | Element embedding | `torch.nn.Embedding` | atomic number `[N]` → `[N,E]` | One learned vector per chemical element ID. |
 | Optional residue embedding | `torch.nn.Embedding` | residue ID `[N]` → `[N,E]` | Tests whether amino-acid category adds useful context. |
-| Atomic encoder | LambdaForge `RelationalGCN` | features `[N,E]` or `[N,2E]`, edges, relation IDs → `[N,D]` | Different message matrices for spatial-only, covalent-only and combined atomic edges. |
-| Atom→surface transfer | LambdaForge `Scatter.mean` | atom embeddings and incidence edges → `[M,D]` | Mean atomic context attached to each point. |
-| Surface projection | LambdaForge `MLP` | atom context plus curvature `[M,D+3S]` → `[M,D]` | Fuses the two information sources point by point. |
-| Surface encoder | LambdaForge `GCN` | point features `[M,D]` and surface edges → `[M,D]` | Exchanges information with neighboring points using normalized graph convolution. |
-| Local head | `torch.nn.Linear(D,1)` | surface embedding `[M,D]` → local logits `[M]` | Converts each learned point description into local class evidence. |
+| Atomic encoder | LambdaForge `RelationalGCN` | features `[N,E]` or `[N,2E]`, bounded edges, relation IDs → `[N,D]` | Separates covalent and spatial messages while retaining every bond. |
+| Atom→surface transfer | `SurfaceAtomTransfer` | atom embeddings and `[M,J]` geometry → `[M,D]` | Learns invariant distance/direction-conditioned weights over nearby atoms. |
+| Surface projection | LambdaForge `MLP` | transferred context plus curvature `[M,D+3S]` → `[M,D]` | Fuses chemical and geometric scalars point by point. |
+| Surface encoder | `DiffusionSurfaceEncoder` | point features plus spectral/gradient operators → `[M,D]` | Alternates learned heat diffusion, frame-independent products of tangent gradients, and pointwise MLPs. |
+| Local output layer (`head`) | `torch.nn.Linear(D,1)` | surface embedding `[M,D]` → local logits `[M]` | Converts each learned point description into local class evidence. |
 | Global reduction | LambdaForge `SparseMaxPooling` | local logits and `surface_batch` → `[B]` | Implements the fixed existential MAX MIL rule. |
 
 An embedding is a trainable lookup table, not a hand-written chemical descriptor. R-GCN means
-**relational graph convolutional network**: a neighbor connected by a covalent bond is transformed
-differently from one connected only by spatial proximity. The subsequent MLP is a row-wise
-multilayer perceptron; in this configuration it is a single learned projection. The surface GCN then
-lets each point combine its state with states arriving through the surface graph. Two components of
-that graph never exchange GCN messages, exactly as explained in Section 4.6.
+**relational graph convolutional network**: a covalent neighbour is transformed differently from a
+spatial-only neighbour. DiffusionNet communicates through the intrinsic operators in Section 4.6;
+there is no persisted or trainable surface adjacency. An **MLP** (multilayer perceptron) is a short
+sequence of linear transformations and nonlinear activation functions applied independently to each
+row.
 
 Let `N` be the total atoms, `M` the total surface points, `B` the proteins in one batch, `E` the
 embedding width, `D` the hidden width, and `S` the configured curvature scales. The residue table is
 omitted entirely for the element-only HPO candidate; otherwise both embeddings are concatenated.
 LambdaForge's `RelationalGCN` uses the three edge relations to produce `h_atom[N,D]`.
 
-For surface point `p`, let `A(p)` be the atoms joined to it by the stored bipartite graph. The first
-atom-to-surface transfer is intentionally only a mean:
+For surface point `p`, let `A_J(p)` be its first `J` valid nearby atoms. For atom `a`, let `d_pa` be
+its distance to the point and let `r_sa` be the transfer cutoff. The transfer computes
 
 ```math
-h_{A\to S}(p)=\frac{1}{|A(p)|}\sum_{a\in A(p)}h_{atom}(a).
+h_{A\to S}(p)=\sum_{a\in A_J(p)}\alpha_{pa}W_hh_a,
+\qquad
+\alpha_{pa}=\operatorname{softmax}_{a\in A_J(p)}
+g\!\left(d_{pa}/r_{sa},z_{pa}/r_{sa},\rho_{pa}/r_{sa}\right).
 ```
 
-Preprocessing guarantees at least one linked atom per point, and LambdaForge's indexed scatter mean
-computes the expression without a dense atom-by-point matrix. Each point also has `S` triplets
-`[H,K,C]`; flattening them yields `3S` invariant scalar features. WISDOM concatenates those values
-with `h_A→S`, projects the resulting `[M,D+3S]` tensor through a LambdaForge `MLP`, and passes it
-through a two-layer LambdaForge `GCN` on the surface graph. Absolute positions and normal-vector
-components are deliberately absent, so rotating the entire input cannot change a feature merely
-because a Cartesian axis changed.
+Here `z_pa` is the signed offset along the point normal and `rho_pa` the tangential magnitude. The
+scoring MLP `g` sees only these rotation-invariant geometric scalars; masks exclude padding. Computation is chunked
+over surface points, so activation memory is `O(chunk_size J D)` instead of `O(M J D)`. Each point
+also has `S` curvature triplets `[H,K,C]`, yielding `3S` invariant scalars. Diffusion blocks apply the
+spectral heat equation from Section 4.6 and learned scalar products of tangent gradients before a
+residual MLP. Those products do not depend on which two perpendicular axes were chosen in the
+tangent plane.
+
+`Training` derives `3S` from the managed dataset before constructing the model and requires train,
+validation, and test to agree. The training YAML therefore does not repeat `curvature_scales`: for
+example, five scales in `wisdom-dna@5` produce 15 projection inputs automatically. This avoids
+a stale model width when a new immutable dataset version deliberately changes the scale set.
 
 A single linear layer maps each final surface embedding to one unconstrained local logit `l_p`.
 “Logit” means a real number before a sigmoid: positive values favour class `1`, negative values
@@ -2167,10 +2335,10 @@ set. The v1 protein logit is deliberately MAX:
 L_b=\max_{p\in P_b} l_p.
 ```
 
-This encodes the MIL statement “a protein may be positive when at least one surface point has strong
-positive evidence.” It also risks overfitting to one spurious point, which is precisely the factor
-isolated in v2. The model returns `logits[B]` and `surface_logits[M]`; only the first receives a true
-label, so a local score is evidence rather than experimentally validated site annotation.
+This is **multiple-instance learning (MIL)**: a protein is a bag of surface points, and one strongly
+positive point can make the complete bag positive. MAX expresses that rule directly. It can also
+overreact to one accidental high score, which is the single question tested by v2. The model returns
+`logits[B]` and `surface_logits[M]`; only the protein logits receive training labels.
 
 For target `y_b∈{0,1}`, LambdaForge's binary cross-entropy with logits minimizes
 
@@ -2182,29 +2350,33 @@ where `σ(z)=1/(1+e^{-z})` converts a logit into a probability. AUROC measures h
 chosen positive is ranked above a randomly chosen negative across all thresholds. AUPRC summarizes
 precision versus recall and is especially informative when positives are rare.
 
-Nothing in these model names implies a three-dimensional coordinate update. Positions generated by
-preprocessing determine the sparse graphs, but v1 does not feed Cartesian coordinates or normals to
-the neural layers. It uses geometry through invariant curvatures and topology while avoiding
-dependence on an arbitrary global rotation.
+WISDOMv1 does not update coordinates. Centered positions define invariant relative vectors,
+distances, tangent gradients, and diffusion operators; raw absolute Cartesian axes are not used as
+learned features. Rigid translation and rotation tests therefore preserve its output within numeric
+tolerance.
 
 V1 searches only fundamental backbone choices: element-only versus element-plus-residue features;
-`E∈{16,32,64}`; `D∈{64,128,256}`; one to four atomic R-GCN layers; one to three projection layers;
-one to four surface GCN layers; shared dropout in `[0,0.5]`; weight decay from `10^-6` to `10^-3`;
-and learning rate from `10^-5` to `3×10^-3`. Atom→surface mean, global MAX, preprocessing, graph
+`E∈{16,32,64}`; `D∈{64,128,256}`; one to three atomic R-GCN layers; one to three projection layers;
+one to three DiffusionNet blocks; runtime `K`, `J`, and `Q`; shared dropout in `[0,0.5]`; weight decay from `10^-6` to `10^-2`;
+and learning rate from `10^-5` to `3×10^-3`. The transfer rule, global MAX, preprocessing, graph
 construction, and dataset splits remain fixed so the experiment answers one question.
+
+The **learning rate** controls the size of each optimizer update. **Weight decay** gradually shrinks
+large weights to discourage unnecessarily complex solutions. **Dropout** randomly hides a configured
+fraction of intermediate activations during training, forcing the model not to rely on one pathway;
+it is disabled during validation and test.
 
 ### 5.3. WISDOMv2 pooling and localization diagnostics
 
-WISDOMv2 asks whether a rule other than v1 MAX can preserve classification while reducing dependence
-on one accidental extreme point. It starts from the reviewed, explicitly materialized v1 backbone
-and changes only the operation that turns local logits into a protein logit. Atomic features,
-embeddings, R-GCN, atom-to-surface mean, projection, surface GCN, and local head remain controlled
-constants. V2 never searches their widths or depths again.
+**Pooling** is the operation that combines all point-level values belonging to one protein into one
+protein-level value. WISDOMv2 asks whether a pooling rule other than v1 MAX can preserve
+classification while depending less on one accidental extreme point. Atomic features, R-GCN,
+learned atom transfer, projection, DiffusionNet, and the local output layer remain fixed; only pooling changes.
 
 MAX and attention use LambdaForge's sparse indexed poolers; the area-weighted mean uses its sparse
 `Scatter` reduction. Top-k and log-sum-exp compact only scalar logits into `X[B,N_max,1]`, where
-`N_max` is the largest point count in that batch, and a Boolean mask excludes padding. Atomic and
-surface graphs always stay sparse and no fake edges are created.
+`N_max` is the largest point count in that batch, and a Boolean mask excludes padding. Atomic
+topology stays sparse; no surface adjacency or fake padded edges are created.
 
 Global attention uses LambdaForge `SparseAttentionPooling`. Let `h_p∈R^D` be the learned
 representation of point `p`, and let `l_p` be its separate positivity logit. Attention computes
@@ -2230,26 +2402,24 @@ The controlled v2 interface compares these rules:
 | `mean` | `Scatter.sum` from LambdaForge | Area-weighted mean: `L_b=sum_p w_p l_p/sum_p w_p`. |
 | `attention` | `SparseAttentionPooling` | Learned normalized importance from `h_p`, applied to positivity logits. |
 | `topk` | `FractionalTopKMeanPooling` | Mean of the largest `ceil(f|P_b|)` logits, with `f` from 1% to 20%. |
-| `local_mean_max` | WISDOM regional consensus plus `SparseMaxPooling` | Area-weighted local mean on the existing surface graph, followed by global MAX. |
+| `local_mean_max` | Fixed spectral diffusion plus `SparseMaxPooling` | Diffuse scalar logits over a physical length scale, then take global MAX. |
 | `log_sum_exp` | normalized `LogSumExpPooling` | `L_b=β^-1 log(|P_b|^-1 sum_p exp(βl_p))`, a smooth-max control. |
 
-For the main regional hypothesis, let `N(j)` contain vertices with a directed surface edge into
-point `j`; let `w_i>0` be represented area; and start with `r_i^(0)=l_i`. Consensus level `t+1` is
+For the regional hypothesis, let `ell` be a physical diffusion length in ångströms and set
+`t=ell^2`. Using the same mass `A`, eigenvectors `Phi`, and eigenvalues `lambda_q` as v1 gives
 
 ```math
-r_j^{(t+1)}=
-\frac{w_j r_j^{(t)}+\sum_{i\in N(j)}w_i r_i^{(t)}}
-     {w_j+\sum_{i\in N(j)}w_i},
+\widetilde{\mathbf l}=\Phi
+\operatorname{diag}(e^{-\ell^2\lambda_q})
+\Phi^\top A\mathbf l,
 \qquad
-L_b=\max_{j\in P_b}r_j^{(T)}.
+L_b=\max_{p\in P_b}\widetilde l_p.
 ```
 
-The numerator combines area-weighted evidence from a point and its graph neighbors; the denominator
-is their represented area. `T∈{1,2,3}` expands the region by one graph hop per level. An isolated
-peak is diluted, while a coherent patch remains positive. No geometry is rebuilt. Mathematical
-tests cover isolated versus coherent peaks, unequal area weights, and batch isolation. Local
-attention is deliberately deferred: LambdaForge has global set attention, but a new learned
-variable-neighborhood operator would confound this first regional-consensus test.
+This is heat diffusion with a physically interpretable scale rather than an arbitrary number of
+graph hops. An isolated high-frequency spike is attenuated, while a broad coherent region survives.
+The operator is fixed and introduces no extra learned encoder, so pooling remains the only v2 factor.
+Tests cover constant preservation, the near-zero-time limit, smoothing, and batch isolation.
 
 Log-sum-exp subtracts its maximum internally for numerical stability and normalizes by point count.
 Fractional top-k always selects at least one point. Noisy-OR remains absent because treating thousands
@@ -2272,27 +2442,172 @@ internal weight of every pooler. These training-time diagnostics do not consume 
 separate post-run evaluator may compare the map with immutable DNA sidecars after model selection;
 that later comparison never changes the loss or HPO objective.
 
-### 5.4. Training, evaluation, and artifacts
+### 5.4. WISDOMv3 surface-encoder comparison
 
-LambdaForge 0.12 resolves the immutable dataset, expands HPO values and seeds, reserves the GPU,
-captures metrics/artifacts, and ranks Runs by the declared validation objective. The public
+WISDOMv3 holds the atomic encoder, bounded transfer, local output layer, MAX pooling, loss, and data splits
+fixed. It changes only the surface encoder through `surface_encoder_type`, so differences can be
+attributed to that hypothesis rather than to simultaneous changes in supervision or pooling.
+
+| Value | Implemented idea | Geometric input |
+|---|---|---|
+| `diffusion` | The v1 DiffusionNet control. | Spectrum, mass, tangent gradients. |
+| `dmasif` | A compact dMaSIF-style learned local geometric convolution. | Bounded neighbours, distances, normal/tangent offsets. |
+| `deltaconv` | DeltaConv-style scalar/vector updates using gradient and divergence. | Precomputed sparse tangent-gradient operators. |
+| `ptv3` | Compact Point Transformer v3-style serialized local attention. | Morton ordering plus bounded local windows. |
+| `pointmamba` | PointMamba-style bidirectional state-space scan over a deterministic point order. | Morton order and invariant radial position. |
+
+These are compact WISDOM implementations of the published mechanisms, not claims of exact source
+code reproduction. Every encoder runs forward/backward on variable-size synthetic proteins; the
+default DiffusionNet and transfer additionally have rigid-motion and permutation tests. Morton
+serialization in PTv3/PointMamba is a deliberate orientation-sensitive experimental bias, not a
+property of the invariant v1/v2 default. The bounded table keeps local encoders at `O(M K_s D)`; spectral
+diffusion uses `O(M Q D)`. The experiment YAML is an exhaustive encoder ablation, not a second
+capacity HPO.
+
+The names summarize different communication rules. The dMaSIF-like encoder weights a small patch
+using distances and agreement between surface normals. DeltaConv alternates scalar features with
+two-component tangent vectors and uses gradient/divergence operations. PTv3 orders points by a
+**Morton code**, which interleaves quantized x/y/z bits so many nearby points remain near each other
+in a one-dimensional list, and applies attention only inside bounded windows. PointMamba uses the
+same deterministic ordering but passes a compact learned state forward and backward through the
+list. The latter two orderings depend on coordinate orientation, which is why they are experimental
+controls rather than replacements for the invariant default.
+
+### 5.5. Training, evaluation, and artifacts
+
+LambdaForge 0.13 resolves the immutable dataset, expands HPO values and seeds, assigns independent
+Runs to GPU slots, captures metrics/artifacts, and ranks Runs by the declared validation objective. The public
 `Training.run()` method owns the transparent PyTorch loop: it creates explicit train/validation/test
 loaders, applies `WisdomCollator`, trains with AdamW and binary cross-entropy, and preserves the
 checkpoint with the greatest validation AUPRC. Test data are read only after that choice.
 
+The training terms used below have precise meanings:
+
+- an **epoch** is one complete pass over the selected training members;
+- a **seed** initializes random weights and data ordering, allowing repeatability and measurement of
+  variation caused by training randomness;
+- a **candidate** is one hyperparameter combination, such as a width, depth, dropout, and learning
+  rate;
+- **hyperparameter optimization (HPO)** compares candidates using validation data;
+- a **Run** evaluates one candidate and seed;
+- a **checkpoint** is a saved set of model weights and its evaluation state.
+
+`Training` does not contain a separate hard-coded branch for every generation. A version number `N`
+loads `wisdom.models.WisdomVN.WisdomVN` and forwards only parameters accepted by that class. A future
+v4 that preserves the current inputs, forward signature, binary loss, and outputs can therefore be
+added without editing the loop. A model with a new target, loss, or input must change `Training`
+explicitly; automatic compatibility would hide a scientific change.
+
 | Configuration | Responsibility |
 |---|---|
-| `wisdom_v1.yaml` | Forty sampled candidates over basic capacity, depth, dropout, learning rate, and weight decay; MAX pooling stays fixed. |
+| `wisdom_v1.yaml` | One hundred sampled candidates over basic capacity, depth, dropout, learning rate, and weight decay; MAX pooling stays fixed. |
 | `wisdom_v2.yaml` | An exhaustive six-way pooling ablation with every backbone/training value fixed. |
+| `wisdom_v3.yaml` | An exhaustive five-way surface-encoder ablation with transfer and MAX fixed. |
 
-V1 optimizes validation AUPRC, never test. Its 40 sampled candidates are each repeated with seeds
-`[7,17,27]`. LambdaForge 0.12 runs the search/seed expansions of one Work serially inside its fixed
-single-GPU allocation; the removed `max_parallel` field is unnecessary. V2 expands MAX, mean,
-attention, top-k mean, local-mean/global-MAX, and normalized log-sum-exp exactly once per seed. The
-top-k fraction, attention width, regional depth, and log-sum-exp temperature are fixed controls in
-this first pooling comparison rather than additional confounded search dimensions.
+V1 optimizes validation AUPRC, never test. Its 100 sampled candidates use the ordered seed budget
+`[4,7,32,54,65,94,109,124,142,167]`. The adaptive successive-halving controller first evaluates
+all candidates with one seed, ranks them by validation AUPRC, retains approximately half, and gives
+the survivors progressively larger seed budgets. With `reduction_factor: 2`, the rounds use budgets
+of 1, 2, 4, 8, and 10 seeds. The conservative score subtracts one standard error from the mean, so
+a candidate is not promoted merely because one seed was unusually favourable.
 
-The callable receives `{dataset: wisdom-dna@4}`, not a machine-specific absolute path. LambdaForge
+The v1 outer allocation exposes two GPUs. `runs_per_gpu: 1` and `max_parallel: 2` create two spawned
+training Runs at a time and restrict each child through its own `CUDA_VISIBLE_DEVICES`; CPU and host
+RAM are divided between those two children. `lf explain` still reports 1,000 planned Runs because
+100 candidates times 10 seeds is the reproducibility upper bound. Successive halving normally
+executes 266 of them: 100 + 50 + 50 + 52 + 14.
+
+GPU memory is controlled mainly by activations, not parameter count. Let `N` be atoms, `M` surface
+points, `K` active spatial neighbours, `J` nearby atoms per point, `Q` spectral modes, `D` hidden
+width, and `b` bytes per activation. The principal bounded terms have order
+
+```math
+M_{active}\sim bD(NK+MJ+MQ)\ \text{bytes}.
+```
+
+Backpropagation retains additional inputs until gradients are computed. Atomic messages and transfer
+gathers are chunked; no term grows as `N^2`, `M^2`, or all radius incidences. A batch still sums
+different protein sizes, so `batch_size` is not a fixed memory unit. Reported `active K/J`, largest
+atoms/points per batch, throughput, NPZ bytes, parameter count, and CUDA allocated/reserved/peak
+memory make this scaling observable.
+
+The current v1 configuration uses eight proteins per batch and `precision: auto`. On compatible
+CUDA hardware it selects BF16 autocast. BF16 stores
+eligible activations in two bytes instead of four while retaining the same exponent range as FP32;
+model parameters and AdamW state remain FP32, and BF16 does not need FP16-style gradient scaling.
+PyTorch CUDA does not implement sparse COO matrix multiplication in BF16. DiffusionNet therefore
+disables autocast only around each tangent-gradient sparse multiplication, performs that operation
+in FP32, and immediately returns to BF16-eligible dense layers. This small precision island avoids
+`addmm_sparse_cuda` failures without disabling mixed precision for the complete model.
+CPU execution falls back to FP32. The training dataset also leaves coordinates, normals, and DNA
+point targets on disk because the global-label loss does not consume them, and each completed batch
+is released before validation. These changes reduce memory and unnecessary I/O without changing
+the graph, label, loss, or model hypothesis.
+
+When `surface_metrics: true`, validation loads only `surface_target_hard` and
+`surface_valid_mask` from the DNA sidecar. The mask removes the physical ambiguity band described
+in Section 3.6 and every point belonging to a positive protein without reliable local GT. Local
+probabilities are `sigmoid(surface_logits)`; they are compared with the sidecar only after the
+forward pass. The sidecar targets and metric calculations are never passed to the loss or backward
+pass; local logits still influence the global prediction through the model's pooling rule.
+
+Two complementary aggregations are reported. Let `V` be all valid validation points and let `V_b`
+be the valid points of positive protein `b`. A **micro** metric is computed once from the pooled
+pairs `{(score_p,target_p): p in V}`. It penalizes false local activations on curated negatives, but
+a protein with more surface samples contributes more observations. A **positive macro** metric is
+computed independently on every positive `V_b` containing both interface and non-interface points,
+then averaged:
+
+```math
+Q_{\mathrm{positive\ macro}}=\frac{1}{|B_+|}\sum_{b\in B_+}Q(V_b).
+```
+
+Here `B_+` is the set of evaluable positive proteins and `Q` is AUPRC, AUROC, balanced accuracy, or
+F1. Macro averaging gives every protein equal weight and is therefore the clearer localization
+summary; micro performance additionally reflects behaviour on globally negative proteins. AUPRC
+is the primary descriptive surface metric because interface points occupy a small fraction of a
+surface. Its random baseline is the positive-point prevalence, so its absolute value must be read
+beside that imbalance rather than as if 0.5 were universally neutral. AUROC measures ranking,
+whereas balanced accuracy and F1 apply the fixed local probability threshold 0.5 and are more
+sensitive to calibration.
+
+These names are deliberately separate from protein classification: for example,
+`val_surface_micro_auprc` and `val_surface_positive_macro_auprc` cannot be confused with the HPO
+objective `val_auprc`. Surface metrics may rise or fall during training, but only global
+`val_auprc` selects a checkpoint, resets patience, drives adaptive pruning, and ranks HPO
+candidates. Final test surface metrics are calculated only after that validation-selected
+checkpoint is restored. Setting `surface_metrics: false` disables sidecar loading and these
+diagnostics without changing training.
+
+Two separate stopping rules avoid wasting those Runs. Within one training, `epochs: 500` is only a
+safety ceiling: the best validation checkpoint is retained, and `patience: 30` stops after 30
+consecutive validation epochs without an AUPRC gain of at least `minimum_delta: 0.001`. Separately,
+LambdaForge compares concurrent candidates after epoch 30 and cooperatively prunes the weaker half.
+The first rule detects a plateau in one learning curve; the second compares different
+hyperparameter candidates. A pruned candidate is checkpointed but does not evaluate test. The HPO
+cannot choose `trials` itself: 100 is the authored compute budget within which it samples and ranks
+configurations. Increasing it explores more settings but also costs more and can overfit repeated
+decisions to the same validation split.
+
+Every Run publishes structured metrics each epoch and emits one compact live line prefixed with its
+trial index and seed. The line includes training loss, validation AUPRC, AUROC, balanced accuracy,
+surface micro/macro AUPRC, surface macro AUROC, best AUPRC, patience, largest batched point/edge
+counts, and CUDA memory. `cuda_allocated` is memory
+occupied by live tensors; `cuda_reserved` also includes reusable blocks held by PyTorch's caching
+allocator; and `cuda_peak` is the largest live-tensor allocation observed in that epoch. Reserved
+memory commonly rises to the largest batch encountered and stays there, so that pattern alone is
+not a leak. A continuing increase in allocated memory for comparable graph sizes would be the
+warning sign. WISDOM deliberately does not call `empty_cache()` after every batch because that
+would discard reusable blocks and slow training without reducing the tensors required by the next
+forward pass. The progress line also updates LambdaForge's bounded epoch progress for `lf top`.
+Because v1 permits only two concurrent Runs, at most two clearly labelled sequences are interleaved.
+
+V2 expands MAX, mean, attention, top-k mean, diffusion/global-MAX, and normalized log-sum-exp
+exactly once per seed. The top-k fraction, attention width, regional depth, and log-sum-exp
+temperature are fixed controls in this first pooling comparison rather than additional confounded
+search dimensions.
+
+The callable receives `{dataset: wisdom-dna@5}`, not a machine-specific absolute path. LambdaForge
 resolves the selector to the managed root; `WisdomDataset` reads `index.jsonl`, filters the explicit
 `split` partition, label target, and requested dilution metadata, and records the exact content/build
 identity plus selected placement in materialized evidence. A local workstation and a cluster may
@@ -2300,21 +2615,41 @@ hold verified copies at different paths without editing model parameters or chan
 identity. Build or materialize the immutable version before HPO; missing data is never silently
 converted into a random split or synthetic labels.
 
+Managed asset paths are logical names, not user filenames. LambdaForge may therefore publish a
+validated NPZ as `assets/<member>/universal_npz` without a `.npz` suffix. `WisdomDataset` identifies
+such assets from the dataset index and declared `application/x-npz` media type, then validates their
+arrays when loading; it does not infer a managed format from the physical filename.
+
 On a managed cluster, first ensure that cluster has a verified placement, then launch the experiment
 on the same cluster. No dataset path is passed to the training command because the logical selector
 already lives in the YAML:
 
 ```bash
-lf datasets materialize wisdom-dna@4 --on citius-ctgpgpu12 --strategy replicate --apply
+lf datasets materialize wisdom-dna@5 --on citius-ctgpgpu12 --strategy replicate --apply
 lf run experiments/wisdom_v1.yaml --on citius-ctgpgpu12
 ```
+
+The direct-process cluster normally uses exclusive LambdaForge GPU leases and avoids devices with
+external compute processes. If this host deliberately permits WISDOM to use both GPUs without that
+external-use exclusion, configure the operational cluster profile once:
+
+```bash
+lf clusters set citius-ctgpgpu12 gpu_access.mode shared
+lf clusters show citius-ctgpgpu12
+```
+
+`shared` does not change the scientific YAML or remove `resources.gpu: 2`: that field still tells
+the adaptive controller how many GPU slots to create. It only allows those slots on devices already
+used by non-LambdaForge processes. LambdaForge continues coordinating its own Jobs. Use this mode
+only when sharing is intentional and GPU memory is sufficient; `auto` restores conservative
+exclusive admission on this non-SLURM host.
 
 Inspect composition and plans without creating study state:
 
 ```bash
 lf datasets list --all
-lf datasets show wisdom-dna@4
-lf datasets locations wisdom-dna@4
+lf datasets show wisdom-dna@5
+lf datasets locations wisdom-dna@5
 lf validate experiments/wisdom_v1.yaml
 lf explain experiments/wisdom_v1.yaml
 lf run experiments/wisdom_v1.yaml --dry-run
@@ -2322,6 +2657,10 @@ lf run experiments/wisdom_v1.yaml --dry-run
 lf validate experiments/wisdom_v2.yaml
 lf explain experiments/wisdom_v2.yaml
 lf run experiments/wisdom_v2.yaml --dry-run
+
+lf validate experiments/wisdom_v3.yaml
+lf explain experiments/wisdom_v3.yaml
+lf run experiments/wisdom_v3.yaml --dry-run
 ```
 
 Start v1 with the normal command. Repeating the exact command lets LambdaForge reuse or resume its
@@ -2341,6 +2680,14 @@ lf run experiments/wisdom_v2.yaml
 lf results audit experiments/wisdom_v2.yaml --no-archived
 ```
 
+Run v3 only after fixing the reviewed v1 backbone in its marked block. Its five values then compare
+surface propagation with the same MAX pooling and three paired seeds:
+
+```bash
+lf run experiments/wisdom_v3.yaml
+lf results audit experiments/wisdom_v3.yaml --no-archived
+```
+
 Each Work writes two explicit artifacts beside LambdaForge's normal run evidence:
 
 ```text
@@ -2349,17 +2696,17 @@ evaluation.json
 ```
 
 `best-model.pt` contains the best-validation weights and exact model parameters. `evaluation.json`
-contains split sizes, selected epoch, validation AUPRC, and held-out binary metrics. LambdaForge's
-`BinaryMetricSuite` preserves mathematically undefined metrics as `null`; it never replaces them
-with zero. Local surface sidecars remain excluded from losses, gradients, HPO, and checkpoint
-selection. Generic NPZ/3D inspection remains available as described in Section 4.2, independently
-of training.
+contains split sizes, completed and selected epochs, stopping reason, validation AUPRC, held-out
+protein metrics, and evaluation-only test surface metrics. Its test fields are `null` only for a
+candidate pruned by adaptive HPO. `BinaryMetricSuite` and `SurfaceMetricSuite` preserve
+mathematically undefined metrics as `null`; they never replace them with zero. Local surface
+sidecars remain excluded from losses, gradients, HPO, and checkpoint selection. Generic NPZ/3D
+inspection remains available as described in Section 4.2, independently of training.
 
-V1 and v2 both omit atomic edge distances, absolute coordinates, normal vectors as neural features,
-residue heads, quasi-geodesic kernels, equivariant coordinate updates, dMaSIF convolutions,
-bidirectional atom↔surface rounds, contrastive learning, protein language models, and multi-task
-outputs. Versions v3–v7 remain documentation-only in
-[`docs/model_roadmap.md`](docs/model_roadmap.md). V2 is technically executable but must not be
+V1 and v2 omit raw absolute coordinates, vector-valued learned states, bidirectional atom↔surface
+rounds, contrastive learning, protein language models, and multi-task outputs. V3 implements the
+five controlled surface encoders in Section 5.4; later roadmap generations remain documentation-only
+in [`docs/model_roadmap.md`](docs/model_roadmap.md). V2 and v3 are technically executable but must not be
 described as better until the declared poolings are compared on real labels with paired seeds and
 disjoint confirmation.
 
@@ -2442,7 +2789,25 @@ disjoint confirmation.
 28. Benjamini, Y. & Hochberg, Y. (1995). “Controlling the False Discovery Rate: A Practical and
     Powerful Approach to Multiple Testing.” *Journal of the Royal Statistical Society: Series B*,
     57(1), 289–300. [doi:10.1111/j.2517-6161.1995.tb02031.x](https://doi.org/10.1111/j.2517-6161.1995.tb02031.x).
+29. Plotly Technologies Inc. “Mesh3d traces in Python.”
+    [Official reference](https://plotly.com/python/reference/mesh3d/).
+30. Kitware Inc. “ParaView User's Guide.”
+    [Official documentation](https://docs.paraview.org/).
+31. Sharp, N., Attaiki, S., Crane, K. & Ovsjanikov, M. (2022). “DiffusionNet:
+    Discretization Agnostic Learning on Surfaces.” *ACM Transactions on Graphics*, 41(3).
+    [Author paper](https://www.cs.cmu.edu/~kmcrane/Projects/DiffusionNet/DiffusionNet.pdf).
+32. Wiersma, R., Nasikun, A., Eisemann, E. & Hildebrandt, K. (2022). “DeltaConv: Anisotropic
+    Operators for Geometric Deep Learning on Point Clouds.” *ACM Transactions on Graphics*, 41(4).
+    [doi:10.1145/3528223.3530166](https://doi.org/10.1145/3528223.3530166).
+33. Wu, X. et al. (2024). “Point Transformer V3: Simpler, Faster, Stronger.” *CVPR 2024*.
+    [Open-access paper](https://openaccess.thecvf.com/content/CVPR2024/html/Wu_Point_Transformer_V3_Simpler_Faster_Stronger_CVPR_2024_paper.html).
+34. Liang, D. et al. (2024). “PointMamba: A Simple State Space Model for Point Cloud Analysis.”
+    *NeurIPS 2024*.
+    [Proceedings paper](https://proceedings.neurips.cc/paper_files/paper/2024/hash/395371f778ebd4854b88521100af30ad-Abstract-Conference.html).
+35. Sharp, N. & Crane, K. (2020). “A Laplacian for Nonmanifold Triangle Meshes.”
+    *Computer Graphics Forum*, 39(5).
+    [doi:10.1111/cgf.14069](https://doi.org/10.1111/cgf.14069).
 
-WISDOM's surface implementation was written independently. dMaSIF and MaSIF motivate the future use
-of learned protein-surface representations, but WISDOM does not copy their code and does not claim
-algorithmic identity with either method.
+WISDOM's surface implementations were written independently. The v3 encoders test compact versions
+of mechanisms motivated by dMaSIF, DeltaConv, PTv3, and PointMamba; WISDOM neither copies their code
+nor claims architectural identity with the published systems.

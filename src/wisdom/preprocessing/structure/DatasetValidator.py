@@ -11,8 +11,8 @@ from typing import Any, cast
 
 import numpy as np
 
+from wisdom.preprocessing.structure.ProteinArchive import ProteinArchive
 from wisdom.preprocessing.structure.PreprocessConfig import PreprocessConfig
-from wisdom.preprocessing.structure.StorageManager import StorageManager
 
 
 class DatasetValidator:
@@ -35,7 +35,7 @@ class DatasetValidator:
 
         Args:
             processed_dir: Directory containing one pickle-free WISDOM NPZ per expected protein.
-            preprocessing_report: JSON report emitted by ``PreprocessPipeline`` for the dataset.
+            preprocessing_report: JSON report emitted by ``ProteinPreprocessor`` for the dataset.
             id_file: Master TXT manifest whose non-empty, non-comment records define coverage.
 
         Returns:
@@ -332,7 +332,7 @@ class DatasetValidator:
 
             # Exact member names reject missing arrays, hidden extras, and pickle-bearing objects.
             with np.load(archive_path, allow_pickle=False) as archive:
-                expected_names = {*StorageManager.ARRAY_NAMES, StorageManager.METADATA_NAME}
+                expected_names = {*ProteinArchive.ARRAY_NAMES, ProteinArchive.METADATA_NAME}
                 actual_names   = set(archive.files)
                 if actual_names != expected_names:
                     missing = sorted(expected_names - actual_names)
@@ -341,10 +341,10 @@ class DatasetValidator:
 
                 arrays = {
                     name: archive[name]
-                    for name in StorageManager.ARRAY_NAMES
+                    for name in ProteinArchive.ARRAY_NAMES
                     if name in actual_names
                 }
-                metadata_array = archive[StorageManager.METADATA_NAME]
+                metadata_array = archive[ProteinArchive.METADATA_NAME]
                 if metadata_array.shape != () or metadata_array.dtype.kind != "U":
                     errors.append("metadata_json must be one scalar fixed-width Unicode value")
                 metadata_value = json.loads(str(metadata_array.item()))
@@ -359,13 +359,13 @@ class DatasetValidator:
             if not isinstance(config_value, dict):
                 errors.append("metadata config must be a JSON object")
                 raise ValueError("metadata config must be a JSON object")
-            storage             = StorageManager(PreprocessConfig(**config_value))
+            storage             = ProteinArchive(PreprocessConfig(**config_value))
             surface_diagnostics = storage.validate(arrays)
 
             # Provenance must identify this manifest record, schema, and exact scientific settings.
             if metadata.get("source_identifier") != identifier:
                 errors.append("metadata source_identifier does not match the master manifest")
-            if metadata.get("preprocessing_schema_version") != StorageManager.SCHEMA_VERSION:
+            if metadata.get("preprocessing_schema_version") != ProteinArchive.SCHEMA_VERSION:
                 errors.append("metadata preprocessing schema version is unsupported")
             if metadata.get("config_hash") != storage.config_hash:
                 errors.append("metadata config_hash does not match its canonical config")
@@ -382,8 +382,12 @@ class DatasetValidator:
                 "residue_count": len(np.unique(arrays["residue_indices"])),
                 "atom_edge_count": arrays["atom_edge_index"].shape[1],
                 "surface_point_count": len(arrays["surface_positions"]),
-                "surface_edge_count": arrays["surface_edge_index"].shape[1],
-                "surface_atom_edge_count": arrays["surface_atom_edge_index"].shape[1],
+                "atom_spatial_candidate_count": int(
+                    np.count_nonzero(arrays["atom_edge_spatial_rank"])
+                ),
+                "surface_atom_neighbor_count": int(arrays["surface_atom_mask"].sum()),
+                "diffusion_spectral_modes": len(arrays["diffusion_eigenvalues"]),
+                "diffusion_gradient_entries": len(arrays["diffusion_gradient_x"]),
             }
             for name, value in counts.items():
                 if metadata.get(name) != value:

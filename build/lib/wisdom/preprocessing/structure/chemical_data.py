@@ -1,9 +1,9 @@
 """Centralized static chemistry used by the structural preprocessor."""
 
-from wisdom.preprocessing.structure.enums.AtomRole import AtomRole
-from wisdom.preprocessing.structure.enums.BondSource import BondSource
-from wisdom.preprocessing.structure.enums.BondType import BondType
-from wisdom.preprocessing.structure.enums.Relation import Relation
+from wisdom.utils.structure.enums.AtomRole import AtomRole
+from wisdom.utils.structure.enums.BondType import BondType
+from wisdom.utils.structure.enums.Relation import Relation
+from wisdom.utils.structure.enums.BondSource import BondSource
 
 # Canonical protein amino-acid residue names in a stable persisted order.
 # Used to encode residue identity compactly (zero is reserved for unknown).

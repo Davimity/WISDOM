@@ -1,44 +1,209 @@
 {
-  "design_schema_version": "1.2",
-  "leakage_group_count": 1754,
-  "quality_eligible": {
+  "cross_split_leakage_groups": 0,
+  "failures": [],
+  "largest_raw_leakage_group": 271,
+  "quality_eligible_counts": {
     "negative": 907,
     "positive": 3341,
     "total": 4248
   },
-  "quality_excluded": {
-    "negative": 48,
-    "positive": 188,
-    "total": 236
-  },
-  "raw": {
+  "raw_counts": {
     "negative": 955,
     "positive": 3529,
     "total": 4484
   },
-  "selected": {
+  "selected_counts": {
     "negative": 907,
     "positive": 907,
     "total": 1814
   },
   "splits": {
     "test": {
+      "global_phenotypes": {
+        "G001": 1,
+        "G003": 1,
+        "G005": 1,
+        "G007": 1,
+        "G012": 1,
+        "G013": 2,
+        "G014": 1,
+        "G017": 2,
+        "G018": 2,
+        "G019": 2,
+        "G020": 1,
+        "G021": 1,
+        "G022": 1,
+        "G025": 1,
+        "G026": 1,
+        "G027": 1,
+        "G028": 2,
+        "G029": 1,
+        "G030": 1,
+        "G031": 1,
+        "G032": 1,
+        "G033": 1,
+        "G034": 3,
+        "G036": 1,
+        "G037": 4,
+        "G038": 3,
+        "G039": 1,
+        "G041": 2,
+        "G043": 1,
+        "G044": 2,
+        "G045": 1,
+        "G046": 3,
+        "G047": 1,
+        "G048": 1,
+        "G050": 1,
+        "G051": 1,
+        "G_NOISE": 221
+      },
+      "interface_phenotypes": {
+        "I001": 127,
+        "I002": 3,
+        "I_NOISE": 7,
+        "not_applicable": 136
+      },
+      "leakage_groups": 196,
       "negative": 136,
-      "positive": 136,
-      "total": 272
+      "origins": {
+        "btd_core": 136,
+        "btd_core+rcsb_support": 16,
+        "rcsb_structural": 121
+      },
+      "positive": 137,
+      "total": 273
     },
     "train": {
+      "global_phenotypes": {
+        "G001": 4,
+        "G002": 2,
+        "G003": 3,
+        "G004": 1,
+        "G005": 4,
+        "G006": 2,
+        "G007": 2,
+        "G008": 1,
+        "G012": 4,
+        "G013": 7,
+        "G014": 5,
+        "G015": 2,
+        "G017": 7,
+        "G018": 7,
+        "G019": 11,
+        "G020": 2,
+        "G021": 2,
+        "G022": 2,
+        "G023": 2,
+        "G025": 2,
+        "G026": 2,
+        "G027": 6,
+        "G028": 10,
+        "G029": 6,
+        "G030": 2,
+        "G031": 4,
+        "G032": 7,
+        "G033": 7,
+        "G034": 14,
+        "G035": 2,
+        "G036": 4,
+        "G037": 16,
+        "G038": 11,
+        "G039": 7,
+        "G040": 2,
+        "G041": 12,
+        "G042": 2,
+        "G043": 2,
+        "G044": 7,
+        "G045": 2,
+        "G046": 14,
+        "G047": 4,
+        "G048": 3,
+        "G049": 1,
+        "G050": 3,
+        "G051": 2,
+        "G_NOISE": 1045
+      },
+      "interface_phenotypes": {
+        "I001": 592,
+        "I002": 14,
+        "I_NOISE": 28,
+        "not_applicable": 635
+      },
+      "leakage_groups": 1256,
       "negative": 635,
-      "positive": 635,
-      "total": 1270
+      "origins": {
+        "btd_core": 635,
+        "btd_core+rcsb_support": 71,
+        "rcsb_structural": 563
+      },
+      "positive": 634,
+      "total": 1269
     },
     "validation": {
+      "global_phenotypes": {
+        "G001": 1,
+        "G003": 1,
+        "G005": 1,
+        "G007": 1,
+        "G012": 1,
+        "G013": 2,
+        "G014": 1,
+        "G015": 1,
+        "G017": 2,
+        "G018": 2,
+        "G019": 2,
+        "G025": 1,
+        "G026": 1,
+        "G027": 2,
+        "G028": 2,
+        "G029": 1,
+        "G030": 1,
+        "G031": 1,
+        "G032": 1,
+        "G033": 1,
+        "G034": 3,
+        "G036": 1,
+        "G037": 3,
+        "G038": 3,
+        "G039": 1,
+        "G040": 1,
+        "G041": 2,
+        "G042": 1,
+        "G043": 1,
+        "G044": 1,
+        "G045": 1,
+        "G046": 3,
+        "G047": 1,
+        "G048": 1,
+        "G050": 1,
+        "G051": 1,
+        "G_NOISE": 221
+      },
+      "interface_phenotypes": {
+        "I001": 126,
+        "I002": 3,
+        "I_NOISE": 7,
+        "not_applicable": 136
+      },
+      "leakage_groups": 195,
       "negative": 136,
+      "origins": {
+        "btd_core": 136,
+        "btd_core+rcsb_support": 15,
+        "rcsb_structural": 121
+      },
       "positive": 136,
       "total": 272
     }
   },
-  "technical_shortcut_auc": 0.6851675565683042,
-  "verdict": "PASS",
-  "warning_count": 31
+  "valid": true,
+  "warnings": [
+    "the largest RAW leakage group contains 6.0% of candidates",
+    "global_phenotype:G015 occurs in 3 leakage groups but is absent from test; phenotype matching is a soft split objective",
+    "global_phenotype:G020 occurs in 3 leakage groups but is absent from validation; phenotype matching is a soft split objective",
+    "global_phenotype:G021 occurs in 3 leakage groups but is absent from validation; phenotype matching is a soft split objective",
+    "global_phenotype:G040 occurs in 3 leakage groups but is absent from test; phenotype matching is a soft split objective",
+    "global_phenotype:G042 occurs in 3 leakage groups but is absent from test; phenotype matching is a soft split objective"
+  ]
 }

@@ -1,10 +1,10 @@
 # Keep the v1 backbone fixed and compare only WISDOM v2 protein-level pooling hypotheses.
 name: wisdom-v2                                      # Stable LambdaForge experiment name.
-run: wisdom.Training.Training                       # Same LambdaForge 0.12 Work class as v1.
+run: wisdom.Training.Training                       # Same LambdaForge 0.13 Work class as v1.
 
 with:                                                # Fixed Training.run(...) arguments.
   dataset:                                           # Resolve one immutable managed placement.
-    dataset: wisdom-dna@4                            # Exact designed release used by v1.
+    dataset: wisdom-dna@5                            # Exact schema-3 release used by v1.
   model_version: 2                                  # Enable only the v2 pooling extension.
   subset: full                                      # Use the complete balanced dataset.
   hidden_dim: 128                                   # Fixed reviewed v1 latent width.
@@ -13,30 +13,45 @@ with:                                                # Fixed Training.run(...) a
   atomic_layers: 2                                  # Fixed reviewed v1 atomic depth.
   projection_depth: 1                              # Fixed reviewed v1 projection depth.
   surface_layers: 2                                 # Fixed reviewed v1 surface depth.
+  atom_spatial_k: 16                                # Fixed reviewed v1 atomic-neighbor budget.
+  surface_atom_k: 16                                # Fixed reviewed v1 transfer-neighbor budget.
+  diffusion_spectral_modes: 128                     # Fixed reviewed v1 intrinsic frequency budget.
+  surface_atom_radius: 6.0                          # Fixed transfer geometry normalization in Å.
+  surface_chunk_size: 8192                          # Bound atom-transfer gathered activations.
+  atomic_message_chunk_size: 65536                  # Bound LambdaForge RGCN edge activations.
   dropout: 0.2                                      # Fixed reviewed v1 dropout.
   learning_rate: 0.0003                             # Fixed reviewed v1 AdamW rate.
   weight_decay: 0.0001                              # Fixed reviewed v1 AdamW decay.
   topk_fraction: 0.05                               # Retained fraction for top-k mean.
   attention_hidden_dim: 32                          # Attention scoring-network width.
-  regional_levels: 1                                # Local smoothing rounds before regional MAX.
+  regional_diffusion_scale: 2.5                     # Physical smoothing length in Å before MAX.
   log_sum_exp_beta: 5.0                             # Log-sum-exp inverse temperature.
   batch_size: 2                                     # Variable-size proteins per step.
   epochs: 100                                       # Maximum epochs per pooling/seed run.
+  patience: 30                                      # Stop a plateau without changing model selection.
+  minimum_delta: 0.001                              # Meaningful validation AUPRC improvement threshold.
+  precision: auto                                   # BF16 on capable CUDA GPUs, otherwise FP32.
+  surface_metrics: true                             # Compare local maps without supervising them.
   data_workers: 0                                   # Loader subprocesses inside each run.
 
 # Fixed Training.run option reference:
 # Values shown above equal public defaults except model_version=2. subset="full"; widths and
-# depths are positive; dropout is in [0,1); topk_fraction is in (0,1]; attention_hidden_dim and
-# regional_levels are positive; log_sum_exp_beta and learning_rate are positive; weight_decay and
-# data_workers are non-negative; batch_size and epochs are positive.
+# depths/K/J/mode budgets are positive; dropout is in [0,1); topk_fraction is in (0,1];
+# attention_hidden_dim and regional_diffusion_scale are positive; log_sum_exp_beta and learning_rate are positive; weight_decay and
+# data_workers and minimum_delta are non-negative; batch_size, epochs, and patience are positive;
+# precision accepts "auto", "bfloat16", "float16", or "float32";
+# surface_metrics=true by default and false disables evaluation-only sidecar diagnostics.
 
 seeds: [7, 17, 27]                                  # Repeat every pooling for seed uncertainty.
 search:                                              # Exhaustive one-factor scientific ablation.
+  strategy: exhaustive                              # Evaluate every pooling with every authored seed.
   pooling_type:                                     # Only this model property may vary in v2.
     values: [max, mean, attention, topk, local_mean_max, log_sum_exp] # Closed PoolingType set.
 
-# pooling_type defaults to "max". The accepted values are MAX, arithmetic mean, learned sparse
-# attention, top-k mean, local area-weighted mean followed by global MAX, and normalized
+# strategy defaults to "adaptive" when an objective and several seeds are present; v2 overrides it
+# because removing weak pooling candidates would confound this controlled ablation. pooling_type
+# defaults to "max". The accepted values are MAX, arithmetic mean, learned sparse
+# attention, top-k mean, fixed spectral diffusion followed by global MAX, and normalized
 # log-sum-exp. With categorical values and no trials field, LambdaForge expands every alternative.
 
 objective:                                           # Used to compare pooling hypotheses.
@@ -49,7 +64,8 @@ resources:                                           # Per-training allocation.
   memory: 32GiB                                      # Host-memory reservation.
   time: 24h                                          # Scheduler wall-time limit.
 
-# LambdaForge 0.12 study options: seeds defaults to one unseeded Run and objective accepts metric
-# plus mode=max|min. Finite-only search forms the Cartesian product; every pooling/seed Run executes
-# serially inside this Work's fixed allocation, so max_parallel no longer exists. Resource options
+# LambdaForge 0.13 study options: seeds defaults to one unseeded Run and objective accepts metric
+# plus mode=max|min. Finite-only exhaustive search forms the Cartesian product; all 18 pooling/seed
+# Runs execute serially inside this Work's fixed allocation. Adaptive-only max_parallel does not
+# apply here. Resource options
 # are cpu, gpu, memory, gpu_memory, time, storage, and processes. output_root is framework-owned.

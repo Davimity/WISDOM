@@ -1,0 +1,74 @@
+# Compare only molecular-surface propagation while fixing atom encoding, transfer, and MAX pooling.
+name: wisdom-v3                                      # Stable LambdaForge surface-ablation study name.
+run: wisdom.Training.Training                       # Shared train/validate/test Work.
+
+with:                                                # Fixed scientific and operational arguments.
+  dataset:                                           # Resolve one immutable managed placement.
+    dataset: wisdom-dna@5                            # Schema-3 operators required by every backend.
+  model_version: 3                                  # Select the controlled surface-encoder generation.
+  subset: full                                      # Use the complete fixed training population.
+  pooling_type: max                                 # Hold weak protein aggregation constant.
+
+  hidden_dim: 128                                   # Fixed scalar atom/surface latent width.
+  embedding_dim: 32                                 # Fixed element/residue embedding width.
+  use_residue_type: true                            # Fixed reviewed atomic feature set.
+  atomic_layers: 2                                  # Fixed relation-aware atomic depth.
+  projection_depth: 1                              # Fixed atom/curvature fusion depth.
+  surface_layers: 2                                 # Equal block depth for every surface backend.
+  dropout: 0.2                                      # Equal regularization for every backend.
+  atom_spatial_k: 16                                # Equal bounded atomic spatial topology.
+  surface_atom_k: 16                                # Equal bounded atom-to-surface transfer.
+  diffusion_spectral_modes: 128                     # Equal operator budget; used directly by controls.
+  surface_atom_radius: 6.0                          # Transfer geometry normalization cutoff in Å.
+  surface_chunk_size: 8192                          # Bounded atom-transfer activation chunk.
+  atomic_message_chunk_size: 65536                  # Bounded LambdaForge RGCN message chunk.
+  surface_patch_size: 64                            # Maximum compact PTv3 attention window.
+
+  batch_size: 2                                     # Variable-size proteins per optimization step.
+  epochs: 500                                       # Safety ceiling; validation patience stops plateaus.
+  patience: 30                                      # Non-improving validation epochs before stopping.
+  minimum_delta: 0.001                              # Required validation AUPRC improvement.
+  precision: auto                                   # BF16 on capable CUDA GPUs, otherwise FP32.
+  surface_metrics: true                             # Evaluation-only localization diagnostics.
+  data_workers: 0                                   # Loader subprocesses per independent training.
+
+# Training.run option reference:
+# model_version=1, subset="full", hidden_dim=128, embedding_dim=32, use_residue_type=true,
+# atomic_layers=2, projection_depth=1, surface_layers=2, dropout=.2, atom_spatial_k=16,
+# surface_atom_k=16, diffusion_spectral_modes=128, surface_atom_radius=6.0,
+# surface_chunk_size=8192, atomic_message_chunk_size=65536, surface_encoder_type="diffusion",
+# surface_patch_size=64, pooling_type="max", batch_size=2, epochs=100, patience=30,
+# minimum_delta=.001, precision="auto", surface_metrics=true, and data_workers=0 are true defaults.
+# v3 deliberately fixes all values except surface_encoder_type. Positive integer fields must remain
+# positive; dropout is in [0,1); precision accepts auto/float32/bfloat16/float16.
+
+seeds: [7, 17, 27]                                  # Repeat every backend to expose seed variance.
+
+search:                                              # Exhaustive one-factor surface comparison.
+  strategy: exhaustive                              # Evaluate every backend with every seed.
+  surface_encoder_type:                             # Only trainable surface propagation varies.
+    values: [diffusion, dmasif, deltaconv, ptv3, point_mamba] # Closed SurfaceEncoderType values.
+
+# Search option reference:
+# strategy defaults to adaptive with an objective and several seeds; exhaustive prevents pruning
+# from confounding a controlled architecture comparison. surface_encoder_type defaults to
+# "diffusion" and accepts diffusion, dmasif, deltaconv, ptv3, or point_mamba. No numeric trial
+# count is needed because the authored categorical alternatives are enumerated exactly.
+
+objective:                                           # Test labels and local GT never select models.
+  metric: val_auprc                                  # Validation protein-level precision-recall area.
+  mode: max                                          # Larger validation AUPRC is better.
+
+# Objective options:
+# metric has no useful project default and must name a logged validation metric. mode accepts max
+# or min. Local surface metrics remain diagnostics and cannot rank these weakly supervised models.
+
+resources:                                           # Fixed allocation for the complete study.
+  gpu: 1                                             # One accelerator executes one isolated run.
+  cpu: 8                                             # Host data loading and orchestration.
+  memory: 32GiB                                      # Host-memory reservation.
+  time: 168h                                         # Seven-day ceiling for all backend/seed runs.
+
+# LambdaForge resource options:
+# cpu>=1, gpu>=0, memory/gpu_memory/storage=<size>, time=<duration>, and processes<=cpu. The
+# framework owns run paths, seed/search expansion, objective comparison, and output indexing.

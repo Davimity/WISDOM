@@ -1,7 +1,8 @@
-"""Disjoint-graph batching for variable-size WISDOM proteins."""
+"""Bounded disjoint batching for variable-size WISDOM proteins."""
 
 from __future__ import annotations
 
+from typing import Any
 from collections.abc import Mapping, Sequence
 
 import torch
@@ -9,138 +10,256 @@ from torch import Tensor
 
 
 class WisdomCollator:
-    """Concatenate proteins and offset all three sparse graph domains deterministically."""
+    """Activate nested K/J budgets and pack independent surface operators per protein."""
+
+    def __init__(
+        self,
+        atom_spatial_k          : int = 16,
+        surface_atom_k          : int = 16,
+        diffusion_spectral_modes: int = 128,
+    ) -> None:
+        """Set runtime topology budgets without changing persisted scientific geometry.
+
+        Args:
+            atom_spatial_k: Active per-atom spatial rank ``K``; covalent edges always remain.
+            surface_atom_k: Prefix width ``J`` selected from every compact atom-neighbor row.
+            diffusion_spectral_modes: Maximum low-frequency modes selected per protein.
+
+        Raises:
+            ValueError: If any runtime budget is not positive.
+        """
+        if atom_spatial_k < 1 or surface_atom_k < 1 or diffusion_spectral_modes < 1:
+            raise ValueError("collator K, J, and spectral-mode budgets must be positive")
+
+        self.atom_spatial_k           = atom_spatial_k
+        self.surface_atom_k           = surface_atom_k
+        self.diffusion_spectral_modes = diffusion_spectral_modes
 
     def __call__(
         self,
         samples: Sequence[Mapping[str, Tensor | str]],
-    ) -> Mapping[str, Tensor | list[str]]:
-        """Build one disconnected tensor graph batch from ordered protein samples.
+    ) -> Mapping[str, Any]:
+        """Build one disconnected atomic batch and one ordered operator pack.
 
-        Preprocessing stores an undirected atomic or surface pair once with ``src<dst``. LambdaForge
-        graph encoders consume directed ``source -> destination`` edges, so each stored pair is
-        expanded to both orientations here. Bipartite edges retain their semantic orientation
-        ``surface -> atom`` because WISDOMv1 gathers atom embeddings explicitly by its two rows.
+        Stored undirected atomic pairs are filtered by ``covalent OR spatial_rank<=K`` and expanded
+        to both message directions. Compact surface-atom tables are sliced to their first ``J``
+        columns and valid atom IDs receive the protein atom offset. Spectral and sparse gradient
+        operators stay in a list aligned with ``surface_ptr``; concatenating them would create a
+        large artificial block matrix with no scientific meaning.
 
         Args:
-            samples: Non-empty ordered sequence returned by ``WisdomDataset``. Protein ``b`` becomes
-                batch index ``b`` without random reordering inside this operation.
+            samples: Non-empty ordered samples returned by :class:`WisdomDataset`.
 
         Returns:
-            Mapping of concatenated features, bidirectional atom/surface graph edges, offset
-            surface-to-atom incidence, ``atom_batch[N]``, ``surface_batch[M]`` and ``target[B]``.
+            Concatenated atom/surface tensors, runtime relations, compact transfer tables,
+            ``surface_ptr[B+1]``, per-protein operator dictionaries, optional geometry/targets, and
+            one target per protein.
 
         Raises:
-            ValueError: If ``samples`` is empty or any offset endpoint leaves its concatenated node
-                domain, indicating an inconsistent dataset/collator contract.
+            ValueError: If a budget exceeds persisted maxima or an offset endpoint is invalid.
         """
         if not samples:
             raise ValueError("cannot collate an empty protein batch")
 
-        atomic_numbers: list[Tensor]          = []
-        residue_type_ids: list[Tensor]        = []
-        atom_edges: list[Tensor]              = []
-        atom_edge_types: list[Tensor]         = []
-        atom_batches: list[Tensor]            = []
-        surface_curvatures: list[Tensor]      = []
-        surface_edges: list[Tensor]           = []
-        bipartite_edges: list[Tensor]         = []
-        surface_weights: list[Tensor]         = []
-        surface_positions: list[Tensor]       = []
-        surface_normals: list[Tensor]         = []
-        surface_batches: list[Tensor]         = []
-        targets: list[Tensor]                 = []
-        identifiers: list[str]                = []
-        tiers: list[str]                      = []
-        annotations: dict[str, list[Tensor]]  = {
+        values: dict[str, list[Tensor]] = {
             name: []
             for name in (
-                "surface_target_hard",
-                "surface_valid_mask",
-                "surface_target_soft",
-                "surface_distance_to_dna",
-                "surface_distance_valid",
-                "surface_target_hard_sensitivity",
+                "atomic_numbers",
+                "residue_type_ids",
+                "atom_edge_index",
+                "atom_edge_types",
+                "atom_batch",
+                "surface_curvatures",
+                "surface_atom_neighbors",
+                "surface_atom_distances",
+                "surface_atom_normal_offsets",
+                "surface_atom_tangential_distances",
+                "surface_atom_mask",
+                "surface_area_weights",
+                "surface_batch",
+                "surface_positions",
+                "surface_normals",
+                "surface_neighbors",
+                "surface_neighbor_distances",
+                "surface_neighbor_mask",
+                "target",
             )
         }
-        has_annotations = all("surface_target_hard" in sample for sample in samples)
-        has_geometry    = all("surface_positions" in sample for sample in samples)
-        has_identity    = all("identifier" in sample for sample in samples)
+        annotation_names = (
+            "surface_target_hard",
+            "surface_valid_mask",
+            "surface_target_soft",
+            "surface_distance_to_dna",
+            "surface_distance_valid",
+            "surface_target_hard_sensitivity",
+        )
+        annotations: dict[str, list[Tensor]] = {name: [] for name in annotation_names}
+        operators: list[dict[str, Tensor]] = []
+        identifiers: list[str] = []
+        tiers: list[str]       = []
+        surface_ptr            = [0]
+
+        has_surface_targets = all(
+            "surface_target_hard" in sample and "surface_valid_mask" in sample
+            for sample in samples
+        )
+        has_full_annotations = has_surface_targets and all(
+            all(name in sample for name in annotation_names[2:]) for sample in samples
+        )
+        has_geometry = all("surface_positions" in sample for sample in samples)
+        has_identity = all("identifier" in sample for sample in samples)
 
         atom_offset    = 0
         surface_offset = 0
         for batch_index, sample in enumerate(samples):
-            atomic_number_value = sample["atomic_numbers"]
-            surface_weight_value = sample["surface_area_weights"]
-            if not isinstance(atomic_number_value, Tensor) or not isinstance(
-                surface_weight_value, Tensor
-            ):
-                raise ValueError("collator tensor fields must contain tensors")
-            atom_count    = len(atomic_number_value)
-            surface_count = len(surface_weight_value)
+            atomic_numbers = self._tensor(sample, "atomic_numbers")
+            surface_weights = self._tensor(sample, "surface_area_weights")
+            atom_count      = len(atomic_numbers)
+            surface_count   = len(surface_weights)
 
-            atomic_numbers.append(atomic_number_value)
-            residue_type_ids.append(self._tensor(sample, "residue_type_ids"))
-            atom_batches.append(
+            values["atomic_numbers"].append(atomic_numbers)
+            values["residue_type_ids"].append(self._tensor(sample, "residue_type_ids"))
+            values["atom_batch"].append(
                 torch.full((atom_count,), batch_index, dtype=torch.long)
             )
 
-            stored_atom_edges = self._tensor(sample, "atom_edge_index") + atom_offset
-            atom_edges.extend((stored_atom_edges, stored_atom_edges.flip(0)))
-            atom_types = self._tensor(sample, "atom_edge_types")
-            atom_edge_types.extend((atom_types, atom_types))
+            # Select one nested atomic topology and derive the closed relation IDs at runtime.
 
-            surface_curvatures.append(self._tensor(sample, "surface_curvatures"))
-            surface_weights.append(surface_weight_value)
-            if has_geometry:
-                surface_positions.append(self._tensor(sample, "surface_positions"))
-                surface_normals.append(self._tensor(sample, "surface_normals"))
-            surface_batches.append(
+            stored_edges = self._tensor(sample, "atom_edge_index")
+            covalent     = self._tensor(sample, "atom_edge_is_covalent").bool()
+            ranks        = self._tensor(sample, "atom_edge_spatial_rank")
+            spatial     = (ranks > 0) & (ranks <= self.atom_spatial_k)
+            active      = covalent | spatial
+            if not torch.any(active):
+                raise ValueError("runtime atomic topology contains no active edge")
+
+            active_edges = stored_edges[:, active] + atom_offset
+            active_types = torch.where(
+                covalent[active] & spatial[active],
+                torch.full_like(ranks[active], 2),
+                torch.where(covalent[active], torch.ones_like(ranks[active]), ranks[active] * 0),
+            ).long()
+            values["atom_edge_index"].extend((active_edges, active_edges.flip(0)))
+            values["atom_edge_types"].extend((active_types, active_types))
+
+            # Slice the compact transfer table; invalid sentinels remain -1 after offsetting.
+
+            stored_neighbors = self._tensor(sample, "surface_atom_neighbors")
+            if self.surface_atom_k > stored_neighbors.shape[1]:
+                raise ValueError(
+                    f"surface_atom_k={self.surface_atom_k} exceeds persisted Jmax="
+                    f"{stored_neighbors.shape[1]}"
+                )
+            atom_mask = self._tensor(sample, "surface_atom_mask")[:, : self.surface_atom_k].bool()
+            neighbors = stored_neighbors[:, : self.surface_atom_k].clone()
+            neighbors[atom_mask] += atom_offset
+
+            values["surface_curvatures"].append(self._tensor(sample, "surface_curvatures"))
+            values["surface_atom_neighbors"].append(neighbors)
+            values["surface_atom_distances"].append(
+                self._tensor(sample, "surface_atom_distances")[:, : self.surface_atom_k]
+            )
+            values["surface_atom_normal_offsets"].append(
+                self._tensor(sample, "surface_atom_normal_offsets")[:, : self.surface_atom_k]
+            )
+            values["surface_atom_tangential_distances"].append(
+                self._tensor(sample, "surface_atom_tangential_distances")[
+                    :, : self.surface_atom_k
+                ]
+            )
+            values["surface_atom_mask"].append(atom_mask)
+            values["surface_area_weights"].append(surface_weights)
+            values["surface_batch"].append(
                 torch.full((surface_count,), batch_index, dtype=torch.long)
             )
 
-            stored_surface_edges = self._tensor(sample, "surface_edge_index") + surface_offset
-            surface_edges.extend((stored_surface_edges, stored_surface_edges.flip(0)))
+            # Operators keep local surface indices and are moved recursively by Training.
 
-            bipartite_offset = torch.tensor(
-                [[surface_offset], [atom_offset]],
-                dtype=torch.long,
+            eigenvalues = self._tensor(sample, "diffusion_eigenvalues")
+            mode_count  = min(self.diffusion_spectral_modes, len(eigenvalues))
+            operators.append(
+                {
+                    "mass": self._tensor(sample, "diffusion_mass"),
+                    "eigenvalues": eigenvalues[:mode_count],
+                    "eigenvectors": self._tensor(sample, "diffusion_eigenvectors")[
+                        :, :mode_count
+                    ],
+                    "gradient_index": self._tensor(sample, "diffusion_gradient_index"),
+                    "gradient_x": self._tensor(sample, "diffusion_gradient_x"),
+                    "gradient_y": self._tensor(sample, "diffusion_gradient_y"),
+                }
             )
-            bipartite_edges.append(
-                self._tensor(sample, "surface_atom_edge_index") + bipartite_offset
-            )
-            targets.append(self._tensor(sample, "target"))
+            surface_ptr.append(surface_offset + surface_count)
+
+            if has_geometry:
+                values["surface_positions"].append(self._tensor(sample, "surface_positions"))
+                values["surface_normals"].append(self._tensor(sample, "surface_normals"))
+                local_neighbors = self._tensor(sample, "surface_neighbors").clone()
+                local_mask      = self._tensor(sample, "surface_neighbor_mask").bool()
+                local_neighbors[local_mask] += surface_offset
+                values["surface_neighbors"].append(local_neighbors)
+                values["surface_neighbor_distances"].append(
+                    self._tensor(sample, "surface_neighbor_distances")
+                )
+                values["surface_neighbor_mask"].append(local_mask)
+
+            values["target"].append(self._tensor(sample, "target"))
             if has_identity:
                 identifiers.append(str(sample["identifier"]))
                 tiers.append(str(sample["tier"]))
-            if has_annotations:
-                for name in annotations:
+            if has_surface_targets:
+                for name in annotation_names[:2]:
+                    annotations[name].append(self._tensor(sample, name))
+            if has_full_annotations:
+                for name in annotation_names[2:]:
                     annotations[name].append(self._tensor(sample, name))
 
             atom_offset    += atom_count
             surface_offset += surface_count
 
-        batch: dict[str, Tensor | list[str]] = {
-            "atomic_numbers": torch.cat(atomic_numbers),
-            "residue_type_ids": torch.cat(residue_type_ids),
-            "atom_edge_index": torch.cat(atom_edges, dim=1),
-            "atom_edge_types": torch.cat(atom_edge_types),
-            "atom_batch": torch.cat(atom_batches),
-            "surface_curvatures": torch.cat(surface_curvatures),
-            "surface_edge_index": torch.cat(surface_edges, dim=1),
-            "surface_atom_edge_index": torch.cat(bipartite_edges, dim=1),
-            "surface_area_weights": torch.cat(surface_weights),
-            "surface_batch": torch.cat(surface_batches),
-            "target": torch.stack(targets),
-        }
+        tensor_names = (
+            "atomic_numbers",
+            "residue_type_ids",
+            "atom_batch",
+            "surface_curvatures",
+            "surface_atom_neighbors",
+            "surface_atom_distances",
+            "surface_atom_normal_offsets",
+            "surface_atom_tangential_distances",
+            "surface_atom_mask",
+            "surface_area_weights",
+            "surface_batch",
+        )
+        batch: dict[str, Any] = {name: torch.cat(values[name]) for name in tensor_names}
+        batch.update(
+            {
+                "atom_edge_index": torch.cat(values["atom_edge_index"], dim=1),
+                "atom_edge_types": torch.cat(values["atom_edge_types"]),
+                "surface_ptr": torch.tensor(surface_ptr, dtype=torch.long),
+                "surface_operators": operators,
+                "target": torch.stack(values["target"]),
+                "active_atom_spatial_k": torch.tensor(self.atom_spatial_k),
+                "active_surface_atom_k": torch.tensor(self.surface_atom_k),
+            }
+        )
         if has_geometry:
-            batch["surface_positions"] = torch.cat(surface_positions)
-            batch["surface_normals"]   = torch.cat(surface_normals)
+            for name in (
+                "surface_positions",
+                "surface_normals",
+                "surface_neighbors",
+                "surface_neighbor_distances",
+                "surface_neighbor_mask",
+            ):
+                batch[name] = torch.cat(values[name])
         if has_identity:
             batch["identifier"] = identifiers
             batch["tier"]       = tiers
-        if has_annotations:
-            batch.update({name: torch.cat(values) for name, values in annotations.items()})
+        if has_surface_targets:
+            for name in annotation_names[:2]:
+                batch[name] = torch.cat(annotations[name])
+        if has_full_annotations:
+            for name in annotation_names[2:]:
+                batch[name] = torch.cat(annotations[name])
             sensitivity_gaps = self._tensor(samples[0], "sensitivity_gaps")
             if any(
                 not torch.equal(self._tensor(sample, "sensitivity_gaps"), sensitivity_gaps)
@@ -149,32 +268,22 @@ class WisdomCollator:
                 raise ValueError("all DNA sidecars in a batch must use the same sensitivity gaps")
             batch["sensitivity_gaps"] = sensitivity_gaps
 
-        # Assertions remain active because an invalid offset would silently mix proteins.
-        atom_edge_batch = self._tensor(batch, "atom_edge_index")
-        if atom_edge_batch.numel() and (
-            atom_edge_batch.min() < 0
-            or atom_edge_batch.max() >= atom_offset
-        ):
-            raise ValueError("batched atom edge index is out of range")
-        surface_edge_batch = self._tensor(batch, "surface_edge_index")
-        if surface_edge_batch.numel() and (
-            surface_edge_batch.min() < 0
-            or surface_edge_batch.max() >= surface_offset
-        ):
-            raise ValueError("batched surface edge index is out of range")
+        # Endpoint assertions prevent silent cross-protein message passing.
 
-        bipartite = self._tensor(batch, "surface_atom_edge_index")
-        if bipartite.numel() and (
-            bipartite[0].min() < 0
-            or bipartite[0].max() >= surface_offset
-            or bipartite[1].min() < 0
-            or bipartite[1].max() >= atom_offset
+        atom_edges = self._tensor(batch, "atom_edge_index")
+        if atom_edges.numel() and (atom_edges.min() < 0 or atom_edges.max() >= atom_offset):
+            raise ValueError("batched atom edge index is out of range")
+        atom_neighbors = self._tensor(batch, "surface_atom_neighbors")
+        atom_mask      = self._tensor(batch, "surface_atom_mask").bool()
+        if atom_neighbors[atom_mask].numel() and (
+            atom_neighbors[atom_mask].min() < 0
+            or atom_neighbors[atom_mask].max() >= atom_offset
         ):
-            raise ValueError("batched surface-to-atom edge index is out of range")
+            raise ValueError("batched surface-to-atom reference is out of range")
         return batch
 
     @staticmethod
-    def _tensor(mapping: Mapping[str, Tensor | str | list[str]], name: str) -> Tensor:
+    def _tensor(mapping: Mapping[str, Any], name: str) -> Tensor:
         """Return a required tensor field with a precise collator error.
 
         Args:

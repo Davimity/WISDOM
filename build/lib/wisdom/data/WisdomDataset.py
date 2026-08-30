@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import csv
-import hashlib
+import json
 from collections.abc import Mapping
 from pathlib import Path
 
@@ -17,15 +17,22 @@ from torch.utils.data import Dataset
 class WisdomDataset(Dataset[Mapping[str, Tensor | str]]):
     """Load one explicit labeled split without changing preprocessed geometry."""
 
+    # Trainable WISDOM generations consume only the bounded schema-3 structural representation.
+
+    STRUCTURAL_SCHEMA_VERSION = "3.0"
+
     LEGACY_COLUMNS = ("file", "label", "split")
     DNA_COLUMNS    = ("file", "annotation", "label", "split", "identifier", "tier")
     SPLITS         = frozenset({"train", "val", "test"})
 
     def __init__(
         self,
-        manifest: str | Path,
-        split   : str,
-        subset  : str = "full",
+        manifest               : str | Path,
+        split                  : str,
+        subset                 : str = "full",
+        include_surface_targets: bool = False,
+        include_diagnostics    : bool = False,
+        include_surface_geometry: bool = False,
     ) -> None:
         """Read and validate a compact ``file,label,split`` CSV manifest.
 
@@ -34,11 +41,18 @@ class WisdomDataset(Dataset[Mapping[str, Tensor | str]]):
         NPZ files remain unopened until ``__getitem__`` so DataLoader workers do not share handles.
 
         Args:
-            manifest: LambdaForge 0.12 managed dataset root containing ``index.jsonl``, or a legacy
+            manifest: LambdaForge 0.13 managed dataset root containing ``index.jsonl``, or a legacy
                 CSV with exactly ``file,label,split`` columns.
             split: Explicit subset to expose; one of ``train``, ``val``, or ``test``.
             subset: ``full`` or a dilution name such as ``replicate-00/train-25``. Managed dataset
                 members carry this view membership in metadata without duplicating heavy assets.
+            include_surface_targets: Load only hard point targets and their validity mask for
+                evaluation-only surface metrics.
+            include_diagnostics: Load surface coordinates, normals, and DNA point targets needed
+                by post-training localization analysis. Ordinary global-label training leaves this
+                false to avoid hashing, decoding, collating, and transferring unused arrays.
+            include_surface_geometry: Load coordinates, normals, and bounded local surface
+                neighborhoods required by WISDOM v3 encoders. V1/V2 leave these arrays unopened.
 
         Raises:
             ValueError: If the split, header, label, row split, path, or selected subset is invalid.
@@ -48,6 +62,10 @@ class WisdomDataset(Dataset[Mapping[str, Tensor | str]]):
             raise ValueError(f"split must be one of {sorted(self.SPLITS)}")
         if not subset.strip():
             raise ValueError("subset cannot be empty")
+
+        self.include_surface_targets = include_surface_targets
+        self.include_diagnostics     = include_diagnostics
+        self.include_surface_geometry = include_surface_geometry
 
         manifest_path = Path(manifest).resolve()
         if manifest_path.is_dir():
@@ -150,21 +168,46 @@ class WisdomDataset(Dataset[Mapping[str, Tensor | str]]):
             ):
                 continue
             try:
-                label = int(member.targets["dna_binding"])
-                base  = root / member.assets["universal_npz"].path
+                label      = int(member.targets["dna_binding"])
+                base_asset = member.assets["universal_npz"]
+                base       = root / base_asset.path
             except (KeyError, TypeError, ValueError) as error:
                 raise ValueError(
                     f"managed member {member.member_id!r} lacks WISDOM label/base asset"
                 ) from error
-            if label not in {0, 1} or not base.is_file() or base.suffix.lower() != ".npz":
-                raise ValueError(f"managed member {member.member_id!r} has invalid base data")
+
+            if label not in {0, 1}:
+                raise ValueError(
+                    f"managed member {member.member_id!r} has non-binary dna_binding={label!r}"
+                )
+            if not base.is_file():
+                raise ValueError(
+                    f"managed member {member.member_id!r} is missing universal_npz at "
+                    f"{base_asset.path!r}"
+                )
+            if base_asset.kind != "file" or base_asset.media_type not in {
+                None,
+                "application/x-npz",
+            }:
+                raise ValueError(
+                    f"managed member {member.member_id!r} universal_npz must be a file with "
+                    "media_type='application/x-npz' when a media type is declared"
+                )
+
             annotation_asset = member.assets.get("dna_annotation")
             annotation = root / annotation_asset.path if annotation_asset is not None else None
-            if annotation is not None and (
-                not annotation.is_file() or annotation.suffix.lower() != ".npz"
+            if annotation is not None and not annotation.is_file():
+                raise ValueError(
+                    f"managed member {member.member_id!r} is missing dna_annotation at "
+                    f"{annotation_asset.path!r}"
+                )
+            if annotation_asset is not None and (
+                annotation_asset.kind != "file"
+                or annotation_asset.media_type not in {None, "application/x-npz"}
             ):
                 raise ValueError(
-                    f"managed member {member.member_id!r} has invalid DNA annotation"
+                    f"managed member {member.member_id!r} dna_annotation must be a file with "
+                    "media_type='application/x-npz' when a media type is declared"
                 )
             records.append(
                 (
@@ -189,20 +232,47 @@ class WisdomDataset(Dataset[Mapping[str, Tensor | str]]):
         """
         return len(self.records)
 
-    def __getitem__(self, index: int) -> Mapping[str, Tensor | str]:
-        """Load only WISDOMv1 arrays and convert them to correctly typed tensors.
+    def storage_bytes(self) -> dict[str, int]:
+        """Measure unique persisted bytes selected by this dataset view.
 
-        Relation bit masks use preprocessing meanings ``1=spatial``, ``2=covalent`` and
-        ``3=both``. WISDOMv1 maps them deterministically to R-GCN relation IDs ``0,1,2`` by
-        subtracting one. Atom/surface graphs remain in their stored undirected-once ``src<dst``
-        form here; ``WisdomCollator`` creates both directed message-passing orientations.
+        Filesystem metadata is sufficient here: the method does not open or hash any NPZ. Paths
+        are deduplicated so repeated logical records cannot inflate preprocessing cost.
+
+        Returns:
+            Byte counts for universal NPZ files, DNA sidecars, and their total.
+
+        Raises:
+            OSError: If a selected asset disappears after dataset initialization.
+        """
+        base_paths = {record[0] for record in self.records}
+        annotation_paths = {
+            record[1]
+            for record in self.records
+            if record[1] is not None
+        }
+
+        base_bytes       = sum(path.stat().st_size for path in base_paths)
+        annotation_bytes = sum(path.stat().st_size for path in annotation_paths)
+        return {
+            "universal_npz":  base_bytes,
+            "dna_annotation": annotation_bytes,
+            "total":          base_bytes + annotation_bytes,
+        }
+
+    def __getitem__(self, index: int) -> Mapping[str, Tensor | str]:
+        """Load the bounded schema-3 model arrays and optional evaluation diagnostics.
+
+        Atomic pairs remain stored once with ``src<dst`` together with covalent flags and spatial
+        activation ranks. Surface-to-atom neighborhoods remain padded at ``Jmax``. Diffusion
+        operators retain per-protein point order and are packed by :class:`WisdomCollator` rather
+        than joined into an artificial block matrix.
 
         Args:
             index: Zero-based selected-split record index.
 
         Returns:
-            Mapping containing integer atom categories/edges/relations, float32 curvature and area
-            tensors, the surface-to-atom incidence, and one scalar float32 binary target.
+            Mapping containing bounded topology, compact atom-neighbor geometry, intrinsic surface
+            operators, one scalar float32 target, and requested host-side diagnostics.
 
         Raises:
             IndexError: If ``index`` is outside the selected split.
@@ -212,23 +282,58 @@ class WisdomDataset(Dataset[Mapping[str, Tensor | str]]):
         """
         path, annotation_path, label, identifier, tier = self.records[index]
         required = {
+            "metadata_json",
             "atomic_numbers",
             "residue_type_ids",
             "atom_edge_index",
-            "atom_edge_relation_mask",
+            "atom_edge_is_covalent",
+            "atom_edge_spatial_rank",
             "surface_curvatures",
-            "surface_edge_index",
-            "surface_atom_edge_index",
             "surface_area_weights",
+            "surface_atom_neighbors",
+            "surface_atom_distances",
+            "surface_atom_normal_offsets",
+            "surface_atom_tangential_distances",
+            "surface_atom_mask",
+            "diffusion_mass",
+            "diffusion_eigenvalues",
+            "diffusion_eigenvectors",
+            "diffusion_gradient_index",
+            "diffusion_gradient_x",
+            "diffusion_gradient_y",
         }
         with np.load(path, allow_pickle=False) as archive:
+            if "metadata_json" not in archive.files:
+                raise ValueError(
+                    f"{path.name} uses an unsupported pre-schema-3 representation; "
+                    "run WISDOM preprocessing again and publish a new DatasetVersion"
+                )
+            metadata = json.loads(str(archive["metadata_json"].item()))
+            if metadata.get("preprocessing_schema_version") != self.STRUCTURAL_SCHEMA_VERSION:
+                raise ValueError(
+                    f"{path.name} uses structural schema "
+                    f"{metadata.get('preprocessing_schema_version')!r}; WISDOM requires "
+                    f"{self.STRUCTURAL_SCHEMA_VERSION}, "
+                    "so the immutable dataset must be preprocessed again"
+                )
             missing = required - set(archive.files)
             if missing:
-                raise ValueError(f"{path.name} is missing WISDOMv1 arrays: {sorted(missing)}")
-            values = {name: archive[name] for name in required}
-            for name in ("surface_positions", "surface_normals"):
-                if name in archive.files:
-                    values[name] = archive[name]
+                raise ValueError(f"{path.name} is missing schema-3 arrays: {sorted(missing)}")
+            values = {name: archive[name] for name in required if name != "metadata_json"}
+            if self.include_diagnostics or self.include_surface_geometry:
+                geometry_names = {
+                    "surface_positions",
+                    "surface_normals",
+                    "surface_neighbors",
+                    "surface_neighbor_distances",
+                    "surface_neighbor_mask",
+                }
+                missing_geometry = geometry_names - set(archive.files)
+                if missing_geometry:
+                    raise ValueError(
+                        f"{path.name} is missing surface geometry: {sorted(missing_geometry)}"
+                    )
+                values.update({name: archive[name] for name in geometry_names})
 
         atom_count    = len(values["atomic_numbers"])
         surface_count = len(values["surface_area_weights"])
@@ -256,60 +361,105 @@ class WisdomDataset(Dataset[Mapping[str, Tensor | str]]):
                 "surface curvature and area tensors must be finite with positive weights"
             )
 
-        # Sparse topology remains compact; every endpoint is checked before tensor construction.
+        # Bounded atomic candidates remain inactive until the collator applies the requested K.
         atom_edges    = values["atom_edge_index"]
-        surface_edges = values["surface_edge_index"]
-        bipartite     = values["surface_atom_edge_index"]
-        relation_mask = values["atom_edge_relation_mask"]
-        for name, edge_index in (
-            ("atom_edge_index", atom_edges),
-            ("surface_edge_index", surface_edges),
-            ("surface_atom_edge_index", bipartite),
-        ):
-            if edge_index.ndim != 2 or edge_index.shape[0] != 2:
-                raise ValueError(f"{name} must have shape [2,E]")
-            if edge_index.dtype.kind not in "iu":
-                raise ValueError(f"{name} must use an integer dtype")
-        if relation_mask.shape != (atom_edges.shape[1],) or not np.all(
-            np.isin(relation_mask, (1, 2, 3))
-        ):
-            raise ValueError("atom relation masks must use preprocessing values 1, 2, or 3")
+        is_covalent   = values["atom_edge_is_covalent"]
+        spatial_rank  = values["atom_edge_spatial_rank"]
+        if atom_edges.ndim != 2 or atom_edges.shape[0] != 2 or atom_edges.dtype.kind not in "iu":
+            raise ValueError("atom_edge_index must be an integer array with shape [2,E]")
+        if is_covalent.shape != (atom_edges.shape[1],) or is_covalent.dtype != np.bool_:
+            raise ValueError("atom_edge_is_covalent must be Boolean with shape [E]")
+        if spatial_rank.shape != (atom_edges.shape[1],) or spatial_rank.dtype.kind not in "iu":
+            raise ValueError("atom_edge_spatial_rank must be integer with shape [E]")
+        if np.any(~is_covalent & (spatial_rank == 0)):
+            raise ValueError("an atomic edge is neither covalent nor spatial")
         if atom_edges.size and (
             atom_edges.min() < 0
             or atom_edges.max() >= atom_count
             or not np.all(atom_edges[0] < atom_edges[1])
         ):
             raise ValueError("atom_edge_index endpoints/order are invalid")
-        if surface_edges.size and (
-            surface_edges.min() < 0
-            or surface_edges.max() >= surface_count
-            or not np.all(surface_edges[0] < surface_edges[1])
+
+        neighbor_shape = values["surface_atom_neighbors"].shape
+        if len(neighbor_shape) != 2 or neighbor_shape[0] != surface_count:
+            raise ValueError("surface_atom_neighbors must have shape [M,Jmax]")
+        for name in (
+            "surface_atom_distances",
+            "surface_atom_normal_offsets",
+            "surface_atom_tangential_distances",
+            "surface_atom_mask",
         ):
-            raise ValueError("surface_edge_index endpoints/order are invalid")
-        if bipartite.size and (
-            bipartite[0].min() < 0
-            or bipartite[0].max() >= surface_count
-            or bipartite[1].min() < 0
-            or bipartite[1].max() >= atom_count
+            if values[name].shape != neighbor_shape:
+                raise ValueError(f"{name} must have shape [M,Jmax]")
+        atom_neighbors = values["surface_atom_neighbors"]
+        atom_mask      = values["surface_atom_mask"]
+        if np.any(atom_mask.sum(axis=1) == 0) or np.any(atom_neighbors[~atom_mask] != -1):
+            raise ValueError("surface atom masks and sentinels are inconsistent")
+        if np.any(atom_neighbors[atom_mask] < 0) or np.any(
+            atom_neighbors[atom_mask] >= atom_count
         ):
-            raise ValueError("surface_atom_edge_index endpoints are invalid")
+            raise ValueError("surface atom neighbor is out of range")
+
+        mass         = values["diffusion_mass"]
+        eigenvalues  = values["diffusion_eigenvalues"]
+        eigenvectors = values["diffusion_eigenvectors"]
+        gradient_index = values["diffusion_gradient_index"]
+        if mass.shape != (surface_count,) or np.any(mass <= 0.0):
+            raise ValueError("diffusion_mass must be positive with shape [M]")
+        if eigenvectors.shape != (surface_count, len(eigenvalues)):
+            raise ValueError("diffusion eigenvectors must have shape [M,Q]")
+        if gradient_index.ndim != 2 or gradient_index.shape[0] != 2:
+            raise ValueError("diffusion_gradient_index must have shape [2,G]")
+        for name in ("diffusion_gradient_x", "diffusion_gradient_y"):
+            if values[name].shape != (gradient_index.shape[1],):
+                raise ValueError(f"{name} must have shape [G]")
 
         output: dict[str, Tensor | str] = {
             "atomic_numbers": torch.from_numpy(values["atomic_numbers"].astype(np.int64)),
             "residue_type_ids": torch.from_numpy(values["residue_type_ids"].astype(np.int64)),
             "atom_edge_index": torch.from_numpy(atom_edges.astype(np.int64)),
-            "atom_edge_types": torch.from_numpy(relation_mask.astype(np.int64) - 1),
+            "atom_edge_is_covalent": torch.from_numpy(is_covalent.astype(np.bool_)),
+            "atom_edge_spatial_rank": torch.from_numpy(spatial_rank.astype(np.int64)),
             "surface_curvatures": torch.from_numpy(curvatures.astype(np.float32)),
-            "surface_edge_index": torch.from_numpy(surface_edges.astype(np.int64)),
-            "surface_atom_edge_index": torch.from_numpy(bipartite.astype(np.int64)),
+            "surface_atom_neighbors": torch.from_numpy(atom_neighbors.astype(np.int64)),
+            "surface_atom_distances": torch.from_numpy(
+                values["surface_atom_distances"].astype(np.float32)
+            ),
+            "surface_atom_normal_offsets": torch.from_numpy(
+                values["surface_atom_normal_offsets"].astype(np.float32)
+            ),
+            "surface_atom_tangential_distances": torch.from_numpy(
+                values["surface_atom_tangential_distances"].astype(np.float32)
+            ),
+            "surface_atom_mask": torch.from_numpy(atom_mask.astype(np.bool_)),
             "surface_area_weights": torch.from_numpy(weights.astype(np.float32)),
+            "diffusion_mass": torch.from_numpy(mass.astype(np.float32)),
+            "diffusion_eigenvalues": torch.from_numpy(eigenvalues.astype(np.float32)),
+            "diffusion_eigenvectors": torch.from_numpy(eigenvectors.astype(np.float32)),
+            "diffusion_gradient_index": torch.from_numpy(gradient_index.astype(np.int64)),
+            "diffusion_gradient_x": torch.from_numpy(
+                values["diffusion_gradient_x"].astype(np.float32)
+            ),
+            "diffusion_gradient_y": torch.from_numpy(
+                values["diffusion_gradient_y"].astype(np.float32)
+            ),
             "target": torch.tensor(float(label), dtype=torch.float32),
         }
-        for name in ("surface_positions", "surface_normals"):
+        for name in (
+            "surface_positions",
+            "surface_normals",
+            "surface_neighbors",
+            "surface_neighbor_distances",
+            "surface_neighbor_mask",
+        ):
             if name in values:
-                output[name] = torch.from_numpy(values[name].astype(np.float32))
-        if annotation_path is not None:
-            base_digest = hashlib.sha256(path.read_bytes()).hexdigest()
+                dtype = np.int64 if name == "surface_neighbors" else (
+                    np.bool_ if name == "surface_neighbor_mask" else np.float32
+                )
+                output[name] = torch.from_numpy(values[name].astype(dtype))
+        if annotation_path is not None and (
+            self.include_surface_targets or self.include_diagnostics
+        ):
             with np.load(annotation_path, allow_pickle=False) as annotation:
                 annotation_required = {
                     "surface_target_hard",
@@ -326,8 +476,11 @@ class WisdomDataset(Dataset[Mapping[str, Tensor | str]]):
                     raise ValueError(
                         f"{annotation_path.name} is missing arrays: {sorted(missing_annotation)}"
                     )
-                if str(annotation["base_npz_sha256"].item()) != base_digest:
-                    raise ValueError("annotation sidecar fingerprint does not match the base NPZ")
+                # Dataset publication already verifies immutable asset checksums and preprocessing
+                # validates this sidecar fingerprint. Rehashing a multi-megabyte NPZ on every
+                # loader process/epoch would add I/O without strengthening the managed placement.
+                if annotation["base_npz_sha256"].shape != ():
+                    raise ValueError("annotation base fingerprint must be a scalar")
                 for name in annotation_required - {
                     "base_npz_sha256",
                     "surface_target_hard_sensitivity",
@@ -349,21 +502,26 @@ class WisdomDataset(Dataset[Mapping[str, Tensor | str]]):
                         "surface_valid_mask": torch.from_numpy(
                             annotation["surface_valid_mask"].astype(np.bool_)
                         ),
-                        "surface_target_soft": torch.from_numpy(
-                            annotation["surface_target_soft"].astype(np.float32)
-                        ),
-                        "surface_distance_to_dna": torch.from_numpy(
-                            annotation["surface_distance_to_dna"].astype(np.float32)
-                        ),
-                        "surface_distance_valid": torch.from_numpy(
-                            annotation["surface_distance_valid"].astype(np.bool_)
-                        ),
-                        "surface_target_hard_sensitivity": torch.from_numpy(
-                            sensitivity.astype(np.int64)
-                        ),
-                        "sensitivity_gaps": torch.from_numpy(gaps.astype(np.float32)),
                     }
                 )
+                if self.include_diagnostics:
+                    output.update(
+                        {
+                            "surface_target_soft": torch.from_numpy(
+                                annotation["surface_target_soft"].astype(np.float32)
+                            ),
+                            "surface_distance_to_dna": torch.from_numpy(
+                                annotation["surface_distance_to_dna"].astype(np.float32)
+                            ),
+                            "surface_distance_valid": torch.from_numpy(
+                                annotation["surface_distance_valid"].astype(np.bool_)
+                            ),
+                            "surface_target_hard_sensitivity": torch.from_numpy(
+                                sensitivity.astype(np.int64)
+                            ),
+                            "sensitivity_gaps": torch.from_numpy(gaps.astype(np.float32)),
+                        }
+                    )
         output["identifier"] = identifier
         output["tier"]       = tier
         return output

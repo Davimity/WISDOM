@@ -15,14 +15,13 @@ from wisdom.preprocessing.structure.chemical_data import (
     STANDARD_RESIDUE_BONDS,
     WATER_RESIDUES,
 )
-from wisdom.preprocessing.structure.dataclasses.Atom import Atom
-from wisdom.preprocessing.structure.dataclasses.Protein import Protein
-from wisdom.preprocessing.structure.dataclasses.Residue import Residue
-from wisdom.preprocessing.structure.enums.AtomRole import AtomRole
-from wisdom.preprocessing.structure.enums.BondSource import BondSource
-from wisdom.preprocessing.structure.enums.BondType import BondType
-from wisdom.preprocessing.structure.enums.ConnectionType import ConnectionType
-from wisdom.preprocessing.structure.enums.Relation import Relation
+from wisdom.utils.structure.models.Atom import Atom
+from wisdom.utils.structure.models.Protein import Protein
+from wisdom.utils.structure.models.Residue import Residue
+from wisdom.utils.structure.enums.AtomRole import AtomRole
+from wisdom.utils.structure.enums.BondType import BondType
+from wisdom.utils.structure.enums.BondSource import BondSource
+from wisdom.utils.structure.enums.ConnectionType import ConnectionType
 
 Bond = tuple[BondType, BondSource, float]
 
@@ -30,27 +29,36 @@ Bond = tuple[BondType, BondSource, float]
 class AtomicStructureBuilder:
     """Encode normalized atoms and construct one sparse multirelational topology."""
 
-    def __init__(self, radius: float) -> None:
+    def __init__(
+        self,
+        radius        : float,
+        max_neighbors : int = 32,
+    ) -> None:
         """Set the Euclidean cutoff used for spatial atomic neighbors.
 
         Args:
             radius: Positive spatial graph radius in ångströms. Covalent pairs are retained even
                 when their Euclidean distance exceeds this value.
+            max_neighbors: Maximum ranked spatial neighbors contributed by each atom. The stored
+                union may have larger undirected degree because either endpoint may select a pair.
 
         Raises:
             ValueError: If ``radius`` is not strictly positive.
         """
-        if radius <= 0:
-            raise ValueError("atom radius must be positive")
+        if radius <= 0 or max_neighbors < 1:
+            raise ValueError("atom radius and maximum neighbor count must be positive")
 
-        self.radius = radius
+        self.radius        = radius
+        self.max_neighbors = max_neighbors
 
     def build(self, protein: Protein) -> dict[str, np.ndarray]:
         """Encode atom features and the union of spatial and reconstructed covalent edges.
 
-        Spatial pairs satisfy ``||x_i-x_j||_2 <= radius``. The final set is the sorted union
-        ``E_spatial union E_covalent`` with each undirected pair stored once as ``i < j``. Relation
-        bit flags preserve whether a pair is spatial, covalent, or both.
+        Atom ``i`` contributes at most ``max_neighbors`` nearest spatial candidates satisfying
+        ``||x_i-x_j||_2 <= radius``. An undirected pair receives the smaller endpoint-local rank
+        when both atoms select it. The final set is the sorted union ``E_spatial union E_covalent``
+        with each pair stored once as ``i < j``. A zero spatial rank denotes covalent-only; all
+        covalent pairs survive every runtime ``K``.
 
         Args:
             protein: Parser-independent ownership hierarchy with consecutive atom indices and
@@ -102,14 +110,10 @@ class AtomicStructureBuilder:
                 role = AtomRole.SIDECHAIN
             roles.append(role)
 
-        # A KD-tree enumerates spatial pairs without constructing a dense distance matrix.
+        # A bounded KD-tree query ranks local candidates without constructing an N-by-N matrix.
         bonds         = self._bonds(protein, positions)
-        spatial_pairs = cKDTree(positions).query_pairs(self.radius, output_type="ndarray")
-        spatial       = {
-            tuple(map(int, pair))
-            for pair in np.asarray(spatial_pairs, dtype=np.int32).reshape(-1, 2)
-        }
-        pairs      = sorted(spatial | set(bonds))
+        spatial_ranks = self._spatial_ranks(positions)
+        pairs         = sorted(set(spatial_ranks) | set(bonds))
         edge_index = (
             np.asarray(pairs, dtype=np.int32).T if pairs else np.empty((2, 0), dtype=np.int32)
         )
@@ -120,7 +124,8 @@ class AtomicStructureBuilder:
         )
 
         # Allocate one compact feature vector per union edge.
-        relation     = np.zeros(len(pairs), dtype=np.uint8)
+        is_covalent  = np.zeros(len(pairs), dtype=np.bool_)
+        spatial_rank = np.zeros(len(pairs), dtype=np.uint16)
         bond_types   = np.full(len(pairs), BondType.NONE, dtype=np.uint8)
         bond_orders  = np.zeros(len(pairs), dtype=np.float32)
         bond_sources = np.full(len(pairs), BondSource.NONE, dtype=np.uint8)
@@ -132,10 +137,9 @@ class AtomicStructureBuilder:
 
         # Fill relation semantics and topological context in deterministic pair order.
         for index, pair in enumerate(pairs):
-            if pair in spatial:
-                relation[index] |= Relation.SPATIAL
+            spatial_rank[index] = spatial_ranks.get(pair, 0)
             if pair in bonds:
-                relation[index] |= Relation.COVALENT
+                is_covalent[index] = True
                 bond_type, source, bond_confidence = bonds[pair]
                 bond_types[index]   = bond_type
                 bond_orders[index]  = bond_type.order
@@ -169,7 +173,8 @@ class AtomicStructureBuilder:
             "residue_names": np.asarray([entry[1].name for entry in entries], dtype="U8"),
             "atom_edge_index": edge_index,
             "atom_edge_distance": distances.astype(np.float32),
-            "atom_edge_relation_mask": relation,
+            "atom_edge_is_covalent": is_covalent,
+            "atom_edge_spatial_rank": spatial_rank,
             "atom_edge_bond_type": bond_types,
             "atom_edge_bond_order": bond_orders,
             "atom_edge_bond_source": bond_sources,
@@ -178,6 +183,36 @@ class AtomicStructureBuilder:
             "atom_edge_same_chain": same_chain,
             "atom_edge_residue_separation": separation,
         }
+
+    def _spatial_ranks(self, positions: np.ndarray) -> dict[tuple[int, int], int]:
+        """Rank a bounded deterministic spatial neighborhood around every atom.
+
+        Args:
+            positions: ``float64 [N,3]`` atom coordinates in ångströms.
+
+        Returns:
+            Undirected atom pairs mapped to their minimum one-based endpoint-local rank. Each atom
+            contributes at most ``max_neighbors`` pairs inside ``radius``; distance and then atom
+            index resolve equal-distance ordering deterministically.
+        """
+        atom_count = len(positions)
+        tree       = cKDTree(positions)
+        neighbors  = tree.query_ball_point(positions, self.radius, workers=1)
+        ranks: dict[tuple[int, int], int] = {}
+
+        for source in range(atom_count):
+            candidates = [
+                (float(np.linalg.norm(positions[source] - positions[target])), int(target))
+                for target in neighbors[source]
+                if target != source
+            ]
+            candidates.sort(key=lambda value: (value[0], value[1]))
+
+            for rank, (_, target) in enumerate(candidates[: self.max_neighbors], start=1):
+                pair = (source, target) if source < target else (target, source)
+                ranks[pair] = min(rank, ranks.get(pair, rank))
+
+        return ranks
 
     def _bonds(
         self,

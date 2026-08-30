@@ -7,7 +7,7 @@ channels:                    # Ordered package repositories resolved by Conda/Ma
 dependencies:                # Base non-PyPI tools required before editable WISDOM installation.
   - python=3.11              # Supported interpreter with current scientific binary availability.
   - pip                      # Installs local LambdaForge/WISDOM checkouts in editable mode.
-  - biopython>=1.84          # ProteinAnalysis sequence descriptors used by DatasetDesign.
+  - biopython>=1.84          # ProteinAnalysis sequence descriptors used by Selection.
   - foldseek                 # Full-RAW protein-structure similarity and leakage edges.
   - mmseqs2                  # Full-RAW protein-sequence similarity and leakage edges.
 
@@ -15,5 +15,7 @@ dependencies:                # Base non-PyPI tools required before editable WISD
 # name may be any valid Conda environment name; install.sh deliberately expects "wisdom" here.
 # channels are searched in the declared order. Python 3.10+ is supported by WISDOM, while 3.11 is
 # pinned for this reproducible environment. pip, Biopython, Foldseek, and MMseqs2 are mandatory;
+# LambdaForge itself is installed through pyproject.toml with the minimum version >=0.13.0 and is
+# intentionally not duplicated as a Conda dependency here.
 # their transitive versions are solved by the two channels and exact installed versions are stored
 # in each LambdaForge Work environment/provenance record.

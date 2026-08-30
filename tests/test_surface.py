@@ -91,5 +91,5 @@ def test_molecular_surface_is_deterministic_and_compact() -> None:
     assert 100 < len(first["surface_positions"]) < 1000
     for name in first:
         assert np.array_equal(first[name], second[name])
-    assert first["surface_edge_index"].shape[0] == 2
+    assert "surface_edge_index" not in first
     assert first["surface_area_weights"].dtype == np.float32

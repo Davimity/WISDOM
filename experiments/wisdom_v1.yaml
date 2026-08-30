@@ -1,39 +1,74 @@
-# Search the basic WISDOM v1 backbone while keeping protein aggregation fixed to MAX.
+# Search only the schema-3 bounded-graph + DiffusionNet WISDOM v1 backbone with fixed MAX pooling.
 name: wisdom-v1                                      # Stable LambdaForge experiment name.
-run: wisdom.Training.Training                       # LambdaForge 0.12 train/validate/test Work class.
+run: wisdom.Training.Training                       # LambdaForge 0.13 train/validate/test Work class.
 
 with:                                                # Fixed Training.run(...) arguments.
   dataset:                                           # Resolve one immutable managed placement.
-    dataset: wisdom-dna@4                            # Designed leakage-safe benchmark release.
-  model_version: 1                                  # Select the v1 fixed-MAX hypothesis.
+    dataset: wisdom-dna@5                            # Schema-3 bounded topology/Diffusion release.
+  model_version: 1                                  # Require bounded atomic topology and DiffusionNet.
   subset: full                                      # Use all selected training members.
   pooling_type: max                                 # Required invariant for v1.
-  batch_size: 2                                     # Variable-size proteins per optimizer step.
-  epochs: 100                                       # Maximum training epochs per candidate.
+  batch_size: 8                                     # Bound graph activations while retaining GPU work.
+  epochs: 500                                       # Safety ceiling; patience normally stops earlier.
+  patience: 30                                      # Stop after thirty non-improving validation epochs.
+  minimum_delta: 0.001                              # Require 0.1 percentage-point AUPRC improvement.
+  precision: auto                                   # Use BF16 dense CUDA layers and FP32 sparse derivatives.
+  surface_atom_radius: 6.0                          # Normalize transfer geometry by its stored Å cutoff.
+  surface_chunk_size: 8192                          # Bound gathered atom activations to 8192 points.
+  atomic_message_chunk_size: 65536                  # Bound each LambdaForge RGCN message chunk.
+  surface_metrics: true                             # Diagnose local GT without affecting optimization.
   data_workers: 0                                   # Loader subprocesses inside each run.
 
 # Fixed Training.run option reference:
 # dataset has no default. model_version=1, subset="full", pooling_type="max", batch_size=2,
-# epochs=100, data_workers=0, and seed=0. LambdaForge supplies each seed below. Valid subsets are
-# "full" or names published in member metadata, for example "replicate-00/train-25".
+# epochs=100, patience=30, minimum_delta=0.001, precision="auto", surface_metrics=true,
+# data_workers=0, and seed=0.
+# LambdaForge supplies each seed below. Valid subsets are "full" or names published in member
+# metadata, for example "replicate-00/train-25". patience is positive; minimum_delta is
+# non-negative; precision accepts "auto", "bfloat16", "float16", or "float32".
+# surface_atom_radius=6.0 Å, surface_chunk_size=8192, and atomic_message_chunk_size=65536.
+# V1 rejects any non-MAX pooling, non-DiffusionNet surface encoder, or structural dataset older
+# than schema 3.0; it has no fallback to the retired surface-edge graph model. surface_metrics=false
+# avoids evaluation sidecars; auto uses BF16 dense layers on capable CUDA GPUs while keeping the
+# unsupported sparse surface derivatives in FP32, and otherwise uses FP32 throughout.
 
-seeds: [7, 17, 27]                                  # Repeat candidates to expose seed variance.
+seeds: [4, 7, 32, 54, 65, 94, 109, 124, 142, 167]    # Ordered seed budget allocated by successive halving.
 
 search:                                              # LambdaForge samples basic v1 choices.
-  trials: 40                                         # Draw forty unique random numeric variants.
+  strategy: adaptive                                 # Promote candidates using validation evidence.
+  trials: 100                                        # Search budget; HPO ranks but cannot choose this limit.
+  runs_per_gpu: 1                                    # Isolate one independent training on each GPU.
+  max_parallel: 2                                    # Run at most two candidates at the same time.
+  min_seeds: 1                                       # Evaluate every candidate with one seed initially.
+  reduction_factor: 2                                # Retain approximately half after each HPO round.
+  confidence: 1.0                                    # Penalize uncertain means by one standard error.
+  early_stopping:                                    # Prune clearly weak concurrent candidates safely.
+    enabled: true                                    # Ask cooperative custom training Runs to stop.
+    min_step: 30                                     # Compare learning curves only after thirty epochs.
+
   hidden_dim: {values: [64, 128, 256]}               # Shared atom/surface latent width.
   embedding_dim: {values: [16, 32, 64]}              # Element/residue embedding width.
   use_residue_type: {values: [true, false]}          # Test whether residue identity helps.
   atomic_layers: {values: [1, 2, 3]}                 # Atomic message-passing depth.
   projection_depth: {values: [1, 2, 3]}              # Atom-to-surface MLP depth.
-  surface_layers: {values: [1, 2, 3]}                # Surface message-passing depth.
+  surface_layers: {values: [1, 2, 3]}                # Number of intrinsic DiffusionNet feature blocks.
+  atom_spatial_k: {values: [8, 12, 16, 24]}          # Activate a nested spatial atom topology.
+  surface_atom_k: {values: [8, 12, 16, 24]}          # Select a prefix of nearest atoms per point.
+  diffusion_spectral_modes: {values: [64, 128]}      # Trade surface frequency detail for cost.
   dropout: {range: [0.0, 0.5]}                       # Continuous dropout probability.
   learning_rate: {range: [0.00001, 0.003], scale: log} # AdamW learning rate.
   weight_decay: {range: [0.000001, 0.01], scale: log}  # AdamW decoupled decay.
 
 # Search option reference:
+# With an objective and multiple seeds, strategy defaults to "adaptive"; "exhaustive" executes
+# every variant/seed pair serially. runs_per_gpu=1, max_parallel=null, min_seeds=1,
+# reduction_factor=2, confidence=1.0, and early_stopping={enabled: true, min_step: 3} are
+# LambdaForge defaults. This experiment selects max_parallel=2 and delays within-Run comparisons
+# until epoch 30; successive halving also allocates more seeds only to candidates supported by
+# validation AUPRC. early_stopping accepts a boolean or {enabled: bool, min_step: integer >= 1}.
 # hidden_dim=128, embedding_dim=32, use_residue_type=true, atomic_layers=2,
-# projection_depth=1, surface_layers=2, dropout=0.2, learning_rate=3e-4, and
+# projection_depth=1, surface_layers=2, atom_spatial_k=16, surface_atom_k=16,
+# diffusion_spectral_modes=128, dropout=0.2, learning_rate=3e-4, and
 # weight_decay=1e-4 when omitted. Widths/depths are positive, dropout is in [0,1), learning rate
 # is positive, and weight decay is non-negative. values enumerates categories; range samples a
 # numeric interval; scale=log samples multiplicatively rather than linearly.
@@ -42,14 +77,16 @@ objective:                                           # Never optimize on held-ou
   metric: val_auprc                                  # Validation precision–recall area.
   mode: max                                          # Larger validation AUPRC is better.
 
-resources:                                           # Per-training allocation.
-  gpu: 1                                             # Exactly one accelerator per run.
-  cpu: 4                                             # Data loading and host orchestration.
-  memory: 32GiB                                      # Host-memory reservation.
-  time: 24h                                          # Scheduler wall-time limit.
+resources:                                           # Fixed outer allocation for the complete study.
+  gpu: 2                                             # Expose both GPUs; each child receives exactly one.
+  cpu: 16                                            # Total host CPU allocation, divided across active Runs.
+  memory: 32GiB                                      # Total host RAM allocation, divided across active Runs.
+  time: 168h                                         # Seven-day ceiling for the complete adaptive study.
 
-# LambdaForge 0.12 study options: seeds defaults to one unseeded Run; search.trials is required for
-# numeric ranges; objective accepts metric plus mode=max|min. Search/seed Runs for one Work execute
-# serially inside its fixed allocation, so the removed max_parallel field is unnecessary.
+# LambdaForge 0.13 study options: seeds defaults to one unseeded Run; search.trials is required for
+# numeric ranges; objective accepts metric plus mode=max|min. Adaptive search executes isolated
+# spawned Runs inside the fixed outer allocation. Two GPUs times runs_per_gpu=1 gives two concurrent
+# trainings; each receives eight of the sixteen CPUs and 16 GiB of the 32 GiB host-memory request.
+# gpu_memory is optional at runs_per_gpu=1 and mandatory only when packing several Runs per GPU.
 # Resource options are cpu>=1, gpu>=0, memory/gpu_memory/storage=<size>, time=<duration>, and
 # processes<=cpu. Work/Attempt output paths are framework-owned; output_root is not configurable.

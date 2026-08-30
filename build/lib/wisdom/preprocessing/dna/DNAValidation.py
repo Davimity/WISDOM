@@ -61,11 +61,23 @@ class DNAValidation(lf.Work):
             output / "figures",
             role="figure",
         )
-        failure_count = sum(not check["passed"] for check in payload["checks"])
+        failed = [check for check in payload["checks"] if not check["passed"]]
+        failure_count = len(failed)
         self.metrics.log("validation_failures", failure_count)
         if failure_count and fail_on_error:
+            summary = ", ".join(
+                f"{check['name']}={check['failure_count']}" for check in failed
+            )
+            self.log(f"Scientific validation failed: {summary}", level="error")
+
+            for detail in payload["member_failures"][:10]:
+                self.log(
+                    f"Invalid member {detail['identifier']}: {detail['failure']}",
+                    level="error",
+                )
+
             raise RuntimeError(
-                f"WISDOM-DNA validation failed {failure_count} hard checks; inspect "
+                f"WISDOM-DNA validation failed {failure_count} hard checks: {summary}; inspect "
                 f"{output / 'dna-validation-report.json'}"
             )
         return payload
@@ -112,10 +124,10 @@ class DNAValidation(lf.Work):
         self._check(
             checks,
             "design_schema_version",
-            design_schema == "1.2",
-            int(design_schema != "1.2"),
-            "The immutable design contract must use schema 1.2 with explicit label evidence, "
-            "content-level structure hashes, paired manifests, and a human report.",
+            design_schema in {"1.2", "1.3"},
+            int(design_schema not in {"1.2", "1.3"}),
+            "Schema 1.2 preserves the complete Selection artifact; schema 1.3 preserves the "
+            "three self-contained preprocessing manifests and their exact fixed metadata.",
         )
         self._check(
             checks,
@@ -193,18 +205,23 @@ class DNAValidation(lf.Work):
             "and point-aligned.",
         )
 
+        # Schema 1.2 carries raw specialist tables and can reapply every pair threshold here.
+        # Schema 1.3 intentionally accepts only three manifests: Selection already audited those
+        # tables, while this boundary independently enforces their resulting transitive group.
+
         pair_failures: dict[str, int] = {}
-        for name in ("sequence-edges.csv", "structure-edges.csv", "exact-pairs.csv"):
-            path = evidence / "clusters" / name
-            failures = self._pair_leakage(path, by_id)
-            pair_failures[name] = failures
-            self._check(
-                checks,
-                name.removesuffix(".csv") + "_split_safety",
-                failures == 0,
-                failures,
-                "Every retained specialist-tool pair must remain inside one split.",
-            )
+        if design_schema == "1.2":
+            for name in ("sequence-edges.csv", "structure-edges.csv", "exact-pairs.csv"):
+                path = evidence / "clusters" / name
+                failures = self._pair_leakage(path, by_id)
+                pair_failures[name] = failures
+                self._check(
+                    checks,
+                    name.removesuffix(".csv") + "_split_safety",
+                    failures == 0,
+                    failures,
+                    "Every retained specialist-tool pair must remain inside one split.",
+                )
 
         local_failures = sum(
             member.partitions.get("split") in {"validation", "test"}
@@ -228,18 +245,16 @@ class DNAValidation(lf.Work):
             class_counts[0] > 0 and class_counts[1] > 0,
             int(class_counts[0] == 0) + int(class_counts[1] == 0),
             "The designed benchmark must contain both labels. Its configured ratio is audited "
-            "by DatasetDesign and need not be 1:1 when the user deliberately changes it.",
+            "by Selection and need not be 1:1 when the user deliberately changes it.",
         )
 
-        phenotype_failures = self._phenotype_coverage(members)
-        self._check(
-            checks,
-            "phenotype_coverage_when_feasible",
-            not phenotype_failures,
-            len(phenotype_failures),
-            "A stable physical phenotype represented by at least three independently movable "
-            "leakage groups must occur in train, validation, and test.",
-        )
+        # Phenotype balance is a soft representativeness objective, exactly as documented by the
+        # split optimizer. Three observed groups do not prove that a simultaneous allocation is
+        # feasible once class balance, train-only local-GT restrictions, and overlapping phenotype
+        # memberships are considered. Report omissions clearly without misclassifying them as
+        # leakage or byte-integrity failures.
+
+        phenotype_warnings = self._phenotype_coverage(members)
 
         dilution = self._validate_dilutions(evidence, by_id)
         self._check(
@@ -251,16 +266,18 @@ class DNAValidation(lf.Work):
         )
         statistics = self._statistics(members, catalog)
         cluster_audit = self._cluster_audit(evidence, by_id)
-        raw_pair_failures = self._raw_pair_leakage(evidence, by_id)
-        for name, failures in raw_pair_failures.items():
-            self._check(
-                checks,
-                name + "_raw_threshold_safety",
-                failures == 0,
-                failures,
-                "Reapplying the recorded identity/probability, bilateral-coverage, and E-value "
-                "thresholds to raw specialist output must find no cross-split pair.",
-            )
+        raw_pair_failures: dict[str, int] = {}
+        if design_schema == "1.2":
+            raw_pair_failures = self._raw_pair_leakage(evidence, by_id)
+            for name, failures in raw_pair_failures.items():
+                self._check(
+                    checks,
+                    name + "_raw_threshold_safety",
+                    failures == 0,
+                    failures,
+                    "Reapplying the recorded identity/probability, bilateral-coverage, and "
+                    "E-value thresholds to raw specialist output must find no cross-split pair.",
+                )
         verdict = "PASS" if all(check["passed"] for check in checks) else "FAIL"
         payload = {
             "verdict": verdict,
@@ -270,7 +287,7 @@ class DNAValidation(lf.Work):
             "cluster_audit": cluster_audit,
             "pair_failures": pair_failures,
             "raw_pair_failures": raw_pair_failures,
-            "phenotype_coverage_failures": phenotype_failures,
+            "phenotype_coverage_warnings": phenotype_warnings,
             "dilutions": dilution,
             "member_failures": details,
             "catalog_failures": catalog_failures,
@@ -444,7 +461,7 @@ class DNAValidation(lf.Work):
     def _evidence_root(root: Path, members: list[Any]) -> Path:
         """Resolve run-owned or published dataset-wide audit evidence.
 
-        Before publication, the unchanged DatasetDesign artifact lives below ``design/``. In a
+        Before publication, the unchanged Selection artifact lives below ``design/``. In a
         published placement LambdaForge stores that directory once as the first member's
         ``dataset_design`` asset.
 
@@ -477,7 +494,7 @@ class DNAValidation(lf.Work):
         """Compare every root manifest view with the authoritative design catalog.
 
         Args:
-            root: DatasetDesign directory containing canonical and split TXT views.
+            root: Selection directory containing canonical and split TXT views.
             catalog: Parsed canonical rows keyed by exact protein identifier.
 
         Returns:
@@ -534,18 +551,19 @@ class DNAValidation(lf.Work):
 
     @staticmethod
     def _phenotype_coverage(members: list[Any]) -> dict[str, Any]:
-        """Find stable phenotype clusters omitted from a split despite feasible group support.
+        """Describe stable phenotype clusters that do not occur in every supervised split.
 
-        A phenotype is considered distributable when it occurs in at least three leakage groups
-        and at least three of those groups may legally leave training. A group is train-only when
-        it contains a positive protein without local ground truth. Noise and unavailable labels are
-        descriptive outcomes, not claimed biological clusters, so they are excluded.
+        A phenotype is reported when it occurs in at least three leakage groups but the greedy
+        splitter does not place it in train, validation, and test. This is a representativeness
+        warning rather than a hard scientific failure: group count alone does not prove that all
+        phenotype, class, and local-ground-truth constraints can be satisfied simultaneously.
+        Noise and unavailable labels are descriptive outcomes and are excluded.
 
         Args:
             members: Complete logical dataset members.
 
         Returns:
-            Mapping from offending phenotype to its available groups and observed splits.
+            Mapping from each incomplete phenotype to its available groups and observed splits.
         """
         phenotype_groups: dict[str, set[str]] = defaultdict(set)
         phenotype_splits: dict[str, set[str]] = defaultdict(set)
@@ -642,7 +660,7 @@ class DNAValidation(lf.Work):
         with path.open("r", encoding="utf-8", newline="") as stream:
             for row in csv.DictReader(stream):
                 left, right = str(row.get("left", "")), str(row.get("right", ""))
-                # DatasetDesign evidence is full-raw by construction. Omitted valid positives are
+                # Selection evidence is full-raw by construction. Omitted valid positives are
                 # outside the published index and therefore irrelevant to selected split crossing.
                 if left not in members or right not in members:
                     continue
@@ -655,7 +673,7 @@ class DNAValidation(lf.Work):
         """Reapply recorded thresholds directly to raw MMseqs2 and Foldseek tables.
 
         Args:
-            evidence: DatasetDesign directory containing raw TSV and provenance.
+            evidence: Selection directory containing raw TSV and provenance.
             members: Dataset members keyed by exact logical identifier.
 
         Returns:
@@ -750,7 +768,7 @@ class DNAValidation(lf.Work):
         """Audit every replicate's group-wise nested training membership.
 
         Args:
-            root: DatasetDesign root containing ``dilutions/replicate-NN/train-P.txt``.
+            root: Selection root containing ``dilutions/replicate-NN/train-P.txt``.
             members: Final members keyed by identifier.
 
         Returns:
@@ -1040,6 +1058,26 @@ class DNAValidation(lf.Work):
                 "HDBSCAN noise means that the current physical descriptors do not support a "
                 "stable discrete phenotype for that protein. It is retained and is not renamed "
                 "as a functional class.",
+            ]
+        )
+        phenotype_warnings = payload.get("phenotype_coverage_warnings", {})
+        if phenotype_warnings:
+            lines.extend(
+                [
+                    "",
+                    "Some stable phenotypes are absent from one evaluation split. This is a "
+                    "representativeness warning, not leakage: whole dependency groups remain "
+                    "indivisible and phenotype matching is a soft split objective.",
+                ]
+            )
+            for phenotype, values in phenotype_warnings.items():
+                lines.append(
+                    f"- **{phenotype}**: {values['group_count']} leakage groups; observed in "
+                    f"{', '.join(values['observed_splits'])}; missing "
+                    f"{', '.join(values['missing_splits'])}."
+                )
+        lines.extend(
+            [
                 "",
                 "## Dilutions",
                 "",

@@ -1,47 +1,219 @@
-# Geometrically preprocess one already completed WISDOM-DNA design and publish its immutable data.
-# Run experiments/dna_design.yaml first whenever data/dna/design does not yet exist. This Work does
-# not execute DatasetDesign, MMseqs2, Foldseek, balancing, clustering, or split construction again.
-name: wisdom-dna-preprocess                           # Stable LambdaForge Work identity.
-run: wisdom.preprocessing.Preprocessing.Preprocessing # Geometry, annotation, validation, and publication only.
+# Select, preprocess, and visualize the benchmark through three independently skippable Works.
+name: wisdom-dna-preprocess                                    # Stable complete preprocessing workflow.
 
-with:                                                # Arguments passed directly to Preprocessing.run(...).
-  design: {file: ../data/dna/design}                 # Existing portable design directory produced by dna_design.yaml.
-  dataset_name: wisdom-dna                            # Stable LambdaForge Registry family.
-  dataset_version: "4"                               # Immutable release; bump for intended content changes.
-  workers: 36                                        # One independent protein process per reserved CPU.
-  requests_per_second: 60.0                           # Aggregate RCSB request-start ceiling across threads.
-  retries: 5                                         # Retry each missing structure five times after failure.
-  progress_log_seconds: 120.0                        # Emit one liveness log every two minutes during parallel phases.
-  surface_resolution: 1.0                            # Target surface point spacing in Å.
-  probe_radius: 1.4                                  # Solvent probe radius in Å.
-  atom_radius: 6.0                                   # Sparse atom-edge cutoff in Å.
-  atom_surface_radius: 6.0                           # Sparse atom-to-surface edge cutoff in Å.
-  curvature_scales: [1.0, 2.0, 3.0, 5.0, 10.0]                       # Curvature fit radii in resolution units.
-  positive_gap: 1.4                                  # Largest confidently DNA-contacting gap in Å.
-  negative_gap: 3.0                                  # Smallest confidently non-contacting gap in Å.
-  sensitivity_gaps: [1.0, 1.4, 2.0]                  # Evaluation-only positive cutoffs in Å.
-resources:                                           # Geometry/annotation/publication reservation.
-  cpu: 36                                            # Exact ceiling checked against workers.
-  memory: 128GiB                                     # Concurrent protein surfaces and validation.
-  storage: 150GiB                                    # Structures, NPZs, sidecars, and checkpoints.
-  time: 24h                                          # Preprocessing wall-time ceiling.
+steps:                                                          # LambdaForge runs these Works in order.
+  - name: select                                                # Fix population, leakage groups, and splits.
+    run: wisdom.preprocessing.dna.selection.Selection.Selection # Evidence-to-design Work.
+    with:                                                       # Arguments passed to Selection.run(...).
+      skip: true                                                # Reuse the declared design; do no selection work.
 
-# Preprocessing.run option reference:
-# design has no default and must be a complete DatasetDesign directory. Its train-labelled.txt,
-# validation-labelled.txt, and test-labelled.txt files use RCSB_CHAIN<TAB>0|1 and actively define
-# split membership/labels; catalog.csv supplies assembly, copy, structure-hash, DNA-contact, group,
-# phenotype, and provenance fields that cannot fit safely in a two-column TXT. Dilution manifests
-# below dilutions/replicate-NN use the same labelled format and become dataset views; preprocessing
-# always computes every canonical member once. dataset_name="wisdom-dna", dataset_version="4",
-# workers=36, requests_per_second=4.0, retries=5, progress_log_seconds=120.0,
-# surface_resolution=1.0 Å, probe_radius=1.4 Å, atom_radius=6.0 Å,
-# atom_surface_radius=6.0 Å, curvature_scales=(2.5,5.0), positive_gap=1.4 Å,
-# negative_gap=3.0 Å, and sensitivity_gaps=(1.0,1.4,2.0) are true defaults. workers is positive
-# and <=resources.cpu; geometry radii/scales are positive (probe non-negative), gaps are
-# non-negative, and negative_gap must exceed positive_gap. requests_per_second must be finite
-# and positive; retries is a non-negative integer and counts attempts after the first request;
-# progress_log_seconds must be finite and positive and changes log cadence, not scientific arrays.
+      # Large typed directories use LambdaForge's mirror contract: local and remote bytes must
+      # match exactly. After a remote Selection, copy its complete design back locally once before
+      # using this reuse mode. Stage the copy under another name and rename it only after transfer;
+      # never submit while files are still arriving. Timestamps do not affect the fingerprint.
+      # existing_design: null                                    # No design path is staged for visualization.
+      existing_design: {file: ../data/dna/design}               # Preprocess-only mode: forward this prior design.
 
-# LambdaForge 0.12 resolves {file: ../data/dna/design} relative to this YAML, fingerprints the
-# complete directory, and stages it on remote executions. The Work creates the Dataset entity in
-# Python through self.outputs.dataset(...); no YAML dataset/stage/output schema is required.
+      # raw_path: {file: ../data/dna/raw/raw.jsonl}              # Rebuild mode: immutable source evidence.
+      raw_path: null                                             # Reuse mode does not stage or read RAW evidence.
+      workers: 36                                               # Concurrent RCSB jobs and tool threads.
+      requests_per_second: 60.0                                 # Aggregate RCSB request-start ceiling.
+      retries: 5                                                # Extra attempts after one failed request.
+      output_directory: ../data/dna/design                      # Publish beside experiments/, under data/dna/.
+      overwrite_output: true                                    # Atomically replace that copy after success.
+
+      sequence_identity: 0.30                                   # Minimum MMseqs2 aligned identity.
+      sequence_coverage: 0.80                                   # Minimum bidirectional sequence coverage.
+      sequence_evalue: 0.001                                    # Largest accepted MMseqs2 expectation value.
+      foldseek_probability: 0.90                                # Minimum Foldseek homology probability.
+      foldseek_tmscore: 0.75                                    # Minimum normalized TM-score in both directions.
+      foldseek_coverage: 0.80                                   # Minimum bidirectional structure coverage.
+      foldseek_evalue: 0.001                                    # Largest accepted Foldseek expectation value.
+      group_same_pdb: true                                      # Keep one deposition inside one leakage group.
+
+      maximum_resolution: 4.0                                  # Largest accepted experimental resolution in Å.
+      interface_region_distance: 8.0                           # Contact-region connection radius in Å.
+      global_min_cluster_size: 15                               # Smallest whole-protein HDBSCAN phenotype.
+      global_min_samples: 2                                     # Global HDBSCAN core-neighbour requirement.
+      interface_min_cluster_size: 20                            # Smallest positive-interface phenotype.
+      interface_min_samples: 5                                  # Interface HDBSCAN core-neighbour requirement.
+
+      positive_negative_ratio: 1.0                             # Select one positive per retained negative.
+      keep_all_negatives: true                                  # Preserve every eligible curated negative.
+      retain_core_positives: true                               # Prefer BTD-Core positives while balancing.
+      train_fraction: 0.70                                      # Target population fraction for fitting.
+      validation_fraction: 0.15                                 # Target fraction for development decisions.
+      test_fraction: 0.15                                       # Target fraction for final evaluation.
+      dilution_fractions: [1.0, 0.75, 0.50, 0.25, 0.10]         # Nested fractions of fixed training groups.
+      dilution_replicates: 1                                    # Deterministic alternative group orderings.
+      seed: 2026                                                 # Stable tie-breaking seed.
+
+      mmseqs_executable: mmseqs                                 # MMseqs2 executable name or absolute path.
+      foldseek_executable: foldseek                             # Foldseek executable name or absolute path.
+      verbose: false                                             # True logs every evidence and PDB item.
+
+      # Preprocessing-only reuse recipe; activate it when the second Work has skip=false:
+      # skip: true                                               # Reuse the complete design below.
+      # existing_design: {file: ../data/dna/design}              # Prior audited Selection directory.
+      # raw_path: null                                           # Avoid staging RAW evidence that is not read.
+
+      # To rebuild Selection, comment its three active reuse lines and uncomment this recipe:
+      # skip: false                                              # Recompute evidence, similarities, and splits.
+      # existing_design: null                                   # No prior design participates in the new result.
+      # raw_path: {file: ../data/dna/raw/raw.jsonl}              # Frozen evidence used by the reconstruction.
+    resources:                                                   # Operational reservation for this configured step.
+      cpu: 36                                                    # Selection is skipped; downstream preprocessing uses its outputs.
+      memory: 120GiB                                             # Upper bound retained by the current cluster recipe.
+      storage: 100GiB                                            # Upper bound retained by the current cluster recipe.
+      time: 24h                                                  # Complete step wall-time ceiling.
+
+    # Full Selection resource recipe; use it together with skip=false:
+    # resources:
+    #   cpu: 36                                                   # Matches workers and specialist-tool threads.
+    #   memory: 96GiB                                             # Assemblies, descriptors, and clustering.
+    #   storage: 100GiB                                           # Structures and specialist temporary tables.
+    #   time: 24h                                                 # Complete Selection wall-time ceiling.
+
+    # Selection.run option reference:
+    # skip=false. existing_design=null and raw_path=null are true defaults. existing_design is a
+    # complete prior Selection directory. With skip=true and existing_design=null the Work is fully
+    # disabled and declares no input or output. Supply existing_design only when a later active Work
+    # consumes its three labelled TXT files, catalog.csv, dilutions/, structures/, and index.
+    # raw_path is required only when skip=false. Keep existing_design=null while rebuilding so
+    # LambdaForge does not stage an unused and potentially large coordinate snapshot.
+    # workers=36, requests_per_second=60.0, retries=5, output_directory="../data/dna/design",
+    # overwrite_output=true, sequence_identity=.30, sequence_coverage=.80,
+    # sequence_evalue=1e-3, foldseek_probability=.90, foldseek_tmscore=.75,
+    # foldseek_coverage=.80, foldseek_evalue=1e-3, group_same_pdb=true,
+    # maximum_resolution=4.0, interface_region_distance=8.0, global_min_cluster_size=15,
+    # global_min_samples=2, interface_min_cluster_size=20, interface_min_samples=5,
+    # positive_negative_ratio=1.0, keep_all_negatives=true, retain_core_positives=true,
+    # train_fraction=.70, validation_fraction=.15, test_fraction=.15,
+    # dilution_fractions=(1,.75,.5,.25,.1), dilution_replicates=1, seed=2026,
+    # mmseqs_executable="mmseqs", foldseek_executable="foldseek", and verbose=false are true
+    # defaults. A skipped step performs no scientific computation. It registers the six paths only
+    # when existing_design is supplied; otherwise it returns without touching project data.
+
+  - name: preprocess                                            # Generate NPZ data and publish DatasetVersion.
+    run: wisdom.preprocessing.dna.preprocessing.Preprocessing.Preprocessing # Design-to-dataset Work.
+    with:                                                       # Arguments passed to Preprocessing.run(...).
+      skip: false                                                # Generate schema-3 archives and publish wisdom-dna@5.
+
+      # train: null                                                # No manifest is resolved while this Work is skipped.
+      # validation: null                                           # No validation manifest participates.
+      # test: null                                                 # No test manifest participates.
+      # catalog: null                                              # No design catalog is staged.
+      # dilutions: null                                            # No learning-curve views are staged.
+      # structures: null                                           # No coordinate snapshot is staged.
+
+      # Active preprocessing bindings: consume the complete design forwarded by Selection.
+      train: {from: select.train}                               # Exact train-labelled.txt from Selection.
+      validation: {from: select.validation}                    # Exact validation-labelled.txt from Selection.
+      test: {from: select.test}                                 # Exact test-labelled.txt from Selection.
+      catalog: {from: select.catalog}                           # Assembly/contact/group evidence.
+      dilutions: {from: select.dilutions}                       # Nested labelled training views.
+      structures: {from: select.structures}                     # Exact audited mmCIF snapshot.
+
+      dataset_name: wisdom-dna                                  # Stable LambdaForge Registry family.
+      dataset_version: "5"                                     # Schema-3 bounded topology/Diffusion release.
+
+      workers: 36                                               # Snapshot threads and spawned protein processes.
+      progress_log_seconds: 120.0                               # Parent liveness log every two minutes.
+      verbose: false                                             # True logs each protein start and completion.
+
+      surface_resolution: 1.0                                  # Target surface point spacing in Å.
+      probe_radius: 1.4                                         # Solvent-probe radius in Å.
+      atom_spatial_radius: 6.0                                  # Largest ranked spatial atom distance in Å.
+      atom_spatial_k_max: 32                                    # Persist up to 32 ranked candidates per atom.
+      surface_atom_radius: 6.0                                  # Largest atom-center transfer distance in Å.
+      surface_atom_k_max: 32                                    # Persist the nearest 32 atoms per surface point.
+      diffusion_spectral_modes_max: 128                         # Persist at most 128 lowest intrinsic modes.
+      surface_neighbor_k_max: 24                                # Bounded local surface table for operators/V3.
+      curvature_scales: [1.0, 2.0, 3.0, 5.0, 10.0]              # Curvature radii in resolution units.
+
+      positive_gap: 1.4                                         # Largest confidently contacting gap in Å.
+      negative_gap: 3.0                                         # Smallest confidently non-contacting gap in Å.
+      sensitivity_gaps: [1.0, 1.4, 2.0]                         # Evaluation-only positive cutoffs in Å.
+    resources:                                                   # Active geometry and annotation reservation.
+      cpu: 36                                                    # Matches the configured spawned-process workers.
+      memory: 120GiB                                             # Concurrent surfaces, operators, and validation.
+      storage: 100GiB                                            # Structures, archives, sidecars, and checkpoints.
+      time: 24h                                                  # Complete preprocessing wall-time ceiling.
+
+    # Full Preprocessing resource recipe; use it together with skip=false and the inputs above:
+    # resources:
+    #   cpu: 36                                                   # Matches spawned geometry workers.
+    #   memory: 128GiB                                            # Concurrent surfaces and final validation.
+    #   storage: 100GiB                                           # Structures, NPZs, sidecars, and checkpoints.
+    #   time: 24h                                                 # Complete preprocessing wall-time ceiling.
+
+    # Preprocessing.run option reference:
+    # skip=false. train, validation, and test default to null and are required when skip=false.
+    # catalog=null and is required for the labelled TXT contract selected here; dilutions=null.
+    # structures=null and is always required because it is the immutable coordinate evidence.
+    # dataset_name="wisdom-dna", dataset_version="5", workers=36,
+    # progress_log_seconds=120.0, verbose=false,
+    # surface_resolution=1.0 Å, probe_radius=1.4 Å, atom_spatial_radius=6.0 Å,
+    # atom_spatial_k_max=32, surface_atom_radius=6.0 Å, surface_atom_k_max=32,
+    # diffusion_spectral_modes_max=128, surface_neighbor_k_max=24,
+    # curvature_scales=(2.5,5.0), positive_gap=1.4 Å,
+    # negative_gap=3.0 Å, and sensitivity_gaps=(1.0,1.4,2.0) are true defaults. This YAML
+    # deliberately overrides curvature scales. skip=true performs no snapshot validation, geometry,
+    # annotation, validation, or Dataset Registry publication.
+
+  - name: visualize                                             # Inspect immutable members without changing data.
+    run: wisdom.visualization.Visualization.Visualization        # Dataset-to-HTML/PLY inspection Work.
+    with:                                                        # Arguments passed to Visualization.run(...).
+      skip: false                                                 # Render after the active Preprocessing step succeeds.
+      dataset: {from: preprocess.dataset}                        # DatasetVersion published by the preceding step.
+
+      # Visualization-only recipe; use it together with preprocess.skip=true:
+      # dataset: {dataset: wisdom-dna@5}                         # Resolve a version published by an earlier run.
+      output_directory: ../data/dna/visualizations               # Atomically publish the browsable gallery here.
+      overwrite_output: true                                     # Replace a different prior gallery after success.
+
+      identifiers: []                                            # Empty selects a balanced deterministic sample.
+      splits: [train, validation, test]                           # Eligible split strata for automatic sampling.
+      labels: [0, 1]                                             # Include curated negatives and verified positives.
+      maximum_proteins: 12                                       # Automatic cap; zero renders every eligible member.
+
+      maximum_surface_points: 6000                               # WebGL point-cloud payload cap per protein.
+      maximum_mesh_points: 2500                                  # Alpha-shape input cap per diagnostic mesh.
+      maximum_edges: 5000                                        # Display cap for each sparse graph edge layer.
+      normal_stride: 25                                          # Draw one normal per 25 displayed surface points.
+      normal_length: 1.5                                         # Normal-vector display length in ångströms.
+      mesh_alpha: 4.0                                            # Maximum alpha-complex tetrahedron radius in Å.
+      maximum_vdw_atoms: 1500                                    # Physical-radius icosahedra cap per protein.
+      verbose: false                                              # True logs every rendered member.
+    resources:                                                    # Small CPU-only visualization reservation.
+      cpu: 1                                                      # Rendering is bounded and sequential for a small gallery.
+      memory: 8GiB                                                # NPZ arrays and bounded Plotly JSON payloads.
+      storage: 10GiB                                              # Shared Plotly bundle, HTML, PLY, and NPZ companions.
+      time: 2h                                                    # Upper bound for explicit large identifier lists.
+
+    # Visualization.run option reference:
+    # skip=true, dataset=null, output_directory="../data/dna/visualizations",
+    # overwrite_output=true, identifiers=(), splits=("train","validation","test"),
+    # labels=(0,1), maximum_proteins=12, maximum_surface_points=6000,
+    # maximum_mesh_points=2500, maximum_edges=5000, normal_stride=25,
+    # normal_length=1.5 Å, mesh_alpha=4.0 Å, maximum_vdw_atoms=1500, and verbose=false are true
+    # defaults. maximum_vdw_atoms bounds the physical-radius envelope only; every atom remains
+    # selectable in the ordinary atom layer.
+    # dataset is required only when skip=false. `{from: preprocess.dataset}` consumes a version
+    # published earlier in this same workflow without resolving it before Preprocessing runs;
+    # `{dataset: name@version}` resolves a version that already exists in the Registry and is the
+    # correct visualization-only form. identifiers accepts exact DatasetIndex member IDs; when
+    # non-empty it preserves their order and ignores maximum_proteins. Zero maximum_proteins renders
+    # every eligible member; positive values bound the balanced sample. Increase storage/time before
+    # rendering all 1,814 current members. splits use stored values and labels are binary targets.
+    # The mesh is a non-authoritative alpha-complex reconstruction;
+    # positive mesh_alpha values change only its visual topology, never NPZ bytes or model inputs.
+
+# LambdaForge 0.13 step options: steps is a non-empty sequential list; each step accepts name, run,
+# with, resources, seeds, search, and objective. `{from: STEP.OUTPUT}` fingerprints and resolves a
+# prior named artifact. The three skip booleans choose Selection, Preprocessing, and Visualization.
+# The active Visualization input consumes `preprocess.dataset`, so it is resolved only after that
+# step publishes successfully. When Preprocessing is skipped, use the commented Registry selector
+# instead and keep its version synchronized with dataset_version above.
+# Resource options are cpu>=1, gpu>=0, memory/gpu_memory/storage=<size>, time=<duration>, and
+# processes<=cpu. A normal rerun may restore compatible Work and per-protein checkpoints.

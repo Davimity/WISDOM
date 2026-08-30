@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import shutil
 from concurrent.futures import ThreadPoolExecutor
@@ -9,38 +10,13 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from wisdom.preprocessing.ProcessingRecord import ProcessingRecord
-from wisdom.preprocessing.ProcessingWorkspace import ProcessingWorkspace
 from wisdom.preprocessing.structure.DatasetValidator import DatasetValidator
 from wisdom.preprocessing.structure.PreprocessConfig import PreprocessConfig
-from wisdom.preprocessing.structure.PreprocessPipeline import PreprocessPipeline
+from wisdom.preprocessing.structure.ProteinArchive import ProteinArchive
+from wisdom.preprocessing.structure.ProteinPreprocessor import ProteinPreprocessor
 from wisdom.preprocessing.structure.ProteinSink import ProteinSink
 from wisdom.preprocessing.structure.ProteinSource import ProteinSource
 from wisdom.preprocessing.structure.ProteinVisualizer import ProteinVisualizer
-from wisdom.preprocessing.structure.StorageManager import StorageManager
-
-
-def _context(run_dir: Path, id_file: Path, config: PreprocessConfig) -> ProcessingWorkspace:
-    """Create explicit paths for one local scientific integration fixture.
-
-    Args:
-        run_dir: Temporary root receiving coordinate, NPZ, and report outputs.
-        id_file: Manifest containing the fixture structure paths.
-        config: Scientific configuration retained for signature parity with callers.
-
-    Returns:
-        Path-only preprocessing workspace; LambdaForge runtime behavior is tested upstream.
-    """
-    del config
-    run_dir.mkdir(parents=True, exist_ok=True)
-    return ProcessingWorkspace(
-        run_dir,
-        inputs={"protein_identifiers": id_file, "structures": id_file.parent},
-        outputs={
-            "processed": run_dir / "processed",
-            "report": run_dir / "preprocessing-report.json",
-        },
-    )
 
 
 def _run(
@@ -51,21 +27,27 @@ def _run(
     resolution: float = 1.2,
     chains: tuple[str, ...] = (),
 ) -> dict:
-    config = PreprocessConfig(chains=chains, surface_resolution=resolution)
-    context  = _context(run_dir, id_file, config)
-    records  = tuple(ProteinSource().records(context))
-    pipeline = PreprocessPipeline(config)
-    operation = partial(pipeline.process, context=context)
+    run_dir.mkdir(parents=True, exist_ok=True)
+
+    config      = PreprocessConfig(chains=chains, surface_resolution=resolution)
+    records     = tuple(ProteinSource().records(id_file))
+    pipeline    = ProteinPreprocessor(config)
+    output_root = run_dir / "processed"
+    operation   = partial(
+        pipeline.process,
+        manifest       = id_file,
+        structure_root = id_file.parent,
+        output_root    = output_root,
+    )
     with ThreadPoolExecutor(max_workers=workers) as pool:
         results = tuple(pool.map(operation, records))
 
     sink = ProteinSink()
     sink.records = {
-        record.key: dict(record.value)
+        str(value["key"]): dict(value["value"])
         for value in results
-        for record in (ProcessingRecord(value),)
     }
-    sink.finalize(context)
+    sink.finalize(id_file, output_root, run_dir / "preprocessing-report.json")
     return json.loads((run_dir / "preprocessing-report.json").read_text(encoding="utf-8"))
 
 
@@ -82,24 +64,138 @@ def test_txt_to_valid_pickle_free_npz_roundtrip(tmp_path: Path, pdb_path: Path) 
         "failed": 0,
     }
     npz_path = tmp_path / "run" / "processed" / "tiny.npz"
-    metadata = StorageManager(PreprocessConfig()).read_metadata(npz_path)
+    metadata = ProteinArchive(PreprocessConfig()).read_metadata(npz_path)
     assert metadata is not None
-    storage = StorageManager(PreprocessConfig(**metadata["config"]))
+    storage = ProteinArchive(PreprocessConfig(**metadata["config"]))
     with np.load(npz_path, allow_pickle=False) as archive:
         arrays = {name: archive[name] for name in archive.files if name != "metadata_json"}
         storage.validate(arrays)
         assert all(array.dtype != object for array in arrays.values())
-        assert "atom_edge_index" in arrays and "surface_atom_edge_index" in arrays
+        assert "atom_edge_index" in arrays and "surface_atom_neighbors" in arrays
+        assert "surface_edge_index" not in arrays
+        assert "surface_atom_edge_index" not in arrays
+        assert "diffusion_eigenvectors" in arrays
     assert metadata["atom_count"] == 17
     assert metadata["selected_chains"] == ["A"]
     assert metadata["surface_point_count"] > 0
 
-    visualizer = ProteinVisualizer(["tiny"], max_surface_points=50)
-    diagnostics = visualizer.visualize(npz_path, tmp_path / "tiny.html", "tiny")
+    visualizer = ProteinVisualizer(max_surface_points=50)
+    diagnostics = visualizer.visualize(
+        npz_path,
+        tmp_path / "tiny.html",
+        "tiny",
+        plotly_script="../plotly.min.js",
+    )
     html = (tmp_path / "tiny.html").read_text(encoding="utf-8")
     assert diagnostics["status"] == "PASS"
     assert "surface_positions" in html
-    assert "C-alpha backbone cartoon" in html
+    assert "C-alpha backbone trace" in html
+    assert "Van der Waals envelopes" in html
+    assert "Distance measurement" in html
+    assert 'id="controls-panel"' in html
+    assert 'id="details-panel"' in html
+    assert "alphahull" not in html
+    assert "Plotly.restyle(gd,{visible:values},indices)" in html
+
+    base_arrays, base_metadata, empty_sidecar = visualizer._load(npz_path, None)
+    figure, controls = visualizer._figure(
+        base_arrays,
+        visualizer._surface_channels(base_arrays, base_metadata, empty_sidecar),
+    )
+    expected_layers = {
+        "surface", "mesh", "atoms", "vdw", "spatial", "covalent", "both",
+        "surface_edges", "normals", "cartoon", "measurement",
+    }
+    assert set(controls["traces"]) == expected_layers
+    assert sorted(controls["traces"].values()) == list(range(len(figure.data)))
+    assert controls["meshTriangles"] > 0
+    assert controls["meshMethod"] in {"alpha-complex", "convex-hull fallback"}
+    assert controls["meshVertexCount"] > 0
+    assert controls["vdwAtoms"] == controls["atomCount"]
+
+    surface_trace = figure.data[controls["traces"]["surface"]]
+    mesh_trace    = figure.data[controls["traces"]["mesh"]]
+    assert surface_trace.marker.opacity == 1.0
+    assert mesh_trace.opacity == 1.0
+    assert mesh_trace.colorscale[0][1] == "#59c3d1"
+
+    # DNA sidecar channels retain exact point order and preserve unavailable distances as null in
+    # strict browser JSON rather than emitting non-standard NaN tokens.
+
+    with np.load(npz_path, allow_pickle=False) as archive:
+        surface_count = len(archive["surface_positions"])
+    distance = np.linspace(0.5, 5.0, surface_count, dtype=np.float32)
+    distance[0] = np.nan
+    distance_valid = np.ones(surface_count, dtype=np.bool_)
+    distance_valid[0] = False
+    hard = (np.arange(surface_count) % 2).astype(np.uint8)
+    sidecar = tmp_path / "tiny.dna.npz"
+    np.savez_compressed(
+        sidecar,
+        surface_target_hard             = hard,
+        surface_valid_mask              = np.ones(surface_count, dtype=np.bool_),
+        surface_target_soft             = hard.astype(np.float32),
+        surface_distance_to_dna         = distance,
+        surface_distance_valid          = distance_valid,
+        surface_target_hard_sensitivity=np.column_stack((hard, hard)),
+        sensitivity_gaps                = np.asarray([1.0, 1.4], dtype=np.float32),
+        base_npz_sha256                 = np.asarray(
+            hashlib.sha256(npz_path.read_bytes()).hexdigest()
+        ),
+        annotation_metadata_json        = np.asarray('{"local_gt_available":true}'),
+    )
+
+    channels = visualizer.surface_channels(npz_path, sidecar)
+    assert {"dna_target_hard", "dna_target_soft", "dna_distance"}.issubset(channels)
+    visualizer.visualize(
+        npz_path,
+        tmp_path / "tiny-annotated.html",
+        "tiny",
+        annotation=sidecar,
+        protein_label=1,
+        partitions={"split": "test"},
+        plotly_script="../plotly.min.js",
+    )
+    annotated_html = (tmp_path / "tiny-annotated.html").read_text(encoding="utf-8")
+    assert "dna_target_hard" in annotated_html
+    assert "dna_distance" in annotated_html
+
+
+def test_visual_mesh_and_van_der_waals_geometry_are_precomputed() -> None:
+    """The browser receives explicit triangles and physically scaled atom envelopes."""
+    cube = np.asarray(
+        [
+            (x, y, z)
+            for x in (0.0, 1.0)
+            for y in (0.0, 1.0)
+            for z in (0.0, 1.0)
+        ],
+        dtype=np.float64,
+    )
+    outward       = cube - np.mean(cube, axis=0)
+    visualizer    = ProteinVisualizer(mesh_alpha=4.0, max_vdw_atoms=1)
+    faces, method = visualizer._alpha_faces(cube, outward)
+
+    assert method == "alpha-complex"
+    assert faces.ndim == 2 and faces.shape[1] == 3
+    assert np.all((faces >= 0) & (faces < len(cube)))
+
+    triangles     = cube[faces]
+    face_normals  = np.cross(
+        triangles[:, 1] - triangles[:, 0],
+        triangles[:, 2] - triangles[:, 0],
+    )
+    mean_outwards = np.mean(outward[faces], axis=1)
+    assert np.all(np.einsum("ij,ij->i", face_normals, mean_outwards) >= 0.0)
+
+    atoms     = np.asarray(((0.0, 0.0, 0.0), (5.0, 0.0, 0.0)))
+    radii     = np.asarray((1.5, 2.0))
+    positions, sphere_faces, atom_ids = visualizer._van_der_waals_mesh(atoms, radii)
+
+    assert positions.shape == (12, 3)
+    assert sphere_faces.shape == (20, 3)
+    assert np.array_equal(atom_ids, np.zeros(12, dtype=np.int64))
+    assert np.allclose(np.linalg.norm(positions, axis=1), 1.5)
 
 
 def test_parallel_and_single_worker_arrays_are_equivalent(tmp_path: Path, pdb_path: Path) -> None:
@@ -224,9 +320,9 @@ def test_surface_diagnostics_reject_flying_points_normals_and_curvature(
     _run(run_dir, id_file, workers=1)
 
     npz_path = run_dir / "processed" / "tiny.npz"
-    metadata = StorageManager(PreprocessConfig()).read_metadata(npz_path)
+    metadata = ProteinArchive(PreprocessConfig()).read_metadata(npz_path)
     assert metadata is not None
-    storage = StorageManager(PreprocessConfig(**metadata["config"]))
+    storage = ProteinArchive(PreprocessConfig(**metadata["config"]))
     with np.load(npz_path, allow_pickle=False) as archive:
         arrays = {name: archive[name].copy() for name in archive.files if name != "metadata_json"}
 

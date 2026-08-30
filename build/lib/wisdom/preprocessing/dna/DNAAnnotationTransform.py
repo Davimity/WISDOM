@@ -11,12 +11,11 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
-import gemmi
 import numpy as np
 from scipy.spatial import cKDTree
 
-from wisdom.preprocessing.ProcessingRecord import ProcessingRecord
-from wisdom.preprocessing.ProcessingWorkspace import ProcessingWorkspace
+from wisdom.utils.structure.ProteinStructure import ProteinStructure
+from wisdom.preprocessing.dna.DNAAnnotationSink import DNAAnnotationSink
 
 
 class DNAAnnotationTransform:
@@ -29,7 +28,6 @@ class DNAAnnotationTransform:
         positive_gap     : float = 1.4,
         negative_gap     : float = 3.0,
         sensitivity_gaps : tuple[float, ...] = (1.0, 1.4, 2.0),
-        structure_output : str = "resolved_structures",
     ) -> None:
         """Configure the physical interface and ambiguity band in ångströms.
 
@@ -45,7 +43,6 @@ class DNAAnnotationTransform:
                 is the radius of a conventional water probe.
             negative_gap: Lower surface gap for a confident negative point in Å.
             sensitivity_gaps: Additional hard cutoffs stored for threshold-sensitivity analysis.
-            structure_output: Named per-stage output receiving verified uncompressed structures.
 
         Raises:
             ValueError: If thresholds are non-positive, unordered, or sensitivity values empty.
@@ -54,18 +51,15 @@ class DNAAnnotationTransform:
             raise ValueError("annotation gaps require 0 < positive_gap < negative_gap")
         if not sensitivity_gaps or any(value <= 0.0 for value in sensitivity_gaps):
             raise ValueError("sensitivity_gaps must contain positive distances")
-        if not structure_output.strip():
-            raise ValueError("structure_output cannot be empty")
         self.positive_gap     = float(positive_gap)
         self.negative_gap     = float(negative_gap)
         self.sensitivity_gaps = tuple(float(value) for value in sensitivity_gaps)
-        self.structure_output = structure_output
 
     def transform(
         self,
-        record : ProcessingRecord,
-        context: ProcessingWorkspace,
-    ) -> ProcessingRecord:
+        record                 : Mapping[str, Any],
+        resolved_structure_root: Path,
+    ) -> dict[str, Any]:
         """Compute aligned target arrays and cryptographic base-geometry provenance.
 
         Positive rows load DNA coordinates from the exact curated assembly. Base surface points are
@@ -75,8 +69,8 @@ class DNAAnnotationTransform:
         NaN together with a false ``surface_distance_valid`` mask.
 
         Args:
-            record: Joined catalog/base-NPZ record from ``DNAAnnotationSource``.
-            context: LambdaForge context resolving the parallel uncompressed-structure output.
+            record: Joined manifest/base-NPZ record prepared by the preprocessing flow.
+            resolved_structure_root: Directory receiving verified uncompressed structures.
 
         Returns:
             Record containing small sidecar arrays, metadata, and a safe output filename.
@@ -86,9 +80,11 @@ class DNAAnnotationTransform:
             ValueError: If base arrays, metadata, label, DNA chains, or coordinate lengths disagree.
             OSError: If the base archive or source assembly cannot be read.
         """
-        if not isinstance(record.value, Mapping):
+        key   = str(record["key"])
+        value = record.get("value")
+        if not isinstance(value, Mapping):
             raise TypeError("DNA annotation record must be a mapping")
-        value = dict(record.value)
+        value = dict(value)
         label = int(value["label"])
         if label not in {0, 1}:
             raise ValueError("DNA annotation requires a curated binary protein label")
@@ -100,19 +96,19 @@ class DNAAnnotationTransform:
         if archive_value:
             archive_path  = Path(str(archive_value))
             expected_hash = str(value["structure_sha256"])
-            structure_path = context.output(self.structure_output) / f"{expected_hash}.cif"
+            structure_path = resolved_structure_root / f"{expected_hash}.cif"
             structure_path.parent.mkdir(parents=True, exist_ok=True)
             if structure_path.is_file():
                 observed_hash = hashlib.sha256(structure_path.read_bytes()).hexdigest()
                 if observed_hash != expected_hash:
                     raise ValueError(
-                        f"resolved structure bytes disagree with design for {record.key}"
+                        f"resolved structure bytes disagree with design for {key}"
                     )
             else:
                 content = gzip.decompress(archive_path.read_bytes())
                 if hashlib.sha256(content).hexdigest() != expected_hash:
                     raise ValueError(
-                        f"geometry structure bytes disagree with design for {record.key}"
+                        f"geometry structure bytes disagree with design for {key}"
                     )
                 self._atomic_write(structure_path, content)
             value["structure_path"] = str(structure_path.resolve())
@@ -121,22 +117,24 @@ class DNAAnnotationTransform:
         base_hash = hashlib.sha256(base_path.read_bytes()).hexdigest()
         with np.load(base_path, allow_pickle=False) as archive:
             required = {
-                "atom_positions",
                 "metadata_json",
                 "residue_indices",
                 "surface_area_weights",
-                "surface_atom_edge_index",
-                "surface_edge_index",
+                "surface_atom_neighbors",
+                "surface_atom_mask",
+                "surface_neighbors",
+                "surface_neighbor_mask",
                 "surface_positions",
             }
             if not required.issubset(archive.files):
                 missing = sorted(required - set(archive.files))
                 raise ValueError(f"{base_path.name} lacks annotation inputs: {missing}")
-            atom_positions   = archive["atom_positions"].astype(np.float64)
             residue_indices  = archive["residue_indices"].astype(np.int64)
             surface_weights  = archive["surface_area_weights"].astype(np.float64)
-            surface_atoms    = archive["surface_atom_edge_index"].astype(np.int64)
-            surface_edges    = archive["surface_edge_index"].astype(np.int64)
+            surface_atoms    = archive["surface_atom_neighbors"].astype(np.int64)
+            surface_atom_mask = archive["surface_atom_mask"].astype(np.bool_)
+            surface_neighbors = archive["surface_neighbors"].astype(np.int64)
+            surface_neighbor_mask = archive["surface_neighbor_mask"].astype(np.bool_)
             surface_positions = archive["surface_positions"].astype(np.float64)
             metadata          = json.loads(str(archive["metadata_json"].item()))
         if surface_positions.ndim != 2 or surface_positions.shape[1] != 3:
@@ -164,12 +162,13 @@ class DNAAnnotationTransform:
             if not np.allclose(rotation @ rotation.T, np.eye(3), atol=1e-5):
                 raise ValueError("dataset design assembly rotation is not orthonormal")
             assembly_surface = source_surface @ rotation.T + translation
-            dna_positions, dna_radii = self._dna_atoms(
-                structure_path,
-                str(value["assembly_id"]),
+            protein_structure = ProteinStructure(structure_path)
+            assembled         = protein_structure.assembly(str(value["assembly_id"]))
+            assembled.protein_copy(
                 str(value["protein_chain"]),
                 int(value["protein_copy"]),
             )
+            dna_positions, dna_radii, _ = assembled.dna_atoms()
             if not len(dna_positions):
                 raise ValueError("positive DNA row has no heavy atoms in its declared assembly")
             center_distance, nearest = cKDTree(dna_positions).query(assembly_surface, k=1)
@@ -194,29 +193,14 @@ class DNAAnnotationTransform:
             binding_residues = np.asarray(value["binding_residue_indices"], dtype=np.int64)
             if binding_residues.ndim != 1 or not len(binding_residues):
                 raise ValueError("binding_residue_mask requires non-empty residue indices")
-            if surface_atoms.ndim != 2 or surface_atoms.shape[0] != 2:
-                raise ValueError("surface_atom_edge_index must have shape [2,E]")
+            if surface_atoms.ndim != 2 or surface_atoms.shape[0] != surface_count:
+                raise ValueError("surface_atom_neighbors must have shape [M,Jmax]")
 
             # Each surface sample inherits the label of its nearest represented protein atom. The
             # atom's flattened residue index is aligned to the design binding-residue evidence.
-            surface_ids = surface_atoms[0]
-            atom_ids    = surface_atoms[1]
-            edge_gaps   = np.linalg.norm(
-                surface_positions[surface_ids] - atom_positions[atom_ids],
-                axis=1,
-            )
-            order = np.lexsort((edge_gaps, surface_ids))
-            nearest_atoms = np.full(surface_count, -1, dtype=np.int64)
-            for edge_index in order:
-                surface_id = int(surface_ids[edge_index])
-                if nearest_atoms[surface_id] < 0:
-                    nearest_atoms[surface_id] = int(atom_ids[edge_index])
-            missing_surface = nearest_atoms < 0
-            if np.any(missing_surface):
-                nearest_atoms[missing_surface] = cKDTree(atom_positions).query(
-                    surface_positions[missing_surface],
-                    k=1,
-                )[1]
+            if np.any(~surface_atom_mask[:, 0]):
+                raise ValueError("every surface point requires a nearest atom in column zero")
+            nearest_atoms = surface_atoms[:, 0]
             hard = np.isin(residue_indices[nearest_atoms], binding_residues).astype(np.uint8)
 
             distance       = np.full(surface_count, np.nan, dtype=np.float64)
@@ -249,11 +233,15 @@ class DNAAnnotationTransform:
                 local_reason = "zero_positive_surface_points"
         positive_weight = float(np.sum(surface_weights[hard == 1]))
         total_weight    = float(np.sum(surface_weights))
-        region_count    = self._region_count(hard, surface_edges) if local_available else 0
+        region_count = (
+            self._region_count(hard, surface_neighbors, surface_neighbor_mask)
+            if local_available
+            else 0
+        )
 
         annotation_metadata: dict[str, Any] = {
             "annotation_schema_version": self.SCHEMA_VERSION,
-            "base_identifier": record.key,
+            "base_identifier": key,
             "base_npz_sha256": base_hash,
             "base_npz_path": str(base_path.resolve()),
             "base_surface_count": surface_count,
@@ -294,19 +282,21 @@ class DNAAnnotationTransform:
                 json.dumps(annotation_metadata, sort_keys=True, separators=(",", ":"))
             ),
         }
-        return record.with_value(
-            {
+        return {
+            "key": key,
+            "value": {
                 "arrays": arrays,
                 "metadata": annotation_metadata,
                 "output_name": f"{base_path.stem}.dna.npz",
-            }
-        )
+            },
+        }
 
     def process(
         self,
-        record : ProcessingRecord,
-        context: ProcessingWorkspace,
-    ) -> ProcessingRecord:
+        record                 : Mapping[str, Any],
+        output_root            : Path,
+        resolved_structure_root: Path,
+    ) -> dict[str, Any]:
         """Compute and atomically persist one sidecar for LambdaForge ``Work.map``.
 
         Arrays are written inside the worker so the process returns only a compact JSON-compatible
@@ -316,7 +306,8 @@ class DNAAnnotationTransform:
 
         Args:
             record: Catalog/base-geometry join for one logical protein.
-            context: Explicit structure and annotation output paths.
+            output_root: Directory receiving DNA sidecars.
+            resolved_structure_root: Directory receiving verified uncompressed structures.
 
         Returns:
             Record containing the JSON-compatible sidecar audit row.
@@ -326,15 +317,10 @@ class DNAAnnotationTransform:
             ValueError: If provenance, point alignment, or local targets are inconsistent.
             OSError: If structures, base archives, or sidecars cannot be read or written.
         """
-        from wisdom.preprocessing.dna.DNAAnnotationSink import DNAAnnotationSink
-
-        sink = DNAAnnotationSink(
-            annotation_output="annotations",
-            report_output="annotation-report",
-        )
+        sink    = DNAAnnotationSink()
         resumed = sink.resume(
             record,
-            context,
+            output_root,
             self.positive_gap,
             self.negative_gap,
             self.sensitivity_gaps,
@@ -342,17 +328,24 @@ class DNAAnnotationTransform:
         if resumed is not None:
             return resumed
 
-        transformed = self.transform(record, context)
-        sink.write(transformed, context)
-        return record.with_value(sink.records[record.key])
+        transformed = self.transform(record, resolved_structure_root)
+        sink.write(transformed, output_root)
+
+        key = str(record["key"])
+        return {"key": key, "value": sink.records[key]}
 
     @staticmethod
-    def _region_count(hard: np.ndarray, edge_index: np.ndarray) -> int:
-        """Count connected positive regions in the fixed sparse surface graph.
+    def _region_count(
+        hard     : np.ndarray,
+        neighbors: np.ndarray,
+        mask     : np.ndarray,
+    ) -> int:
+        """Count positive regions through the persisted bounded surface neighborhood.
 
         Args:
             hard: Binary point targets with shape ``[M]``.
-            edge_index: Undirected surface pairs stored once as integer shape ``[2,E]``.
+            neighbors: Nearest-surface IDs with shape ``[M,Ksmax]``.
+            mask: Boolean validity table with the same shape.
 
         Returns:
             Number of connected components induced by positive surface points.
@@ -360,18 +353,18 @@ class DNAAnnotationTransform:
         Raises:
             ValueError: If the sparse graph has an invalid shape or endpoint.
         """
-        if edge_index.ndim != 2 or edge_index.shape[0] != 2:
-            raise ValueError("surface_edge_index must have shape [2,E]")
-        if edge_index.size and (edge_index.min() < 0 or edge_index.max() >= len(hard)):
-            raise ValueError("surface_edge_index contains an invalid endpoint")
+        if neighbors.ndim != 2 or neighbors.shape != mask.shape or len(neighbors) != len(hard):
+            raise ValueError("surface neighbor IDs and mask must have shape [M,Ksmax]")
+        if np.any(neighbors[mask] < 0) or np.any(neighbors[mask] >= len(hard)):
+            raise ValueError("surface neighbor table contains an invalid endpoint")
         positive = set(np.flatnonzero(hard).tolist())
         adjacency: dict[int, list[int]] = {index: [] for index in positive}
-        for left, right in edge_index.T:
-            first  = int(left)
-            second = int(right)
-            if first in positive and second in positive:
-                adjacency[first].append(second)
-                adjacency[second].append(first)
+        for first in positive:
+            for second_value in neighbors[first, mask[first]]:
+                second = int(second_value)
+                if second in positive:
+                    adjacency[first].append(second)
+                    adjacency[second].append(first)
 
         regions = 0
         while positive:
@@ -406,64 +399,3 @@ class DNAAnnotationTransform:
             os.replace(temporary, path)
         finally:
             temporary.unlink(missing_ok=True)
-
-    @staticmethod
-    def _dna_atoms(
-        structure_path: Path,
-        assembly_id  : str,
-        protein_chain: str,
-        protein_copy : int,
-    ) -> tuple[np.ndarray, np.ndarray]:
-        """Reconstruct exact assembly DNA coordinates and validate the declared protein copy.
-
-        Args:
-            structure_path: Curated biological assembly path readable by Gemmi.
-            assembly_id: Exact biological assembly identifier fixed by DatasetDesign.
-            protein_chain: Exact deposited protein chain name, which may contain several chars.
-            protein_copy: One-based copy index under Gemmi's deterministic ``Dup`` naming policy.
-
-        Returns:
-            Coordinate matrix ``float64 [D,3]`` and matching radii ``float64 [D]`` in Å.
-
-        Raises:
-            ValueError: If assembly/copy identity is absent or an atom radius is unavailable.
-        """
-        structure = gemmi.read_structure(str(structure_path))
-        if not structure:
-            raise ValueError("positive annotation structure has no coordinate model")
-        assembly = next(
-            (value for value in structure.assemblies if str(value.name) == assembly_id),
-            None,
-        )
-        if assembly is None:
-            raise ValueError(f"positive annotation assembly {assembly_id!r} is absent")
-        assembled = gemmi.make_assembly(
-            assembly,
-            structure[0],
-            gemmi.HowToNameCopiedChain.Dup,
-        )
-        protein_copies = [
-            chain
-            for chain in assembled
-            if chain.name == protein_chain
-            and chain.get_polymer().check_polymer_type()
-            in {gemmi.PolymerType.PeptideL, gemmi.PolymerType.PeptideD}
-        ]
-        if protein_copy < 1 or protein_copy > len(protein_copies):
-            raise ValueError("positive annotation protein assembly copy is absent")
-        positions: list[tuple[float, float, float]] = []
-        radii    : list[float]                      = []
-        for chain in assembled:
-            polymer = chain.get_polymer()
-            if not len(polymer) or polymer.check_polymer_type() != gemmi.PolymerType.Dna:
-                continue
-            for residue in polymer.first_conformer():
-                for atom in residue.first_conformer():
-                    if atom.element.atomic_number <= 1:
-                        continue
-                    position = (atom.pos.x, atom.pos.y, atom.pos.z)
-                    radius   = float(atom.element.vdw_r)
-                    if np.isfinite(position).all() and radius > 0.0:
-                        positions.append(position)
-                        radii.append(radius)
-        return np.asarray(positions, dtype=np.float64).reshape((-1, 3)), np.asarray(radii)

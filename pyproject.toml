@@ -4,16 +4,18 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "wisdom"
-version = "0.10.0"
+version = "0.13.0"
 description = "Universal protein surfaces and weakly supervised DNA-binding WISDOM models"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
   "biopython>=1.84,<2",
   "gemmi>=0.7,<0.8",
-  "lambdaforge[clustering,cluster-password]>=0.12.0,<0.13",
+  "lambdaforge[clustering,cluster-password]>=0.13.0",
   "matplotlib>=3.7",
   "numpy>=1.24,<2.5",
+  "plotly>=6.5,<7",
+  "robust-laplacian>=1.1,<2",
   "scipy>=1.10",
   "scikit-learn>=1.3,<2",
   "torch>=2.1",
@@ -41,6 +43,9 @@ target-version = "py310"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
+
+[tool.ruff.lint.per-file-ignores]
+"src/**/*.py" = ["I001"]
 
 [tool.mypy]
 python_version = "3.10"

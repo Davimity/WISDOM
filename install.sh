@@ -10,8 +10,7 @@ set -euo pipefail
 ENV_NAME="wisdom"
 
 LAMBDAFORGE_REPO="https://github.com/simplelambda/LambdaForge.git"
-LAMBDAFORGE_MIN_VERSION="0.12.0"
-LAMBDAFORGE_MAX_VERSION="0.13.0"
+LAMBDAFORGE_MIN_VERSION="0.13.0"
 
 MINIFORGE_DIR="$HOME/miniforge3"
 
@@ -761,7 +760,7 @@ echo "  ${LAMBDAFORGE_VERSION}"
 
 if ! conda run \
     --name "${ENV_NAME}" \
-    python - "${LAMBDAFORGE_MIN_VERSION}" "${LAMBDAFORGE_MAX_VERSION}" <<'PY'
+    python - "${LAMBDAFORGE_MIN_VERSION}" <<'PY'
 import sys
 from importlib.metadata import version
 
@@ -769,12 +768,11 @@ from packaging.version import Version
 
 installed = Version(version("lambdaforge"))
 minimum = Version(sys.argv[1])
-maximum = Version(sys.argv[2])
 
-if not minimum <= installed < maximum:
+if installed < minimum:
     raise SystemExit(
         f"Incompatible LambdaForge version: {installed}. "
-        f"Required: >={minimum},<{maximum}"
+        f"Required: >={minimum}"
     )
 PY
 then

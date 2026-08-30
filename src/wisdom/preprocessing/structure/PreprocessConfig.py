@@ -18,10 +18,14 @@ class PreprocessConfig:
         include_nonpolymer: Whether non-polymer residues such as ligands are retained.
         include_metals: Whether metal atoms/residues are retained.
         center_coordinates: Whether to subtract the filtered atomic centroid.
-        atom_radius: Spatial atomic graph cutoff in ångströms.
+        atom_spatial_radius: Spatial atomic-neighbor cutoff in ångströms.
+        atom_spatial_k_max: Maximum ranked spatial neighbors retained per atom.
         surface_resolution: Main surface sampling length scale in ångströms.
         probe_radius: Solvent probe radius added to van der Waals radii, in ångströms.
-        atom_surface_radius: Bipartite surface-to-atom cutoff in ångströms.
+        surface_atom_radius: Surface-to-atom neighborhood cutoff in ångströms.
+        surface_atom_k_max: Maximum nearest atoms retained per surface point.
+        diffusion_spectral_modes_max: Maximum Laplace--Beltrami eigenmodes persisted.
+        surface_neighbor_k_max: Maximum local surface neighbors persisted for V3 encoders.
         curvature_scales: Positive neighborhood-radius multipliers relative to
             ``surface_resolution``. One ``(H,K,C)`` curvature triplet is stored per multiplier.
     """
@@ -36,11 +40,15 @@ class PreprocessConfig:
     center_coordinates: bool                         = True
 
     # Scientific radii are expressed in ångströms.
-    atom_radius        : float                          = 6.0
-    surface_resolution : float                          = 1.0
-    probe_radius       : float                          = 1.4
-    atom_surface_radius: float                          = 6.0
-    curvature_scales   : tuple[float, ...] | list[float] = (2.5, 5.0)
+    atom_spatial_radius          : float                          = 6.0
+    atom_spatial_k_max           : int                            = 32
+    surface_resolution           : float                          = 1.0
+    probe_radius                 : float                          = 1.4
+    surface_atom_radius          : float                          = 6.0
+    surface_atom_k_max           : int                            = 32
+    diffusion_spectral_modes_max : int                            = 128
+    surface_neighbor_k_max       : int                            = 24
+    curvature_scales             : tuple[float, ...] | list[float] = (2.5, 5.0)
 
     def __post_init__(self) -> None:
         """Canonicalize chain values and reject invalid configuration domains.
@@ -65,9 +73,24 @@ class PreprocessConfig:
             raise ValueError("model_index cannot be negative")
 
         # All geometric cutoffs are strict positive length scales.
-        for name in ("atom_radius", "surface_resolution", "probe_radius", "atom_surface_radius"):
+        for name in (
+            "atom_spatial_radius",
+            "surface_resolution",
+            "probe_radius",
+            "surface_atom_radius",
+        ):
             if float(getattr(self, name)) <= 0:
                 raise ValueError(f"{name} must be positive")
+
+        for name in (
+            "atom_spatial_k_max",
+            "surface_atom_k_max",
+            "diffusion_spectral_modes_max",
+            "surface_neighbor_k_max",
+        ):
+            value = getattr(self, name)
+            if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+                raise ValueError(f"{name} must be a positive integer")
         if not self.curvature_scales:
             raise ValueError("curvature_scales must contain at least one scale")
         if any(value <= 0 for value in self.curvature_scales):

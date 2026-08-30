@@ -89,22 +89,39 @@ project contract, not optional style suggestions.
 - Keep at most one substantive class in each Python file and name that file exactly like its class.
   Several tiny related enums may share one clearly named vocabulary module when separate files
   would add navigation without isolating behavior.
-- Expose exactly the cohesive LambdaForge 0.12 Work classes required by public YAML actions:
-  `DatasetDesign`, `Preprocessing`, `DNAValidation`, and `Training`. Keep other cohesive
+- Expose exactly the cohesive LambdaForge 0.13 Work classes required by public YAML actions:
+  `Selection`, `Preprocessing`, `Visualization`, `DNAValidation`, and `Training`. Keep other cohesive
   stateful/scientific concepts as classes; private module helpers are allowed only when they isolate
   a substantial algorithm and cannot be expressed more clearly as a method.
+- Keep `wisdom.preprocessing.dna.selection.Selection` and
+  `wisdom.preprocessing.dna.preprocessing.Preprocessing` as commented orchestration scripts that
+  read like scientific pseudocode. Their stateless scientific stages are the explicit exception to
+  the class-per-concept rule: implement them as small function modules rather than recreating giant
+  Work classes or graphs of trivial service objects.
 - Prefer a small number of meaningful domain and service classes. Do not introduce factories,
   adapters, managers, builders, DTOs, wrappers, or interfaces unless they remove real complexity.
+- Put a class in `wisdom/utils` only when the same cohesive domain operation is genuinely reused by
+  independent workflows. Do not create generic helper collections or move single-use logic there.
+- Keep the shared deposited-structure object model under `wisdom/utils/structure`: a structure owns
+  its digest, sequences, metadata, and assembly construction; a biological assembly owns chain-copy
+  selection and DNA atoms. Keep universal-NPZ algorithms under `wisdom.preprocessing.structure`.
+- At LambdaForge Work boundaries, prefer JSON-compatible mappings and explicit `Path` arguments.
+  Do not wrap records, inputs, outputs, or checkpoint roots in project-owned adapter classes unless
+  the wrapper enforces a scientific invariant that cannot remain clear in the calling flow.
 - Preserve the ownership hierarchy `Protein -> Chain -> Residue -> Atom`. Do not duplicate atoms or
   residues in parent-level flat collections. Keep provenance and processing metadata outside these
   domain entities.
+- Keep parser-independent `Protein`, `Chain`, `Residue`, and `Atom` models and shared chemical enums
+  under `wisdom.utils.structure`. Keep source resolution, filtering, centering, graph/surface
+  construction, NPZ persistence, and validation under `wisdom.preprocessing.structure` because
+  those operations belong specifically to the preprocessing representation.
 - Use enums instead of magic strings or unscoped numeric categories whenever the values form a
   closed semantic set.
-- Make every YAML-executable action a class derived directly from LambdaForge 0.12 `Work`, with all
+- Make every YAML-executable action a class derived directly from LambdaForge 0.13 `Work`, with all
   scientific parameters on its single public `run()` method. Never use function targets,
   constructor injection, method escape hatches, removed `Task`/`TaskContext`/`PreprocessingTask`
   APIs, or project-owned framework compatibility shims.
-- Author every user-facing LambdaForge 0.12 YAML only with `name`, `run`, `with`, `resources`,
+- Author every user-facing LambdaForge 0.13 YAML only with `name`, `run`, `with`, `resources`,
   `seeds`, `search`, `objective`, and `steps` as applicable. Do not add `output_root`, `kind`,
   `schema_version`, `inputs`, `outputs`, `trials` outside `search`, `max_parallel`, object graphs,
   DatasetRecipe stages, or model/loss/optimizer construction trees.
@@ -116,15 +133,19 @@ project contract, not optional style suggestions.
   provenance; and `self.progress`, `self.metrics`, and `self.outputs` for their exact public
   purposes. Do not recreate cache locks, retry loops, partial files, atomic replacement, subprocess
   logging, environment thread limits, output fingerprinting, or dependency restoration in WISDOM.
-- Build WISDOM-DNA through two public Work classes. `DatasetDesign` consumes immutable typed JSONL
-  evidence (with legacy FASTA accepted only for reproducibility) and owns structure/contact
-  revalidation, full-raw MMseqs2/Foldseek leakage groups,
-  physical phenotypes, canonical balancing, fixed splits, nested train dilutions, statistics, and
-  reports in one deliberately cohesive implementation file. `Preprocessing` consumes that exact
+- Build WISDOM-DNA through two public Work classes. `Selection` consumes immutable typed JSONL
+  evidence and orchestrates structure/contact revalidation, full-raw MMseqs2/Foldseek leakage
+  groups, physical phenotypes, canonical balancing, fixed splits, nested train dilutions,
+  statistics, and reports through its adjacent simple stage modules. `Preprocessing` consumes that exact
   design, generates only universal geometry and DNA sidecars, validates the joined result, and then
-  publishes it through LambdaForge 0.12 `self.outputs.dataset(...)`. It must never rediscover,
+  publishes it through LambdaForge 0.13 `self.outputs.dataset(...)`. It must never rediscover,
   rebalance, recluster, repartition, or dilute proteins.
-- Keep all code under one top-level `wisdom` package. Put the two action modules under
+- Expose one `experiments/dna_preprocess.yaml` with sequential Selection and Preprocessing steps.
+  The first public parameter of each Work is `skip`: a skipped Selection performs no scientific
+  computation and forwards explicitly staged labelled TXT/catalog/dilution inputs; a skipped
+  Preprocessing publishes no dataset. Never infer missing assembly/contact provenance from a
+  two-column TXT.
+- Keep all code under one top-level `wisdom` package. Put preprocessing below
   `wisdom.preprocessing`, structural internals under `wisdom.preprocessing.structure`, DNA-specific
   internals under `wisdom.preprocessing.dna`, and trainable data/models/evaluation in their named
   sibling packages. Do not restore parallel top-level packages with cross-cutting imports.
@@ -139,7 +160,7 @@ project contract, not optional style suggestions.
   reconstructible downloads with `self.cache`; use `self.temp_dir` only for disposable specialist
   scratch. Treat raw `self.run_dir`, `cache.path`, and `checkpoints.path` as advanced escape hatches,
   not normal application APIs, and never expose physical framework paths in YAML or persisted data.
-- Keep the per-record `PreprocessPipeline` transform readable as commented pseudocode. Scientific,
+- Keep the per-record `ProteinPreprocessor` transform readable as commented pseudocode. Scientific,
   parsing, geometry, download, and metadata complexity belongs in cohesive peripheral classes;
   exact NPZ validation, scientific resume, and atomic publication belong at the sink boundary.
 - Keep operational execution fields (`workers`, map executor choice, and `resources`) out of
@@ -177,11 +198,11 @@ project contract, not optional style suggestions.
 - Keep trainable WISDOM code small and conceptual: one dataset for validated `index.jsonl`/NPZ
   ingestion, one graph collator for domain-specific disjoint batching, the two explicitly requested
   model generations, and one `Training` Work.
-- Let LambdaForge 0.12 resolve datasets, expand seeds/search, reserve resources, capture
+- Let LambdaForge 0.13 resolve datasets, expand seeds/search, reserve resources, capture
   metrics/artifacts, and compare objectives. `Training.run()` owns its readable PyTorch loop and
   uses LambdaForge public graph layers, scatter operations, pooling, and metrics; do not reconstruct
   framework scheduling, Registry, results, or HPO infrastructure.
-- Prefer LambdaForge result indexing and plotting for run-level evidence. LambdaForge 0.12 does not
+- Prefer LambdaForge result indexing and plotting for run-level evidence. LambdaForge 0.13 does not
   expose the former generic artifact-inspection command family, so retain WISDOM tools that enforce
   protein topology, signed surface gaps, normal orientation, curvature identities, and visual NPZ
   inspection.
@@ -201,6 +222,10 @@ project contract, not optional style suggestions.
   evidence with a versioned external Foldseek installation after geometry exists. Retain thresholded
   pair tables, join all similarity/identity edges transitively, and assign each connected leakage
   group wholly to train, validation, or test. Never silently fall back when either tool is absent.
+- Publish the exact selected PDBx/mmCIF bytes inside every portable Selection design. Preprocessing
+  must consume and verify that immutable snapshot instead of downloading the current RCSB revision
+  again. Exact coordinate hashes protect the evidence that produced the design; adopting a later
+  public revision requires an explicit new Selection and dataset version.
 - Fit positive and negative physical phenotypes separately with median/IQR robust scaling and
   LambdaForge's public `lambdaforge.clustering.HDBSCAN`/`stability` services. WISDOM owns the
   scientific variables, scale, parameter grid, stability threshold, and interpretation—not a
@@ -228,8 +253,14 @@ project contract, not optional style suggestions.
 
 ## Visual layout of Python code
 
+- Keep imports at module scope; never import a dependency inside a method or function. Write plain
+  `import ...` statements first, then leave one blank line before all `from ... import ...`
+  statements. Within each group, order complete import lines from shortest to longest so the block
+  grows visually from top to bottom. This project ordering deliberately overrides isort's grouping.
 - Separate assignments into logical blocks. Insert one blank line between groups that serve
   different purposes, even when all assignments are consecutive syntactically.
+- Leave one complete blank line between an explanatory block comment and the code it introduces.
+  Also leave one blank line between large consecutive code blocks whose purposes differ.
 - Within each short logical block, vertically align assignment operators when this improves visual
   scanning. Example:
 
@@ -254,6 +285,9 @@ project contract, not optional style suggestions.
 
 - Apply alignment only inside a genuinely related block. Do not align unrelated statements across a
   long distance, and do not create extreme spacing because one identifier is unusually long.
+- In short dictionary literals, align values by adding spaces after each key's colon. Split a large
+  dictionary into meaningful blocks separated by blank lines, then align each block independently
+  instead of creating extreme spacing around one unusually long key.
 - Keep nested expressions readable. Prefer a descriptive intermediate variable and a visually
   separated block over dense nesting.
 - Do not run an automatic formatter over manually aligned `src/wisdom/preprocessing` code if it would remove
@@ -314,9 +348,6 @@ project contract, not optional style suggestions.
   ruff check .
   mypy src/wisdom
   pytest -q
-  lf validate experiments/dna_design.yaml
-  lf explain experiments/dna_design.yaml
-  lf run experiments/dna_design.yaml --dry-run
   lf validate experiments/dna_preprocess.yaml
   lf explain experiments/dna_preprocess.yaml
   lf run experiments/dna_preprocess.yaml --dry-run

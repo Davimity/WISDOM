@@ -16,14 +16,13 @@ class SurfaceBuilder:
 
     The builder samples the solvent-accessible boundary of van der Waals spheres expanded by a
     probe radius, reduces density by deterministic voxels, estimates outward normals and two-scale
-    curvature, and builds both surface and surface-to-atom sparse graphs.
+    multi-scale curvature, area weights, and temporary connectivity diagnostics.
     """
 
     def __init__(
         self,
         resolution       : float,
         probe_radius     : float                    = 1.4,
-        atom_radius      : float                    = 6.0,
         curvature_scales : tuple[float, ...] | list[float] = (2.5, 5.0),
     ) -> None:
         """Set the physical/geometric length scales used by all surface operations.
@@ -33,7 +32,6 @@ class SurfaceBuilder:
                 curvature radii, and surface graph radius are derived from this value.
             probe_radius: Solvent probe radius added to each atomic van der Waals radius, in
                 ångströms.
-            atom_radius: Surface-to-atom communication cutoff in ångströms.
             curvature_scales: Positive curvature-neighborhood radius multipliers. Scale ``s`` fits
                 one local quadratic inside radius ``s * resolution``.
 
@@ -41,14 +39,13 @@ class SurfaceBuilder:
             ValueError: If any length scale is not strictly positive, or curvature scales are empty,
                 non-positive, or duplicated.
         """
-        if resolution <= 0 or atom_radius <= 0 or probe_radius <= 0:
-            raise ValueError("surface resolution, atom radius and probe radius must be positive")
+        if resolution <= 0 or probe_radius <= 0:
+            raise ValueError("surface resolution and probe radius must be positive")
         scales = tuple(float(value) for value in curvature_scales)
         if not scales or any(value <= 0 for value in scales) or len(set(scales)) != len(scales):
             raise ValueError("curvature scales must be non-empty, positive and unique")
 
         self.resolution       = resolution
-        self.atom_radius      = atom_radius
         self.probe_radius     = probe_radius
         self.curvature_scales = scales
 
@@ -61,8 +58,8 @@ class SurfaceBuilder:
 
         Atom ``i`` is expanded to ``R_i = r_i + probe_radius``. Fibonacci candidates on each sphere
         are removed when another expanded sphere contains them, reduced to one point per resolution
-        voxel, assigned soft-min sphere-gradient normals, fitted with two-scale quadratic curvature,
-        weighted by local spacing, and connected through sparse radius graphs.
+        voxel, assigned soft-min sphere-gradient normals, fitted with multi-scale quadratic
+        curvature, weighted by local spacing, and audited through a temporary sparse radius graph.
 
         Args:
             atom_positions: Finite Cartesian atom coordinates with shape ``[N,3]`` in ångströms.
@@ -73,8 +70,7 @@ class SurfaceBuilder:
             plus diagnostic surface-connectivity warnings.
 
         Raises:
-            ValueError: If no exposed candidates survive or any surface point has no atom inside
-                ``atom_radius``.
+            ValueError: If no exposed candidates survive.
         """
         # Expand van der Waals spheres by the solvent probe to define the sampled SAS boundary.
         positions = np.asarray(atom_positions, dtype=np.float64)
@@ -92,33 +88,15 @@ class SurfaceBuilder:
         normals         = self._envelope_normals(points, owners, positions, expanded)
         curvatures      = self.estimate_curvatures(points, normals)
         weights         = self.area_weights(points)
-        graph, warnings = self.build_graph(points, normals)
+        _, warnings     = self.build_graph(points, normals)
 
-        # Connect each surface point to every atom inside the communication radius; never use KNN.
-        atom_tree     = cKDTree(positions)
-        neighborhoods = atom_tree.query_ball_point(points, self.atom_radius, return_sorted=True)
-
-        surface_atom_edges     : list[tuple[int, int]] = []
-        surface_atom_distances : list[float]           = []
-        for surface_index, atom_indices in enumerate(neighborhoods):
-            if not atom_indices:
-                raise ValueError(
-                    f"surface point {surface_index} has no atom within "
-                    f"atom_surface_radius={self.atom_radius}"
-                )
-            for atom_index in atom_indices:
-                surface_atom_edges.append((surface_index, int(atom_index)))
-                surface_atom_distances.append(
-                    float(np.linalg.norm(points[surface_index] - positions[atom_index]))
-                )
+        # Only immutable molecular geometry is published here. Trainable neighborhoods and
+        # intrinsic operators are built by their dedicated stages without changing point order.
         arrays = {
             "surface_positions": points.astype(np.float32),
             "surface_normals": normals.astype(np.float32),
             "surface_curvatures": curvatures.astype(np.float32),
             "surface_area_weights": weights,
-            "surface_atom_edge_index": np.asarray(surface_atom_edges, dtype=np.int32).T,
-            "surface_atom_distance": np.asarray(surface_atom_distances, dtype=np.float32),
-            **graph,
         }
         return arrays, warnings
 
@@ -233,19 +211,36 @@ class SurfaceBuilder:
         tree         = cKDTree(values)
         output       = np.zeros((len(values), len(self.curvature_scales), 3), dtype=np.float32)
 
-        # Dimensionless local coordinates stabilize one independent fit at every requested scale.
+        # Tangent frames and fallback nearest-neighbor rows do not depend on curvature scale. Build
+        # them once instead of repeating the same geometry for every configured radius.
+
+        bases           = [self._tangent_basis(normal) for normal in unit_normals]
+        first_tangents  = np.asarray([basis[0] for basis in bases])
+        second_tangents = np.asarray([basis[1] for basis in bases])
+        _, nearest      = tree.query(values, k=min(12, len(values)), workers=1)
+        nearest         = np.asarray(nearest).reshape(len(values), -1)
+
+        # Query all radius neighborhoods once per scale. The remaining loop performs the genuinely
+        # independent weighted quadratic fits in dimensionless local coordinates.
+
         for scale_index, scale in enumerate(self.curvature_scales):
-            radius = scale * self.resolution
+            radius        = scale * self.resolution
+            neighborhoods = tree.query_ball_point(
+                values,
+                radius,
+                workers       = 1,
+                return_sorted = True,
+            )
+
             for index, point in enumerate(values):
-                neighbors = tree.query_ball_point(point, radius)
+                neighbors = neighborhoods[index]
                 if len(neighbors) < 7:
-                    _, nearest = tree.query(point, k=min(12, len(values)))
-                    neighbors = np.atleast_1d(nearest).tolist()
+                    neighbors = nearest[index]
+
                 offsets       = values[neighbors] - point
-                first, second = self._tangent_basis(unit_normals[index])
-                u = offsets @ first / radius
-                v = offsets @ second / radius
-                z = offsets @ unit_normals[index] / radius
+                u             = offsets @ first_tangents[index] / radius
+                v             = offsets @ second_tangents[index] / radius
+                z             = offsets @ unit_normals[index] / radius
 
                 design = np.column_stack(
                     (0.5 * u * u, u * v, 0.5 * v * v, u, v, np.ones(len(u)))

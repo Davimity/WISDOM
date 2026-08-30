@@ -6,21 +6,21 @@ import numpy as np
 import pytest
 
 from wisdom.preprocessing.structure.AtomicStructureBuilder import AtomicStructureBuilder
-from wisdom.preprocessing.structure.enums.AtomRole import AtomRole
-from wisdom.preprocessing.structure.enums.BondType import BondType
 from wisdom.preprocessing.structure.PreprocessConfig import PreprocessConfig
 from wisdom.preprocessing.structure.ProteinReader import ProteinReader
-from wisdom.preprocessing.structure.StructureCache import StructureCache
+from wisdom.preprocessing.structure.StructureResolver import StructureResolver
+from wisdom.utils.structure.enums.AtomRole import AtomRole
+from wisdom.utils.structure.enums.BondType import BondType
 
 
 def _read(path: Path, config: PreprocessConfig | None = None):
     selected_config = config or PreprocessConfig()
-    source = StructureCache(path.parent).resolve(str(path), path.parent)
+    source = StructureResolver(path.parent).resolve(str(path), path.parent)
     return ProteinReader(selected_config).read(source)
 
 
 def test_underscore_chain_identifier_format(tmp_path: Path) -> None:
-    cache = StructureCache(tmp_path)
+    cache = StructureResolver(tmp_path)
     with pytest.raises(ValueError, match="identifier"):
         cache.resolve("XYZ#A,B", tmp_path)
 
@@ -52,7 +52,7 @@ def test_reads_pdb_mmcif_and_gzip(request: pytest.FixtureRequest, fixture_name: 
 
 def test_chain_selection_and_source_selector_precedence(pdb_path: Path) -> None:
     config = PreprocessConfig(chains=["B"])
-    source = StructureCache(pdb_path.parent).resolve(str(pdb_path), pdb_path.parent)
+    source = StructureResolver(pdb_path.parent).resolve(str(pdb_path), pdb_path.parent)
     chain_b, metadata_b = ProteinReader(config).read(source)
     chain_a, metadata_a = ProteinReader(config).read(replace(source, chains=("A",)))
     assert [chain.id for chain in chain_b.chains] == ["B"]
@@ -66,7 +66,7 @@ def test_invalid_model_chain_and_filtering(pdb_path: Path) -> None:
         _read(pdb_path, PreprocessConfig(model_index=1))
 
     config = PreprocessConfig()
-    source = StructureCache(pdb_path.parent).resolve(str(pdb_path), pdb_path.parent)
+    source = StructureResolver(pdb_path.parent).resolve(str(pdb_path), pdb_path.parent)
     with pytest.raises(ValueError, match="requested chains"):
         ProteinReader(config).read(replace(source, chains=("Z",)))
 
@@ -79,7 +79,7 @@ def test_invalid_model_chain_and_filtering(pdb_path: Path) -> None:
     protein, _ = _read(pdb_path, inclusive)
     residues = [residue for chain in protein.chains for residue in chain.residues]
     atoms = [atom for residue in residues for atom in residue.atoms]
-    roles = AtomicStructureBuilder(inclusive.atom_radius).build(protein)["atom_role_ids"]
+    roles = AtomicStructureBuilder(inclusive.atom_spatial_radius).build(protein)["atom_role_ids"]
     assert any(atom.atomic_number == 1 for atom in atoms)
     assert AtomRole.WATER in roles
     assert AtomRole.METAL in roles

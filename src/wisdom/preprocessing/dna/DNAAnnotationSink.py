@@ -14,64 +14,39 @@ from uuid import uuid4
 
 import numpy as np
 
-from wisdom.preprocessing.ProcessingRecord import ProcessingRecord
-from wisdom.preprocessing.ProcessingWorkspace import ProcessingWorkspace
-
 
 class DNAAnnotationSink:
     """Publish compact annotation archives aligned to immutable base surfaces."""
 
-    def __init__(
-        self,
-        annotation_output : str = "annotations",
-        report_output     : str = "annotation-report.json",
-        design_input      : str | None = None,
-    ) -> None:
-        """Bind named output locations for sidecars and their audit.
-
-        Args:
-            annotation_output: Named directory receiving ``*.dna.npz`` sidecars.
-            report_output: Named JSON report output.
-            design_input: Optional named directory containing the fixed canonical design catalog.
-
-        Raises:
-            ValueError: If a logical input or output name is invalid.
-        """
-        if (
-            not annotation_output.strip()
-            or not report_output.strip()
-            or (design_input is not None and not design_input.strip())
-        ):
-            raise ValueError("annotation output names cannot be empty")
-        self.annotation_output = annotation_output
-        self.report_output     = report_output
-        self.design_input      = design_input
+    def __init__(self) -> None:
+        """Create an empty collection of validated sidecar reports."""
         self.records: dict[str, dict[str, Any]] = {}
 
-    def write(self, record: ProcessingRecord, context: ProcessingWorkspace) -> None:
+    def write(self, record: Mapping[str, Any], output_root: Path) -> None:
         """Validate all sidecar arrays, then publish one pickle-free NPZ atomically.
 
         Args:
             record: Annotation transform output with arrays, metadata, and filename.
-            context: LambdaForge context resolving the annotation directory.
+            output_root: Checkpoint-owned directory receiving ``*.dna.npz`` files.
 
         Raises:
             TypeError: If the record does not follow the transform/sink contract.
             ValueError: If schemas, lengths, masks, values, or fingerprints are inconsistent.
             OSError: If atomic NPZ publication or verification fails.
         """
-        if not isinstance(record.value, Mapping):
+        key   = str(record["key"])
+        value = record.get("value")
+        if not isinstance(value, Mapping):
             raise TypeError("annotation value must be a mapping")
-        arrays = record.value.get("arrays")
-        metadata = record.value.get("metadata")
-        output_name = record.value.get("output_name")
+        arrays      = value.get("arrays")
+        metadata    = value.get("metadata")
+        output_name = value.get("output_name")
         if not isinstance(arrays, Mapping) or not isinstance(metadata, Mapping):
             raise TypeError("annotation requires array and metadata mappings")
         if not isinstance(output_name, str) or Path(output_name).name != output_name:
             raise ValueError("annotation output_name must be a safe filename")
         self._validate(arrays, metadata)
 
-        output_root = context.output(self.annotation_output)
         output_root.mkdir(parents=True, exist_ok=True)
         output_path = output_root / output_name
         temporary = output_path.with_name(
@@ -87,36 +62,38 @@ class DNAAnnotationSink:
         with np.load(output_path, allow_pickle=False) as stored:
             self._validate({name: stored[name] for name in stored.files}, metadata)
 
-        self.records[record.key] = self._report(record.key, output_path, metadata)
+        self.records[key] = self._report(key, output_path, metadata)
 
     def resume(
         self,
-        record          : ProcessingRecord,
-        context         : ProcessingWorkspace,
+        record          : Mapping[str, Any],
+        output_root     : Path,
         positive_gap    : float,
         negative_gap    : float,
         sensitivity_gaps: tuple[float, ...],
-    ) -> ProcessingRecord | None:
+    ) -> dict[str, Any] | None:
         """Reuse one sidecar only when geometry provenance and target settings still match.
 
         Args:
             record: Current joined catalog/base-NPZ record.
-            context: Workspace locating checkpoint-owned annotation sidecars.
+            output_root: Directory containing checkpoint-owned annotation sidecars.
             positive_gap: Current confident-positive surface gap in ångströms.
             negative_gap: Current confident-negative surface gap in ångströms.
             sensitivity_gaps: Current evaluation-only cutoff sequence in ångströms.
 
         Returns:
-            Compact ``ProcessingRecord`` report for a fully valid reusable sidecar, or ``None``
-            when the worker must recompute it.
+            JSON-compatible report for a fully valid reusable sidecar, or ``None`` when the
+            worker must recompute it.
 
         Raises:
             TypeError: If the joined record value is not a mapping.
         """
-        if not isinstance(record.value, Mapping):
+        key   = str(record["key"])
+        value = record.get("value")
+        if not isinstance(value, Mapping):
             raise TypeError("annotation resume requires a mapping record")
-        base_path = Path(str(record.value.get("base_npz", "")))
-        sidecar   = context.output(self.annotation_output) / f"{base_path.stem}.dna.npz"
+        base_path = Path(str(value.get("base_npz", "")))
+        sidecar   = output_root / f"{base_path.stem}.dna.npz"
         if not base_path.is_file() or not sidecar.is_file():
             return None
         try:
@@ -128,11 +105,11 @@ class DNAAnnotationSink:
             return None
 
         expected_base = hashlib.sha256(base_path.read_bytes()).hexdigest()
-        if metadata.get("base_identifier") != record.key:
+        if metadata.get("base_identifier") != key:
             return None
         if metadata.get("base_npz_sha256") != expected_base:
             return None
-        if metadata.get("source_structure_sha256") != record.value.get("structure_sha256"):
+        if metadata.get("source_structure_sha256") != value.get("structure_sha256"):
             return None
         if float(metadata.get("positive_gap_angstrom", -1.0)) != positive_gap:
             return None
@@ -141,7 +118,7 @@ class DNAAnnotationSink:
         if tuple(metadata.get("sensitivity_gaps_angstrom", ())) != sensitivity_gaps:
             return None
 
-        return record.with_value(self._report(record.key, sidecar, metadata))
+        return {"key": key, "value": self._report(key, sidecar, metadata)}
 
     @staticmethod
     def _report(
@@ -180,11 +157,12 @@ class DNAAnnotationSink:
             "sidecar_sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
         }
 
-    def finalize(self, context: ProcessingWorkspace) -> tuple[Path, Path]:
+    def finalize(self, output_root: Path, report_path: Path) -> tuple[Path, Path]:
         """Write an ordered audit and declare the annotation dataset.
 
         Args:
-            context: LambdaForge context resolving annotation and report outputs.
+            output_root: Self-contained directory containing sidecars and portable base assets.
+            report_path: Destination ordered annotation JSON report.
 
         Returns:
             Dataset and JSON report artifact declarations.
@@ -194,27 +172,15 @@ class DNAAnnotationSink:
         """
         if not self.records:
             raise RuntimeError("DNA annotation produced no sidecar archives")
-        output_root = context.output(self.annotation_output)
         self._materialize_bases(output_root)
         self._materialize_structures(output_root)
-
-        # Preserve the already partitioned canonical catalog beside the arrays. DatasetDesign is
-        # authoritative; annotation never recalculates or mutates its membership metadata.
-        if self.design_input is not None:
-            design_root = context.input(self.design_input)
-            if not design_root.is_dir():
-                raise RuntimeError("dataset design input must resolve to a directory")
-            source = design_root / "catalog.csv"
-            if not source.is_file():
-                raise RuntimeError("dataset design input lacks catalog.csv")
-            self._atomic_copy(source, output_root / "catalog.csv")
 
         annotated_records = sorted(
             self.records.values(), key=lambda value: str(value["identifier"])
         )
         self._write_annotated_catalog(output_root / "annotated-catalog.csv", annotated_records)
 
-        report_path = context.output(self.report_output, create=True)
+        report_path.parent.mkdir(parents=True, exist_ok=True)
         payload = {
             "verdict": "PASS",
             "annotated_count": len(self.records),
@@ -292,7 +258,7 @@ class DNAAnnotationSink:
             value["portable_base_path"] = target.relative_to(output_root).as_posix()
 
     def _materialize_structures(self, output_root: Path) -> None:
-        """Copy DatasetDesign-verified structures from the geometry cache into publication.
+        """Copy Selection-verified structures from the geometry cache into publication.
 
         Args:
             output_root: Final dataset root receiving a ``structures`` directory.
