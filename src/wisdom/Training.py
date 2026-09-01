@@ -85,7 +85,8 @@ class Training(lf.Work):
         minimum_delta         : float = 1.0e-3,
         precision            : str = "auto",
         surface_metrics      : bool = True,
-        data_workers         : int = 0,
+        surface_metrics_interval: int = 0,
+        data_workers         : int = 4,
     ) -> dict[str, Any]:
         """Train and evaluate one compatible WISDOM generation from a managed DatasetVersion.
 
@@ -126,7 +127,11 @@ class Training(lf.Work):
             precision: ``auto``, ``float32``, ``bfloat16``, or ``float16`` activation policy.
             surface_metrics: Report evaluation-only local metrics on validation and final test
                 without exposing them to loss, checkpoint selection, pruning, or HPO ranking.
-            data_workers: Non-negative DataLoader subprocess count per split.
+            surface_metrics_interval: Validation-epoch interval for local metrics. Zero evaluates
+                them only once after restoring the best checkpoint; a positive value also evaluates
+                them every N epochs. The final held-out test evaluation remains unchanged.
+            data_workers: Persistent training-loader subprocesses used to overlap NPZ decoding
+                with GPU work. Validation and test use half this count, rounded down to one.
 
         Returns:
             Best validation epoch/metrics, stopping reason, and held-out test metrics. Adaptively
@@ -170,6 +175,7 @@ class Training(lf.Work):
             minimum_delta=minimum_delta,
             precision=precision,
             surface_metrics=surface_metrics,
+            surface_metrics_interval=surface_metrics_interval,
             data_workers=data_workers,
             seed=self.seed or 0,
         )
@@ -208,7 +214,8 @@ def _train_wisdom(
     minimum_delta         : float = 1.0e-3,
     precision            : str = "auto",
     surface_metrics      : bool = True,
-    data_workers         : int = 0,
+    surface_metrics_interval: int = 0,
+    data_workers         : int = 4,
     seed                 : int = 0,
 ) -> dict[str, Any]:
     """Train and evaluate one compatible WISDOM generation from a managed DatasetVersion.
@@ -250,7 +257,11 @@ def _train_wisdom(
         precision: ``auto``, ``float32``, ``bfloat16``, or ``float16`` activation policy.
         surface_metrics: Report evaluation-only local metrics on validation and final test without
             using them for optimization or model selection.
-        data_workers: Non-negative DataLoader subprocess count per split.
+        surface_metrics_interval: Validation-epoch interval for local metrics. Zero evaluates them
+            only on the restored best checkpoint; a positive integer additionally evaluates every
+            N epochs. Ignored when ``surface_metrics`` is false.
+        data_workers: Persistent training-loader subprocesses used to overlap NPZ decoding with
+            GPU work. Validation and test use half this count, rounded down to one.
         seed: Reproducible seed injected by LambdaForge for each expanded run.
 
     Returns:
@@ -272,6 +283,12 @@ def _train_wisdom(
         raise ValueError("optimizer learning rate must be positive and weight decay non-negative")
     if batch_size < 1 or epochs < 1 or data_workers < 0:
         raise ValueError("batch size/epochs must be positive and data workers non-negative")
+    if (
+        isinstance(surface_metrics_interval, bool)
+        or not isinstance(surface_metrics_interval, int)
+        or surface_metrics_interval < 0
+    ):
+        raise ValueError("surface_metrics_interval must be a non-negative integer")
     if patience < 1 or minimum_delta < 0.0:
         raise ValueError("patience must be positive and minimum_delta must be non-negative")
     if precision not in {"auto", "bfloat16", "float16", "float32"}:
@@ -302,7 +319,7 @@ def _train_wisdom(
     scaler = torch.amp.GradScaler("cuda", enabled=effective_precision == "float16")
 
     if device.type == "cuda":
-        torch.set_float32_matmul_precision("high")
+        torch.set_float32_matmul_precision("medium")
 
     trial_index = work.trial.index if work.trial is not None else 0
     run_label   = f"trial={trial_index} seed={seed}"
@@ -314,28 +331,70 @@ def _train_wisdom(
             dataset,
             split,
             subset=subset,
-            include_surface_targets=surface_metrics and split in {"val", "test"},
+            include_surface_targets=False,
             include_surface_geometry=model_version == 3,
         )
         for split in ("train", "val", "test")
     }
+    loader_datasets = dict(datasets)
+
+    # Surface targets live in separate sidecars and are not needed for global validation. A second
+    # validation view prevents ordinary epochs from decoding those arrays or retaining every point
+    # score merely to compute diagnostics that cannot select the model. The held-out sidecars are
+    # likewise isolated until the validation-selected checkpoint reaches final test evaluation.
+
+    if surface_metrics:
+        loader_datasets["val_surface"] = WisdomDataset(
+            dataset,
+            "val",
+            subset=subset,
+            include_surface_targets=True,
+            include_surface_geometry=model_version == 3,
+        )
+        loader_datasets["test_surface"] = WisdomDataset(
+            dataset,
+            "test",
+            subset=subset,
+            include_surface_targets=True,
+            include_surface_geometry=model_version == 3,
+        )
+
     generator = torch.Generator().manual_seed(seed)
-    loaders = {
-        split: DataLoader(
-            value,
+    collator  = WisdomCollator(
+        atom_spatial_k=atom_spatial_k,
+        surface_atom_k=surface_atom_k,
+        diffusion_spectral_modes=diffusion_spectral_modes,
+    )
+    loaders: dict[str, DataLoader[Any]] = {}
+    evaluation_workers = max(1, data_workers // 2) if data_workers else 0
+
+    # Persistent training workers overlap compressed-NPZ decoding with the previous GPU batch.
+    # Evaluation uses half as many temporary workers so the idle training pool plus the active
+    # validation pool and trainer remain inside the per-Run CPU allocation.
+
+    for split, split_dataset in loader_datasets.items():
+        split_workers = (
+            data_workers
+            if split == "train"
+            else evaluation_workers
+        )
+        loader_options: dict[str, Any] = {}
+        if split_workers:
+            loader_options.update(
+                persistent_workers=split == "train",
+                prefetch_factor=1,
+            )
+
+        loaders[split] = DataLoader(
+            split_dataset,
             batch_size=batch_size,
             shuffle=split == "train",
-            num_workers=data_workers,
-            collate_fn=WisdomCollator(
-                atom_spatial_k=atom_spatial_k,
-                surface_atom_k=surface_atom_k,
-                diffusion_spectral_modes=diffusion_spectral_modes,
-            ),
+            num_workers=split_workers,
+            collate_fn=collator,
             generator=generator if split == "train" else None,
             pin_memory=device.type == "cuda",
+            **loader_options,
         )
-        for split, value in datasets.items()
-    }
 
     # Infer the model input width from the immutable data contract instead of duplicating the
     # preprocessing scale count in a training YAML. All splits must expose the same [M,S,3] shape.
@@ -408,16 +467,27 @@ def _train_wisdom(
     work.metrics.log("parameter_count", float(parameter_count))
     work.metrics.log("preprocessing_bytes", float(preprocessing_bytes))
 
+    if not surface_metrics:
+        surface_schedule = "disabled"
+    elif surface_metrics_interval == 0:
+        surface_schedule = "best-checkpoint-only"
+    else:
+        surface_schedule = f"every-{surface_metrics_interval}-epochs-plus-best"
+
     work.log(
         f"[Training {run_label}] starting on {device.type}; splits={split_sizes}; "
         f"architecture={architecture_name}; curvature_features={curvature_features}; "
         f"batch_size={batch_size}; "
-        f"precision={effective_precision}; parameters={parameter_count:,} "
+        f"data_workers=train:{data_workers}/eval:{evaluation_workers}; "
+        f"precision={effective_precision}; "
+        f"matmul_precision={torch.get_float32_matmul_precision()}; parameters={parameter_count:,} "
         f"({parameter_mib:.2f} MiB in FP32); preprocessing_bytes={preprocessing_bytes:,}; "
-        f"maximum_epochs={epochs}; patience={patience}"
+        f"maximum_epochs={epochs}; patience={patience}; "
+        f"surface_metrics={surface_schedule}"
     )
 
     best_auprc                 = float("-inf")
+    best_val_loss              = float("inf")
     best_epoch                 = 0
     epochs_completed           = 0
     epochs_without_improvement = 0
@@ -428,6 +498,16 @@ def _train_wisdom(
 
     checkpoint = work.run_dir / "best-model.pt"
 
+    maximum_atoms          = 0
+    maximum_surface_points = 0
+    maximum_atomic_edges   = 0
+    maximum_atomic_degree  = 0
+    mean_atomic_degree_sum = 0.0
+    atom_count_sum          = 0
+    surface_point_sum       = 0
+    profiled_batches        = 0
+    spectral_modes_seen     : list[int] = []
+
     # Train up to the safety ceiling. Validation patience decides the useful duration of an
     # ordinary Run, while LambdaForge may cooperatively prune a weak HPO candidate.
 
@@ -437,38 +517,32 @@ def _train_wisdom(
             torch.cuda.reset_peak_memory_stats(device)
 
         model.train()
-        loss_sum = 0.0
-        examples = 0
-
-        maximum_atoms          = 0
-        maximum_surface_points = 0
-        maximum_atomic_edges   = 0
-        maximum_atomic_degree  = 0
-        mean_atomic_degree_sum = 0.0
-        atom_count_sum          = 0
-        surface_point_sum       = 0
-        training_batches       = 0
-        spectral_modes_seen    : list[int] = []
+        loss_sum               = torch.zeros((), device=device)
+        examples               = 0
+        data_wait_seconds      = 0.0
+        previous_batch_finished = time.perf_counter()
 
         for batch in loaders["train"]:
-            atomic_numbers = _tensor(batch, "atomic_numbers")
-            maximum_surface_points = max(
-                maximum_surface_points,
-                int(_tensor(batch, "surface_area_weights").shape[0]),
-            )
-            maximum_atoms = max(maximum_atoms, len(atomic_numbers))
-            atom_count_sum += len(atomic_numbers)
-            surface_point_sum += int(_tensor(batch, "surface_area_weights").shape[0])
-            active_edges  = _tensor(batch, "atom_edge_index")
-            maximum_atomic_edges = max(maximum_atomic_edges, active_edges.shape[1])
-            degree = torch.bincount(active_edges[1], minlength=len(atomic_numbers))
-            maximum_atomic_degree = max(maximum_atomic_degree, int(degree.max()))
-            mean_atomic_degree_sum += float(degree.float().mean())
-            training_batches += 1
-            spectral_modes_seen.extend(
-                len(operator["eigenvalues"])
-                for operator in _operators(batch)
-            )
+            data_wait_seconds += time.perf_counter() - previous_batch_finished
+
+            if epoch == 1:
+                atomic_numbers = _tensor(batch, "atomic_numbers")
+                surface_points = int(_tensor(batch, "surface_area_weights").shape[0])
+                active_edges   = _tensor(batch, "atom_edge_index")
+                degree         = torch.bincount(active_edges[1], minlength=len(atomic_numbers))
+
+                maximum_atoms          = max(maximum_atoms, len(atomic_numbers))
+                maximum_surface_points = max(maximum_surface_points, surface_points)
+                maximum_atomic_edges   = max(maximum_atomic_edges, active_edges.shape[1])
+                maximum_atomic_degree  = max(maximum_atomic_degree, int(degree.max()))
+                mean_atomic_degree_sum += float(degree.float().mean())
+                atom_count_sum          += len(atomic_numbers)
+                surface_point_sum       += surface_points
+                profiled_batches        += 1
+                spectral_modes_seen.extend(
+                    len(operator["eigenvalues"])
+                    for operator in _operators(batch)
+                )
 
             tensors = _device_batch(batch, device)
             optimizer.zero_grad(set_to_none=True)
@@ -491,81 +565,68 @@ def _train_wisdom(
                 optimizer.step()
 
             count     = len(target)
-            loss_sum += float(loss.detach()) * count
+            loss_sum += loss.detach() * count
             examples += count
 
             # The model returns point-level diagnostics in addition to protein logits. Explicitly
             # release the completed batch so it cannot overlap the next batch or validation pass.
 
             del tensors, output, target, loss
+            previous_batch_finished = time.perf_counter()
 
         optimizer.zero_grad(set_to_none=True)
 
+        if device.type == "cuda":
+            torch.cuda.synchronize(device)
+
         training_seconds = time.perf_counter() - epoch_started
         train_throughput = examples / max(training_seconds, 1.0e-9)
-        train_loss       = loss_sum / max(1, examples)
+        train_loss       = float(loss_sum) / max(1, examples)
+
+        # Global validation is required every epoch for checkpoint selection, patience, and HPO.
+        # Local diagnostics use the sidecar-enabled view only on explicitly scheduled epochs.
+
+        surface_metrics_due = (
+            surface_metrics
+            and surface_metrics_interval > 0
+            and epoch % surface_metrics_interval == 0
+        )
+        validation_loader = (
+            loaders["val_surface"]
+            if surface_metrics_due
+            else loaders["val"]
+        )
+
+        validation_started = time.perf_counter()
         validation, surface_validation = _evaluate(
             model,
-            loaders["val"],
+            validation_loader,
             device,
             autocast_dtype,
         )
+        validation_seconds = time.perf_counter() - validation_started
 
         work.metrics.log("loss", train_loss, step=epoch, split="train")
-        work.metrics.log(
-            "maximum_surface_points",
-            float(maximum_surface_points),
-            step=epoch,
-            split="train",
-        )
-        work.metrics.log(
-            "maximum_atoms",
-            float(maximum_atoms),
-            step=epoch,
-            split="train",
-        )
-        work.metrics.log(
-            "maximum_active_atomic_edges",
-            float(maximum_atomic_edges),
-            step=epoch,
-            split="train",
-        )
-        work.metrics.log(
-            "maximum_atomic_degree",
-            float(maximum_atomic_degree),
-            step=epoch,
-            split="train",
-        )
-        work.metrics.log(
-            "mean_atomic_degree",
-            mean_atomic_degree_sum / max(1, training_batches),
-            step=epoch,
-            split="train",
-        )
-        work.metrics.log(
-            "mean_atoms_per_batch",
-            atom_count_sum / max(1, training_batches),
-            step=epoch,
-            split="train",
-        )
-        work.metrics.log(
-            "mean_surface_points_per_batch",
-            surface_point_sum / max(1, training_batches),
-            step=epoch,
-            split="train",
-        )
-        work.metrics.log(
-            "active_atom_spatial_k",
-            float(atom_spatial_k),
-            step=epoch,
-            split="train",
-        )
-        work.metrics.log(
-            "active_surface_atom_k",
-            float(surface_atom_k),
-            step=epoch,
-            split="train",
-        )
+
+        if epoch == 1:
+            static_metrics = {
+                "maximum_surface_points":       float(maximum_surface_points),
+                "maximum_atoms":                float(maximum_atoms),
+                "maximum_active_atomic_edges":  float(maximum_atomic_edges),
+                "maximum_atomic_degree":        float(maximum_atomic_degree),
+                "mean_atomic_degree":           mean_atomic_degree_sum / max(1, profiled_batches),
+                "mean_atoms_per_batch":         atom_count_sum / max(1, profiled_batches),
+                "mean_surface_points_per_batch": surface_point_sum / max(1, profiled_batches),
+                "active_atom_spatial_k":         float(atom_spatial_k),
+                "active_surface_atom_k":         float(surface_atom_k),
+            }
+            if spectral_modes_seen:
+                static_metrics["mean_spectral_modes"] = (
+                    sum(spectral_modes_seen) / len(spectral_modes_seen)
+                )
+            for name, metric_value in static_metrics.items():
+                work.metrics.log(name, metric_value, step=epoch, split="train")
+
         work.metrics.log(
             "train_seconds",
             training_seconds,
@@ -578,26 +639,41 @@ def _train_wisdom(
             step=epoch,
             split="train",
         )
-        if spectral_modes_seen:
-            work.metrics.log(
-                "mean_spectral_modes",
-                sum(spectral_modes_seen) / len(spectral_modes_seen),
-                step=epoch,
-                split="train",
-            )
+        work.metrics.log(
+            "data_wait_seconds",
+            data_wait_seconds,
+            step=epoch,
+            split="train",
+        )
+        work.metrics.log(
+            "validation_seconds",
+            validation_seconds,
+            step=epoch,
+            split="val",
+        )
+        work.metrics.log(
+            "surface_metrics_computed",
+            float(surface_metrics_due),
+            step=epoch,
+            split="val",
+        )
+        for name, optional_metric in validation.items():
+            if optional_metric is not None:
+                work.metrics.log(name, optional_metric, step=epoch, split="val")
+        for name, optional_metric in surface_validation.items():
+            if optional_metric is not None:
+                work.metrics.log(name, optional_metric, step=epoch, split="val")
 
-        for name, value in validation.items():
-            if value is not None:
-                work.metrics.log(name, value, step=epoch, split="val")
-        for name, value in surface_validation.items():
-            if value is not None:
-                work.metrics.log(name, value, step=epoch, split="val")
+        objective       = validation["auprc"]
+        validation_loss = validation["loss"]
+        if validation_loss is None:
+            raise RuntimeError("validation loss is unavailable for a non-empty split")
 
-        objective        = validation["auprc"]
         epochs_completed = epoch
 
         if objective is not None and objective > best_auprc + minimum_delta:
             best_auprc                 = objective
+            best_val_loss              = validation_loss
             best_epoch                 = epoch
             epochs_without_improvement = 0
 
@@ -610,22 +686,39 @@ def _train_wisdom(
                     "seed":             seed,
                     "epoch":            epoch,
                     "val_auprc":        objective,
+                    "val_loss":         best_val_loss,
                 },
                 checkpoint,
             )
         elif objective is not None:
             epochs_without_improvement += 1
 
-        # One compact, labelled line per epoch remains readable with two interleaved GPU Runs.
+        work.metrics.log(
+            "patience_used",
+            float(epochs_without_improvement),
+            step=epoch,
+            split="val",
+        )
+        work.metrics.log(
+            "patience_remaining",
+            float(max(0, patience - epochs_without_improvement)),
+            step=epoch,
+            split="val",
+        )
+
+        # One compact, labelled line per epoch remains readable with eight interleaved GPU Runs.
         # The complete metric suite is still stored structurally by LambdaForge above.
 
         auroc    = validation["auroc"]
         balanced = validation["balanced_accuracy"]
+        mcc      = validation["mcc"]
 
         auprc_text    = "n/a" if objective is None else f"{objective:.4f}"
         auroc_text    = "n/a" if auroc is None else f"{auroc:.4f}"
         balanced_text = "n/a" if balanced is None else f"{balanced:.4f}"
+        mcc_text      = "n/a" if mcc is None else f"{mcc:.4f}"
         best_text     = "n/a" if best_epoch == 0 else f"{best_auprc:.4f}"
+        val_loss_text = _metric_text(validation, "loss")
 
         surface_micro_text = _metric_text(surface_validation, "surface_micro_auprc")
         surface_macro_text = _metric_text(
@@ -633,10 +726,16 @@ def _train_wisdom(
             "surface_positive_macro_auprc",
         )
         surface_auroc_text = _metric_text(surface_validation, "surface_positive_macro_auroc")
+        surface_status = (
+            "computed"
+            if surface_metrics_due
+            else "deferred" if surface_metrics else "disabled"
+        )
 
         progress_message = (
-            f"{run_label}; loss={train_loss:.5f}; val_auprc={auprc_text}; "
-            f"surface_macro_auprc={surface_macro_text}; best={best_text}"
+            f"{run_label}; train_loss={train_loss:.5f}; val_loss={val_loss_text}; "
+            f"val_auprc={auprc_text}; surface_macro_auprc={surface_macro_text}; "
+            f"patience={epochs_without_improvement}/{patience}; best={best_text}"
         )
 
         memory_text = ""
@@ -670,10 +769,10 @@ def _train_wisdom(
 
         work.progress.update(completed=epoch, total=epochs, message=progress_message)
         work.log(
-            f"[Training {run_label}] epoch={epoch}/{epochs} loss={train_loss:.5f} "
-            f"protein_val[auprc={auprc_text},auroc={auroc_text},"
-            f"balanced_accuracy={balanced_text},best_auprc={best_text}] "
-            f"surface_val[micro_auprc={surface_micro_text},"
+            f"[Training {run_label}] epoch={epoch}/{epochs} train_loss={train_loss:.5f} "
+            f"protein_val[loss={val_loss_text},auprc={auprc_text},auroc={auroc_text},"
+            f"balanced_accuracy={balanced_text},mcc={mcc_text},best_auprc={best_text}] "
+            f"surface_val[status={surface_status},micro_auprc={surface_micro_text},"
             f"positive_macro_auprc={surface_macro_text},"
             f"positive_macro_auroc={surface_auroc_text}] "
             f"patience={epochs_without_improvement}/{patience} "
@@ -681,7 +780,8 @@ def _train_wisdom(
             f"atomic_edges:{maximum_atomic_edges:,},degree_max:{maximum_atomic_degree},"
             f"K:{atom_spatial_k},J:{surface_atom_k},modes:"
             f"{max(spectral_modes_seen, default=0)} train_throughput={train_throughput:.2f}/s "
-            f"epoch_throughput={proteins_per_second:.2f}/s"
+            f"epoch_throughput={proteins_per_second:.2f}/s "
+            f"data_wait={data_wait_seconds:.1f}s validation={validation_seconds:.1f}s"
             f"{memory_text}"
         )
 
@@ -712,7 +812,8 @@ def _train_wisdom(
 
     work.metrics.log("auprc", best_auprc, split="val")
 
-    test_metrics: dict[str, float | None] | None = None
+    best_surface_metrics: dict[str, float | None] | None = None
+    test_metrics        : dict[str, float | None] | None = None
     test_surface_metrics: dict[str, float | None] | None = None
 
     # Pruned HPO Runs are excluded from candidate scores and need no held-out test evaluation.
@@ -722,19 +823,35 @@ def _train_wisdom(
     if stop_reason != "adaptive-hpo":
         saved = torch.load(checkpoint, map_location=device, weights_only=True)
         model.load_state_dict(saved["state_dict"])
+
+        # Local validation is always reported once for the exact checkpoint selected by global
+        # validation AUPRC. This is the only local pass when the configured interval is zero.
+
+        if surface_metrics:
+            _, best_surface_metrics = _evaluate(
+                model,
+                loaders["val_surface"],
+                device,
+                autocast_dtype,
+            )
+
+            for name, optional_metric in best_surface_metrics.items():
+                if optional_metric is not None:
+                    work.metrics.log(name, optional_metric, split="val")
+
         test_metrics, test_surface_metrics = _evaluate(
             model,
-            loaders["test"],
+            loaders["test_surface"] if surface_metrics else loaders["test"],
             device,
             autocast_dtype,
         )
 
-        for name, value in test_metrics.items():
-            if value is not None:
-                work.metrics.log(name, value, split="test")
-        for name, value in test_surface_metrics.items():
-            if value is not None:
-                work.metrics.log(name, value, split="test")
+        for name, optional_metric in test_metrics.items():
+            if optional_metric is not None:
+                work.metrics.log(name, optional_metric, split="test")
+        for name, optional_metric in test_surface_metrics.items():
+            if optional_metric is not None:
+                work.metrics.log(name, optional_metric, split="test")
 
     report = {
         "model_version":               model_version,
@@ -745,11 +862,14 @@ def _train_wisdom(
         "epochs_completed":            epochs_completed,
         "best_epoch":                  best_epoch,
         "best_val_auprc":              best_auprc,
+        "best_val_loss":               best_val_loss,
         "early_stopping_patience":     patience,
         "early_stopping_minimum_delta": minimum_delta,
         "precision":                   effective_precision,
         "surface_metrics_enabled":     surface_metrics,
+        "surface_metrics_interval":    surface_metrics_interval,
         "stop_reason":                 stop_reason,
+        "best_validation_surface":     best_surface_metrics,
         "test":                        test_metrics,
         "test_surface":                test_surface_metrics,
         "curvature_features":          curvature_features,
@@ -790,10 +910,10 @@ def _evaluate(
         autocast_dtype: CUDA mixed-precision dtype, or ``None`` for full float32.
 
     Returns:
-        Protein metric mapping and optional surface metric mapping. Mathematically undefined values
-        remain ``None``.
+        Protein metric mapping including mean binary cross-entropy loss, and an optional surface
+        metric mapping. Mathematically undefined values remain ``None``.
     """
-    probabilities     : list[Tensor] = []
+    logits            : list[Tensor] = []
     targets           : list[Tensor] = []
     surface_scores    : list[Tensor] = []
     surface_targets   : list[Tensor] = []
@@ -807,7 +927,7 @@ def _evaluate(
     )
 
     model.eval()
-    with torch.no_grad():
+    with torch.inference_mode():
         for batch in loader:
             tensors = _device_batch(batch, device)
 
@@ -818,12 +938,12 @@ def _evaluate(
             ):
                 output = model(**_model_inputs(tensors))
 
-            probabilities.append(torch.sigmoid(output["logits"]).cpu())
-            protein_target = _tensor(tensors, "target").cpu()
+            logits.append(output["logits"].float())
+            protein_target = _tensor(batch, "target")
             targets.append(protein_target)
 
             if "surface_target_hard" in batch and "surface_valid_mask" in batch:
-                surface_scores.append(torch.sigmoid(output["surface_logits"]).float().cpu())
+                surface_scores.append(output["surface_logits"].float())
                 surface_targets.append(_tensor(batch, "surface_target_hard").cpu())
                 surface_validity.append(_tensor(batch, "surface_valid_mask").cpu())
                 surface_owners.append(_tensor(batch, "surface_batch").cpu() + protein_offset)
@@ -833,12 +953,17 @@ def _evaluate(
 
             del tensors, output
 
-    protein_metrics = BinaryMetricSuite().compute(torch.cat(probabilities), torch.cat(targets))
+    protein_logits  = torch.cat(logits).cpu()
+    protein_targets = torch.cat(targets)
+    protein_metrics = BinaryMetricSuite().compute(torch.sigmoid(protein_logits), protein_targets)
+    protein_metrics["loss"] = float(
+        F.binary_cross_entropy_with_logits(protein_logits, protein_targets)
+    )
     if not surface_scores:
         return protein_metrics, {}
 
     local_metrics = SurfaceMetricSuite().compute(
-        torch.cat(surface_scores),
+        torch.sigmoid(torch.cat(surface_scores)).cpu(),
         torch.cat(surface_targets),
         torch.cat(surface_validity),
         torch.cat(surface_owners),
@@ -924,7 +1049,7 @@ def _create_model(
 
 
 def _device_batch(batch: Mapping[str, Any], device: torch.device) -> dict[str, Any]:
-    """Recursively move only model inputs and the protein target to one device.
+    """Move model tensors to one device while retaining prefix boundaries on the host.
 
     Args:
         batch: Collated WISDOM graph mapping, which may also contain point-level diagnostics.
@@ -932,12 +1057,14 @@ def _device_batch(batch: Mapping[str, Any], device: torch.device) -> dict[str, A
 
     Returns:
         New mapping containing model tensors/operator packs and the global target on ``device``.
-        DNA sidecars, identifiers, tiers, and unused diagnostics stay on the host.
+        ``surface_ptr`` stays on CPU because it supplies Python slice boundaries; moving it to
+        CUDA would force one device synchronization for every protein. DNA sidecars, identifiers,
+        tiers, and unused diagnostics also stay on the host.
     """
     selected_names = [*_MODEL_INPUT_NAMES, "target"]
     selected_names.extend(name for name in _V3_INPUT_NAMES if name in batch)
     return {
-        name: _move_to_device(batch[name], device)
+        name: batch[name] if name == "surface_ptr" else _move_to_device(batch[name], device)
         for name in selected_names
     }
 

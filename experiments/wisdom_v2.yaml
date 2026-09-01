@@ -6,7 +6,7 @@ with:                                                # Fixed Training.run(...) a
   dataset:                                           # Resolve one immutable managed placement.
     dataset: wisdom-dna@5                            # Exact schema-3 release used by v1.
   model_version: 2                                  # Enable only the v2 pooling extension.
-  subset: full                                      # Use the complete balanced dataset.
+  subset: replicate-00/train-25                     # Compare pooling on the balanced 25% train view.
   hidden_dim: 128                                   # Fixed reviewed v1 latent width.
   embedding_dim: 32                                 # Fixed reviewed v1 embedding width.
   use_residue_type: true                            # Fixed reviewed v1 atom features.
@@ -30,42 +30,68 @@ with:                                                # Fixed Training.run(...) a
   epochs: 100                                       # Maximum epochs per pooling/seed run.
   patience: 30                                      # Stop a plateau without changing model selection.
   minimum_delta: 0.001                              # Meaningful validation AUPRC improvement threshold.
-  precision: auto                                   # BF16 on capable CUDA GPUs, otherwise FP32.
+  precision: auto                                   # BF16 dense CUDA layers with FP32 sparse derivatives.
   surface_metrics: true                             # Compare local maps without supervising them.
-  data_workers: 0                                   # Loader subprocesses inside each run.
+  surface_metrics_interval: 0                       # Evaluate surfaces only on the best checkpoint.
+  data_workers: 2                                   # Overlap NPZ decoding without consuming all four CPUs.
 
 # Fixed Training.run option reference:
-# Values shown above equal public defaults except model_version=2. subset="full"; widths and
-# depths/K/J/mode budgets are positive; dropout is in [0,1); topk_fraction is in (0,1];
+# Values shown above equal public defaults except model_version=2, subset, and data_workers=2.
+# subset="full" by default; this experiment selects "replicate-00/train-25" while preserving full
+# validation/test. Widths and depths/K/J/mode budgets are positive; dropout is in [0,1);
+# topk_fraction is in (0,1];
 # attention_hidden_dim and regional_diffusion_scale are positive; log_sum_exp_beta and learning_rate are positive; weight_decay and
+# data_workers=4 by default; this 4-CPU experiment selects two so the trainer retains CPU capacity.
 # data_workers and minimum_delta are non-negative; batch_size, epochs, and patience are positive;
 # precision accepts "auto", "bfloat16", "float16", or "float32";
-# surface_metrics=true by default and false disables evaluation-only sidecar diagnostics.
+# surface_metrics=true and surface_metrics_interval=0 by default. False disables sidecar
+# diagnostics; interval zero evaluates the restored best checkpoint only, while positive N also
+# evaluates every N validation epochs.
 
-seeds: [7, 17, 27]                                  # Repeat every pooling for seed uncertainty.
-search:                                              # Exhaustive one-factor scientific ablation.
-  strategy: exhaustive                              # Evaluate every pooling with every authored seed.
+seeds: [4, 7, 32, 54, 65, 94, 109, 124, 142, 167]    # Shared ordered seed budget for paired comparisons.
+search:                                              # Adaptive one-factor pooling comparison.
+  strategy: adaptive                                # Race poolings using validation evidence.
+  trials: 6                                         # Exactly six authored pooling candidates exist.
+  runs_per_gpu: 4                                   # Allow four independent Runs per H100.
+  max_parallel: 8                                   # Bound two H100s to eight concurrent Runs.
+  min_seeds: 1                                      # Give every pooling at least one search seed.
+
+  seed_racing:                                      # Allocate seeds while a pooling remains plausible.
+    probability_threshold: 0.05                     # Continue above 5% practical-equivalence probability.
+    equivalence_margin: 0.015                        # Treat utility differences <=0.015 as equivalent.
+
+  early_stopping:                                   # Prune weak learning curves conservatively.
+    enabled: true                                   # Enable cooperative Work stopping.
+    min_step: 40                                    # Wait for forty validation epochs.
+    confirmations: 3                                # Require three distinct confirmations.
+    probability_threshold: 0.02                     # Stop below 2% competitive probability.
+    equivalence_margin: 0.015                        # Preserve curves within 0.015 utility.
+
   pooling_type:                                     # Only this model property may vary in v2.
     values: [max, mean, attention, topk, local_mean_max, log_sum_exp] # Closed PoolingType set.
 
-# strategy defaults to "adaptive" when an objective and several seeds are present; v2 overrides it
-# because removing weak pooling candidates would confound this controlled ablation. pooling_type
-# defaults to "max". The accepted values are MAX, arithmetic mean, learned sparse
-# attention, top-k mean, fixed spectral diffusion followed by global MAX, and normalized
-# log-sum-exp. With categorical values and no trials field, LambdaForge expands every alternative.
+# strategy defaults to adaptive when an objective exists. trials=6 covers the complete finite
+# pooling set; adaptive seed racing changes replication effort, never the fixed backbone or data.
+# pooling_type defaults to max and accepts MAX, arithmetic mean, learned sparse attention, top-k
+# mean, fixed spectral diffusion/global MAX, and normalized log-sum-exp. Search-policy values match
+# v1 so pooling comparisons use the same statistical decision thresholds.
 
-objective:                                           # Used to compare pooling hypotheses.
-  metric: val_auprc                                  # Validation precision–recall area.
-  mode: max                                          # Larger validation AUPRC is better.
+objective:                                           # Same global composite utility as v1.
+  metrics:                                          # All components are emitted at each validation epoch.
+    val_auprc: {mode: max, weight: 0.35, range: [0.0, 1.0]} # Imbalance-aware ranking.
+    val_auroc: {mode: max, weight: 0.20, range: [0.0, 1.0]} # Two-class ranking.
+    val_balanced_accuracy: {mode: max, weight: 0.25, range: [0.0, 1.0]} # Thresholded balance.
+    val_mcc: {mode: max, weight: 0.20, range: [-1.0, 1.0]} # Prediction-label correlation.
+  aggregation: geometric                            # Reward candidates strong across every component.
 
-resources:                                           # Per-training allocation.
-  gpu: 1                                             # Exactly one accelerator per run.
-  cpu: 4                                             # Data loading and orchestration.
-  memory: 32GiB                                      # Host-memory reservation.
-  time: 24h                                          # Scheduler wall-time limit.
+resources:                                           # Fixed outer allocation for the complete study.
+  gpu: 2                                             # Expose both H100s.
+  gpu_memory: 20GiB                                  # Per-Run free-VRAM admission threshold.
+  cpu: 36                                            # Total CPU shared by active Runs.
+  memory: 96GiB                                      # Total host RAM shared by active Runs.
+  time: 168h                                         # Seven-day study ceiling.
 
-# LambdaForge 0.13 study options: seeds defaults to one unseeded Run and objective accepts metric
-# plus mode=max|min. Finite-only exhaustive search forms the Cartesian product; all 18 pooling/seed
-# Runs execute serially inside this Work's fixed allocation. Adaptive-only max_parallel does not
-# apply here. Resource options
-# are cpu, gpu, memory, gpu_memory, time, storage, and processes. output_root is framework-owned.
+# LambdaForge adaptive defaults include probabilistic racing, fresh confirmation seeds, convergence
+# detection, and failure recovery. WISDOM overrides the thresholds shown above to match v1.
+# Composite ranges are fixed and weights are normalized by LambdaForge. Resource options are cpu,
+# gpu, memory, gpu_memory, time, storage, and processes; output paths remain framework-owned.

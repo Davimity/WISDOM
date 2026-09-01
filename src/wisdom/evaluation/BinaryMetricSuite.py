@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import math
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 
 import torch
 from lambdaforge.metrics import (
@@ -38,20 +38,26 @@ class BinaryMetricSuite:
             raise ValueError("classification threshold must lie in (0,1)")
         self.threshold = float(threshold)
 
-    def compute(self, probabilities: Tensor, targets: Tensor) -> dict[str, float | None]:
+    def compute(
+        self,
+        probabilities: Tensor,
+        targets      : Tensor,
+        names        : Sequence[str] | None = None,
+    ) -> dict[str, float | None]:
         """Run public LambdaForge metrics only where their denominators are defined.
 
         Args:
             probabilities: Finite continuous scores with shape ``[N]`` in ``[0,1]``.
             targets: Binary integer or Boolean values with shape ``[N]``.
+            names: Optional metric-name subset. ``None`` computes the complete protein suite.
 
         Returns:
             Mapping of accuracy, balanced accuracy, precision, recall, specificity, F1, MCC,
             Cohen's kappa, AUROC, and AUPRC. Undefined metrics are JSON ``null``, never zero.
 
         Raises:
-            ValueError: If inputs are empty, misaligned, non-finite, non-probabilistic, or
-                nonbinary.
+            ValueError: If inputs are empty, misaligned, non-finite, non-probabilistic, nonbinary,
+                or request an unknown metric.
         """
         scores = probabilities.detach().view(-1).float().cpu()
         truth  = targets.detach().view(-1).long().cpu()
@@ -104,10 +110,17 @@ class BinaryMetricSuite:
             "auroc": (lambda: BinaryAUROC("probability", "target"), has_both_classes),
             "auprc": (lambda: BinaryAUPRC("probability", "target"), has_both_classes),
         }
+
+        selected_names = tuple(constructors) if names is None else tuple(names)
+        unknown_names  = set(selected_names) - set(constructors)
+        if unknown_names:
+            raise ValueError(f"unknown binary metrics: {sorted(unknown_names)}")
+
         output: dict[str, float | None] = {}
         metric_outputs = {"probability": scores}
         metric_batch   = {"target": truth}
-        for name, (constructor, defined) in constructors.items():
+        for name in selected_names:
+            constructor, defined = constructors[name]
             if not defined:
                 output[name] = None
                 continue

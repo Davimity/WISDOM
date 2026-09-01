@@ -172,6 +172,7 @@ class WisdomV2(WisdomV1):
             surface_area_weights,
             surface_batch,
             len(surface_curvatures),
+            len(surface_ptr) - 1,
         )
         embeddings, surface_logits = self.encode_surface(
             atomic_numbers,
@@ -269,6 +270,7 @@ class WisdomV2(WisdomV1):
             surface_area_weights,
             surface_batch,
             point_count,
+            len(surface_ptr) - 1,
         )
         if self.pooling_type is PoolingType.MAX:
             logits = self.sparse_max(surface_logits[:, None], surface_batch, protein_count)[:, 0]

@@ -6,7 +6,7 @@ with:                                                # Fixed scientific and oper
   dataset:                                           # Resolve one immutable managed placement.
     dataset: wisdom-dna@5                            # Schema-3 operators required by every backend.
   model_version: 3                                  # Select the controlled surface-encoder generation.
-  subset: full                                      # Use the complete fixed training population.
+  subset: replicate-00/train-25                     # Compare encoders on the balanced 25% train view.
   pooling_type: max                                 # Hold weak protein aggregation constant.
 
   hidden_dim: 128                                   # Fixed scalar atom/surface latent width.
@@ -28,9 +28,10 @@ with:                                                # Fixed scientific and oper
   epochs: 500                                       # Safety ceiling; validation patience stops plateaus.
   patience: 30                                      # Non-improving validation epochs before stopping.
   minimum_delta: 0.001                              # Required validation AUPRC improvement.
-  precision: auto                                   # BF16 on capable CUDA GPUs, otherwise FP32.
+  precision: auto                                   # BF16 dense CUDA layers with FP32 sparse derivatives.
   surface_metrics: true                             # Evaluation-only localization diagnostics.
-  data_workers: 0                                   # Loader subprocesses per independent training.
+  surface_metrics_interval: 0                       # Evaluate surfaces only on the best checkpoint.
+  data_workers: 4                                   # Overlap NPZ decoding with accelerator execution.
 
 # Training.run option reference:
 # model_version=1, subset="full", hidden_dim=128, embedding_dim=32, use_residue_type=true,
@@ -38,37 +39,63 @@ with:                                                # Fixed scientific and oper
 # surface_atom_k=16, diffusion_spectral_modes=128, surface_atom_radius=6.0,
 # surface_chunk_size=8192, atomic_message_chunk_size=65536, surface_encoder_type="diffusion",
 # surface_patch_size=64, pooling_type="max", batch_size=2, epochs=100, patience=30,
-# minimum_delta=.001, precision="auto", surface_metrics=true, and data_workers=0 are true defaults.
+# minimum_delta=.001, precision="auto", surface_metrics=true, surface_metrics_interval=0, and
+# data_workers=4 are true defaults.
+# This experiment overrides subset with "replicate-00/train-25"; validation/test remain complete.
 # v3 deliberately fixes all values except surface_encoder_type. Positive integer fields must remain
-# positive; dropout is in [0,1); precision accepts auto/float32/bfloat16/float16.
+# positive; dropout is in [0,1); precision accepts auto/float32/bfloat16/float16. A zero surface
+# interval evaluates only the restored best checkpoint; positive N also evaluates every N epochs.
 
-seeds: [7, 17, 27]                                  # Repeat every backend to expose seed variance.
+seeds: [4, 7, 32, 54, 65, 94, 109, 124, 142, 167]    # Shared ordered seed budget for paired comparisons.
 
-search:                                              # Exhaustive one-factor surface comparison.
-  strategy: exhaustive                              # Evaluate every backend with every seed.
+search:                                              # Adaptive one-factor surface comparison.
+  strategy: adaptive                                # Race encoders using validation evidence.
+  trials: 5                                         # Exactly five authored encoder candidates exist.
+  runs_per_gpu: 4                                   # Allow four independent Runs per H100.
+  max_parallel: 8                                   # Bound two H100s to eight concurrent Runs.
+  min_seeds: 1                                      # Give every encoder at least one search seed.
+
+  seed_racing:                                      # Allocate seeds while an encoder remains plausible.
+    probability_threshold: 0.05                     # Continue above 5% practical-equivalence probability.
+    equivalence_margin: 0.015                        # Treat utility differences <=0.015 as equivalent.
+
+  early_stopping:                                   # Prune weak learning curves conservatively.
+    enabled: true                                   # Enable cooperative Work stopping.
+    min_step: 40                                    # Wait for forty validation epochs.
+    confirmations: 3                                # Require three distinct confirmations.
+    probability_threshold: 0.02                     # Stop below 2% competitive probability.
+    equivalence_margin: 0.015                        # Preserve curves within 0.015 utility.
+
   surface_encoder_type:                             # Only trainable surface propagation varies.
     values: [diffusion, dmasif, deltaconv, ptv3, point_mamba] # Closed SurfaceEncoderType values.
 
 # Search option reference:
-# strategy defaults to adaptive with an objective and several seeds; exhaustive prevents pruning
-# from confounding a controlled architecture comparison. surface_encoder_type defaults to
-# "diffusion" and accepts diffusion, dmasif, deltaconv, ptv3, or point_mamba. No numeric trial
-# count is needed because the authored categorical alternatives are enumerated exactly.
+# strategy defaults to adaptive when an objective exists. trials=5 covers the complete finite
+# encoder set; adaptive seed racing changes replication effort, never the fixed backbone, transfer,
+# pooling, or data. surface_encoder_type defaults to diffusion and accepts diffusion, dmasif,
+# deltaconv, ptv3, or point_mamba. Search-policy values match v1.
 
-objective:                                           # Test labels and local GT never select models.
-  metric: val_auprc                                  # Validation protein-level precision-recall area.
-  mode: max                                          # Larger validation AUPRC is better.
+objective:                                           # Same global composite utility as v1.
+  metrics:                                          # All components are emitted at each validation epoch.
+    val_auprc: {mode: max, weight: 0.35, range: [0.0, 1.0]} # Imbalance-aware ranking.
+    val_auroc: {mode: max, weight: 0.20, range: [0.0, 1.0]} # Two-class ranking.
+    val_balanced_accuracy: {mode: max, weight: 0.25, range: [0.0, 1.0]} # Thresholded balance.
+    val_mcc: {mode: max, weight: 0.20, range: [-1.0, 1.0]} # Prediction-label correlation.
+  aggregation: geometric                            # Reward candidates strong across every component.
 
 # Objective options:
-# metric has no useful project default and must name a logged validation metric. mode accepts max
-# or min. Local surface metrics remain diagnostics and cannot rank these weakly supervised models.
+# Composite components require mode, non-negative weight, and fixed finite range. Aggregation accepts
+# weighted_mean, geometric, or chebyshev. Local surface metrics remain diagnostics and cannot rank
+# these weakly supervised models.
 
 resources:                                           # Fixed allocation for the complete study.
-  gpu: 1                                             # One accelerator executes one isolated run.
-  cpu: 8                                             # Host data loading and orchestration.
-  memory: 32GiB                                      # Host-memory reservation.
+  gpu: 2                                             # Expose both H100s.
+  gpu_memory: 20GiB                                  # Per-Run free-VRAM admission threshold.
+  cpu: 36                                            # Total CPU shared by active Runs.
+  memory: 96GiB                                      # Total host RAM shared by active Runs.
   time: 168h                                         # Seven-day ceiling for all backend/seed runs.
 
 # LambdaForge resource options:
-# cpu>=1, gpu>=0, memory/gpu_memory/storage=<size>, time=<duration>, and processes<=cpu. The
-# framework owns run paths, seed/search expansion, objective comparison, and output indexing.
+# LambdaForge adaptive defaults include fresh confirmation seeds, convergence detection, and one
+# failure retry. cpu>=1, gpu>=0, memory/gpu_memory/storage=<size>, time=<duration>, and
+# processes<=cpu. The framework owns run paths, seed racing, objective comparison, and indexing.

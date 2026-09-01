@@ -3,7 +3,30 @@
 import pytest
 import torch
 
+from wisdom.evaluation.BinaryMetricSuite import BinaryMetricSuite
 from wisdom.evaluation.SurfaceMetricSuite import SurfaceMetricSuite
+
+
+def test_binary_metric_suite_exposes_mcc_for_composite_hpo() -> None:
+    """Perfect binary decisions expose MCC under the exact ``val_mcc`` source name."""
+    metrics = BinaryMetricSuite().compute(
+        torch.tensor([0.95, 0.80, 0.20, 0.05]),
+        torch.tensor([1, 1, 0, 0]),
+    )
+
+    assert metrics["mcc"] == pytest.approx(1.0)
+
+
+def test_binary_metric_subset_avoids_unrequested_surface_work() -> None:
+    """Surface evaluation can request its four metrics without computing the protein-only suite."""
+    metrics = BinaryMetricSuite().compute(
+        torch.tensor([0.9, 0.8, 0.2, 0.1]),
+        torch.tensor([1, 1, 0, 0]),
+        SurfaceMetricSuite.METRIC_NAMES,
+    )
+
+    assert set(metrics) == set(SurfaceMetricSuite.METRIC_NAMES)
+    assert all(value == pytest.approx(1.0) for value in metrics.values())
 
 
 def test_surface_metrics_separate_point_micro_and_positive_protein_macro() -> None:

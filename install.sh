@@ -20,6 +20,7 @@ CONDA_INSTALLED_BY_SCRIPT=false
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DEFAULT_LAMBDAFORGE_DIR="${ROOT_DIR}/LambdaForge"
 SIBLING_LAMBDAFORGE_DIR="$(dirname "${ROOT_DIR}")/LambdaForge"
+OBSOLETE_WISDOM_METADATA="${ROOT_DIR}/src/wisdom_protein.egg-info"
 
 TEMP_DIR=""
 
@@ -802,6 +803,36 @@ echo "satisfy the pyproject.toml dependency locally."
 echo
 
 if confirm "Install WISDOM and its Python dependencies?"; then
+
+    # WISDOM releases before 0.13 used the distribution name ``wisdom-protein``. Because editable
+    # metadata lives inside ``src/``, pip can still discover that obsolete distribution after the
+    # project was renamed to ``wisdom`` and then report its retired LambdaForge upper bound. Remove
+    # only that historical distribution metadata before installing the current project.
+
+    if [[ -d "${OBSOLETE_WISDOM_METADATA}" ]] || conda run \
+        --name "${ENV_NAME}" \
+        python -m pip show \
+        wisdom-protein >/dev/null 2>&1
+    then
+
+        echo
+        echo "Removing obsolete wisdom-protein distribution metadata..."
+
+        conda run \
+            --name "${ENV_NAME}" \
+            python -m pip uninstall \
+            --yes \
+            wisdom-protein
+
+        # Very old editable installs have no uninstall RECORD, so pip identifies the distribution
+        # but cannot delete its source-local metadata. The explicit target below is fixed, generated
+        # packaging state; no source package or current ``wisdom.egg-info`` directory is removed.
+
+        if [[ -d "${OBSOLETE_WISDOM_METADATA}" ]]; then
+            rm -rf -- "${OBSOLETE_WISDOM_METADATA}"
+        fi
+
+    fi
 
     conda run \
         --name "${ENV_NAME}" \

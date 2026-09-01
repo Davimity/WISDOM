@@ -6,9 +6,9 @@ with:                                                # Fixed Training.run(...) a
   dataset:                                           # Resolve one immutable managed placement.
     dataset: wisdom-dna@5                            # Schema-3 bounded topology/Diffusion release.
   model_version: 1                                  # Require bounded atomic topology and DiffusionNet.
-  subset: full                                      # Use all selected training members.
+  subset: replicate-00/train-25                     # Screen on the balanced nested 25% train view.
   pooling_type: max                                 # Required invariant for v1.
-  batch_size: 8                                     # Bound graph activations while retaining GPU work.
+  batch_size: 16                                    # Use available H100 memory to reduce optimizer steps.
   epochs: 500                                       # Safety ceiling; patience normally stops earlier.
   patience: 30                                      # Stop after thirty non-improving validation epochs.
   minimum_delta: 0.001                              # Require 0.1 percentage-point AUPRC improvement.
@@ -17,34 +17,46 @@ with:                                                # Fixed Training.run(...) a
   surface_chunk_size: 8192                          # Bound gathered atom activations to 8192 points.
   atomic_message_chunk_size: 65536                  # Bound each LambdaForge RGCN message chunk.
   surface_metrics: true                             # Diagnose local GT without affecting optimization.
-  data_workers: 0                                   # Loader subprocesses inside each run.
+  surface_metrics_interval: 0                       # Evaluate surfaces only on the best checkpoint.
+  data_workers: 4                                   # Overlap NPZ decoding with each GPU training run.
 
 # Fixed Training.run option reference:
 # dataset has no default. model_version=1, subset="full", pooling_type="max", batch_size=2,
 # epochs=100, patience=30, minimum_delta=0.001, precision="auto", surface_metrics=true,
-# data_workers=0, and seed=0.
-# LambdaForge supplies each seed below. Valid subsets are "full" or names published in member
-# metadata, for example "replicate-00/train-25". patience is positive; minimum_delta is
-# non-negative; precision accepts "auto", "bfloat16", "float16", or "float32".
+# surface_metrics_interval=0, data_workers=4, and seed=0.
+# LambdaForge supplies each seed below. WISDOM deliberately overrides subset with
+# "replicate-00/train-25" for economical screening. Valid subsets are "full" or names published
+# in member metadata. Validation and test are never diluted. patience is positive;
+# minimum_delta is non-negative; precision accepts "auto", "bfloat16", "float16", or "float32".
 # surface_atom_radius=6.0 Å, surface_chunk_size=8192, and atomic_message_chunk_size=65536.
 # V1 rejects any non-MAX pooling, non-DiffusionNet surface encoder, or structural dataset older
 # than schema 3.0; it has no fallback to the retired surface-edge graph model. surface_metrics=false
-# avoids evaluation sidecars; auto uses BF16 dense layers on capable CUDA GPUs while keeping the
+# avoids evaluation sidecars. surface_metrics_interval=0 evaluates local metrics once on the
+# restored best checkpoint; a positive N additionally evaluates them every N validation epochs.
+# auto uses BF16 dense layers on capable CUDA GPUs while keeping the
 # unsupported sparse surface derivatives in FP32, and otherwise uses FP32 throughout.
+# data_workers persists that many training loaders and uses half as many temporary evaluation
+# loaders; four plus two workers leave CPU capacity within this study's 8-CPU child share.
 
-seeds: [4, 7, 32, 54, 65, 94, 109, 124, 142, 167]    # Ordered seed budget allocated by successive halving.
+seeds: [4, 7, 32, 54, 65, 94, 109, 124, 142, 167]    # Ordered seed budget allocated by probability racing.
 
 search:                                              # LambdaForge samples basic v1 choices.
   strategy: adaptive                                 # Promote candidates using validation evidence.
   trials: 100                                        # Search budget; HPO ranks but cannot choose this limit.
-  runs_per_gpu: 1                                    # Isolate one independent training on each GPU.
-  max_parallel: 2                                    # Run at most two candidates at the same time.
-  min_seeds: 1                                       # Evaluate every candidate with one seed initially.
-  reduction_factor: 2                                # Retain approximately half after each HPO round.
-  confidence: 1.0                                    # Penalize uncertain means by one standard error.
+  runs_per_gpu: 5                                    # Allow four independent Runs to share each H100.
+  max_parallel: 10                                   # Bound the two-H100 study to eight concurrent Runs.
+  min_seeds: 1                                       # Require at least one seed to continue a candidate.
+
+  seed_racing:                                       # Allocate more seeds only while a candidate is plausible.
+    probability_threshold: 0.05                     # Continue above 5% probability of practical equivalence.
+    equivalence_margin: 0.015                        # Treat utility differences <=0.015 as equivalent.
+
   early_stopping:                                    # Prune clearly weak concurrent candidates safely.
     enabled: true                                    # Ask cooperative custom training Runs to stop.
-    min_step: 30                                     # Compare learning curves only after thirty epochs.
+    min_step: 40                                     # Compare learning curves only after forty epochs.
+    confirmations: 3                                 # Stop only after three independent confirmations of non-improvement.
+    probability_threshold: 0.02                      # Stop below 2% probability of remaining competitive.
+    equivalence_margin: 0.015                        # Regard composite-utility differences <=0.015 as equivalent.
 
   hidden_dim: {values: [64, 128, 256]}               # Shared atom/surface latent width.
   embedding_dim: {values: [16, 32, 64]}              # Element/residue embedding width.
@@ -61,11 +73,12 @@ search:                                              # LambdaForge samples basic
 
 # Search option reference:
 # With an objective and multiple seeds, strategy defaults to "adaptive"; "exhaustive" executes
-# every variant/seed pair serially. runs_per_gpu=1, max_parallel=null, min_seeds=1,
-# reduction_factor=2, confidence=1.0, and early_stopping={enabled: true, min_step: 3} are
-# LambdaForge defaults. This experiment selects max_parallel=2 and delays within-Run comparisons
-# until epoch 30; successive halving also allocates more seeds only to candidates supported by
-# validation AUPRC. early_stopping accepts a boolean or {enabled: bool, min_step: integer >= 1}.
+# every variant/seed pair serially. runs_per_gpu=1, max_parallel=null, min_seeds=1
+# and early_stopping={enabled: true, min_step: 3} are
+# LambdaForge defaults. This experiment selects runs_per_gpu=4 and max_parallel=8, starts curve
+# comparisons at epoch 40, requires three confirmations, and uses probability-based seed racing.
+# early_stopping accepts a boolean or the five-field mapping selected above. seed_racing defaults
+# to probability_threshold=0.1 and equivalence_margin=0.0.
 # hidden_dim=128, embedding_dim=32, use_residue_type=true, atomic_layers=2,
 # projection_depth=1, surface_layers=2, atom_spatial_k=16, surface_atom_k=16,
 # diffusion_spectral_modes=128, dropout=0.2, learning_rate=3e-4, and
@@ -73,20 +86,42 @@ search:                                              # LambdaForge samples basic
 # is positive, and weight decay is non-negative. values enumerates categories; range samples a
 # numeric interval; scale=log samples multiplicatively rather than linearly.
 
-objective:                                           # Never optimize on held-out test labels.
-  metric: val_auprc                                  # Validation precision–recall area.
-  mode: max                                          # Larger validation AUPRC is better.
+objective:                                           # Combine complementary global validation evidence.
+  metrics:                                          # Components must all be logged at the same epoch.
+
+    val_auprc:                                      # Ranking quality under class imbalance.
+      mode: max                                     # Larger area is better.
+      weight: 0.35                                  # Primary utility contribution.
+      range: [0.0, 1.0]                             # Fixed mathematical normalization range.
+
+    val_auroc:                                      # Threshold-independent ranking across both classes.
+      mode: max                                     # Larger area is better.
+      weight: 0.20                                  # Secondary ranking contribution.
+      range: [0.0, 1.0]                             # Fixed mathematical normalization range.
+
+    val_balanced_accuracy:                          # Mean sensitivity and specificity at threshold 0.5.
+      mode: max                                     # Larger class-balanced accuracy is better.
+      weight: 0.25                                  # Emphasize usable thresholded decisions.
+      range: [0.0, 1.0]                             # Fixed mathematical normalization range.
+
+    val_mcc:                                        # Matthews correlation of predictions and labels.
+      mode: max                                     # +1 is perfect, 0 chance-like, and -1 inverted.
+      weight: 0.20                                  # Penalize one-class or imbalanced decision rules.
+      range: [-1.0, 1.0]                            # Exact MCC range used for normalization.
+
+  aggregation: geometric                            # Require strength across all normalized components.
 
 resources:                                           # Fixed outer allocation for the complete study.
-  gpu: 2                                             # Expose both GPUs; each child receives exactly one.
-  cpu: 16                                            # Total host CPU allocation, divided across active Runs.
-  memory: 32GiB                                      # Total host RAM allocation, divided across active Runs.
+  gpu: 2                                             # Expose both H100s to the packed adaptive study.
+  gpu_memory: 20GiB                                  # Per-Run free-VRAM admission threshold.
+  cpu: 36                                            # Total host CPU reservation shared by active Runs.
+  memory: 96GiB                                      # Total host RAM reservation shared by active Runs.
   time: 168h                                         # Seven-day ceiling for the complete adaptive study.
 
 # LambdaForge 0.13 study options: seeds defaults to one unseeded Run; search.trials is required for
-# numeric ranges; objective accepts metric plus mode=max|min. Adaptive search executes isolated
-# spawned Runs inside the fixed outer allocation. Two GPUs times runs_per_gpu=1 gives two concurrent
-# trainings; each receives eight of the sixteen CPUs and 16 GiB of the 32 GiB host-memory request.
-# gpu_memory is optional at runs_per_gpu=1 and mandatory only when packing several Runs per GPU.
+# numeric ranges; objective accepts scalar or fixed-range composite utilities. Adaptive search
+# executes isolated spawned Runs inside the fixed outer allocation. Two GPUs and runs_per_gpu=4
+# permit at most eight concurrent trainings. gpu_memory is a per-child admission threshold, not a
+# reservation or enforced PyTorch limit; it is mandatory when packing several Runs per GPU.
 # Resource options are cpu>=1, gpu>=0, memory/gpu_memory/storage=<size>, time=<duration>, and
 # processes<=cpu. Work/Attempt output paths are framework-owned; output_root is not configurable.

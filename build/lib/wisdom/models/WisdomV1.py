@@ -195,8 +195,8 @@ class WisdomV1(Model):
             Surface embeddings ``[M,H]`` and weakly supervised local logits ``[M]``.
 
         Raises:
-            ValueError: If categories, relations, curvature width, endpoints, or encoder outputs
-                disagree with the model contract.
+            ValueError: If tensor shapes, curvature width, or encoder outputs disagree with the
+                model contract. Dataset publication owns exhaustive value/range validation.
         """
         if atomic_numbers.ndim != 1 or not len(atomic_numbers):
             raise ValueError("atomic_numbers must contain at least one value with shape [N]")
@@ -209,7 +209,6 @@ class WisdomV1(Model):
         if surface_curvatures.ndim != 3 or surface_curvatures.shape[2] != 3:
             raise ValueError("surface_curvatures must have shape [M,S,3]")
 
-        atom_count    = len(atomic_numbers)
         surface_count = len(surface_curvatures)
         observed_width = int(surface_curvatures.shape[1] * 3)
         if surface_count == 0 or observed_width != self.curvature_features:
@@ -217,19 +216,6 @@ class WisdomV1(Model):
                 "flattened surface curvature width disagrees with model configuration: "
                 f"observed={observed_width}, expected={self.curvature_features}"
             )
-        if atomic_numbers.min() < 0 or (
-            atomic_numbers.max() >= self.atomic_number_embedding.num_embeddings
-        ):
-            raise ValueError("atomic number is outside the configured embedding table")
-        if residue_type_ids.min() < 0 or residue_type_ids.max() >= self.residue_type_count:
-            raise ValueError("residue type is outside the configured embedding table")
-        if atom_edge_types.numel() and (atom_edge_types.min() < 0 or atom_edge_types.max() > 2):
-            raise ValueError("atom relation IDs must be 0=spatial, 1=covalent, or 2=both")
-        if atom_edge_index.numel() and (
-            atom_edge_index.min() < 0 or atom_edge_index.max() >= atom_count
-        ):
-            raise ValueError("atomic graph endpoint is out of range")
-
         atom_features = self.atomic_number_embedding(atomic_numbers)
         if self.residue_type_embedding is not None:
             atom_features = torch.cat(
@@ -295,32 +281,28 @@ class WisdomV1(Model):
         surface_area_weights: Tensor,
         surface_batch       : Tensor,
         surface_count       : int,
+        protein_count       : int,
     ) -> int:
-        """Validate ordered non-empty protein bags and return their count.
+        """Validate surface ownership shapes without synchronizing CUDA values to the host.
 
         Args:
             surface_area_weights: Positive finite weights ``float [M]``.
             surface_batch: Ordered consecutive protein IDs ``long [M]``.
             surface_count: Expected point count ``M``.
+            protein_count: Number of proteins derived from the CPU-resident prefix array.
 
         Returns:
-            Number of protein bags ``B``.
+            Supplied number of protein bags ``B``.
 
         Raises:
-            ValueError: If shapes, weights, or ordered ownership IDs are invalid.
+            ValueError: If tensor shapes or the protein count are invalid.
         """
         if surface_count < 1 or surface_area_weights.shape != (surface_count,):
             raise ValueError("surface area weights must have non-empty shape [M]")
         if surface_batch.shape != (surface_count,):
             raise ValueError("surface_batch must have shape [M]")
-        if not torch.isfinite(surface_area_weights).all() or torch.any(surface_area_weights <= 0):
-            raise ValueError("surface area weights must be finite and positive")
-        if surface_batch.min() != 0 or not torch.all(surface_batch[1:] >= surface_batch[:-1]):
-            raise ValueError("surface_batch must contain ordered consecutive protein IDs")
-
-        protein_count = int(surface_batch.max().item()) + 1
-        if torch.any(torch.bincount(surface_batch, minlength=protein_count) == 0):
-            raise ValueError("surface_batch must not skip protein IDs")
+        if protein_count < 1:
+            raise ValueError("surface_ptr must describe at least one protein")
         return protein_count
 
     def forward(
@@ -365,6 +347,7 @@ class WisdomV1(Model):
             surface_area_weights,
             surface_batch,
             len(surface_curvatures),
+            len(surface_ptr) - 1,
         )
         _, surface_logits = self.encode_surface(
             atomic_numbers,

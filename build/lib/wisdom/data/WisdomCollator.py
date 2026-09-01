@@ -56,7 +56,7 @@ class WisdomCollator:
             one target per protein.
 
         Raises:
-            ValueError: If a budget exceeds persisted maxima or an offset endpoint is invalid.
+            ValueError: If a budget exceeds persisted maxima or a required tensor is unavailable.
         """
         if not samples:
             raise ValueError("cannot collate an empty protein batch")
@@ -130,8 +130,6 @@ class WisdomCollator:
             ranks        = self._tensor(sample, "atom_edge_spatial_rank")
             spatial     = (ranks > 0) & (ranks <= self.atom_spatial_k)
             active      = covalent | spatial
-            if not torch.any(active):
-                raise ValueError("runtime atomic topology contains no active edge")
 
             active_edges = stored_edges[:, active] + atom_offset
             active_types = torch.where(
@@ -268,18 +266,6 @@ class WisdomCollator:
                 raise ValueError("all DNA sidecars in a batch must use the same sensitivity gaps")
             batch["sensitivity_gaps"] = sensitivity_gaps
 
-        # Endpoint assertions prevent silent cross-protein message passing.
-
-        atom_edges = self._tensor(batch, "atom_edge_index")
-        if atom_edges.numel() and (atom_edges.min() < 0 or atom_edges.max() >= atom_offset):
-            raise ValueError("batched atom edge index is out of range")
-        atom_neighbors = self._tensor(batch, "surface_atom_neighbors")
-        atom_mask      = self._tensor(batch, "surface_atom_mask").bool()
-        if atom_neighbors[atom_mask].numel() and (
-            atom_neighbors[atom_mask].min() < 0
-            or atom_neighbors[atom_mask].max() >= atom_offset
-        ):
-            raise ValueError("batched surface-to-atom reference is out of range")
         return batch
 
     @staticmethod

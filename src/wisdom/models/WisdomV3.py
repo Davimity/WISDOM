@@ -207,6 +207,7 @@ class WisdomV3(WisdomV1):
             surface_area_weights,
             surface_batch,
             len(surface_curvatures),
+            len(surface_ptr) - 1,
         )
         if (
             surface_positions is None

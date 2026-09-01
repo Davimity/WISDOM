@@ -197,7 +197,8 @@ unexpected LambdaForge directory. In order, it:
 3. reuses `./LambdaForge` or `../LambdaForge`, asks for another checkout, or clones the official
    repository;
 4. verifies that LambdaForge satisfies the minimum version `>=0.13.0`;
-5. installs LambdaForge and `wisdom[dev]` in editable mode inside the Conda environment;
+5. removes obsolete editable `wisdom-protein` metadata from releases before 0.13, then installs
+   LambdaForge and `wisdom[dev]` in editable mode inside the Conda environment;
 6. optionally checks Python, dependency consistency, LambdaForge, MMseqs2, Foldseek, Biopython, and
    the WISDOM import.
 
@@ -1003,6 +1004,8 @@ Preprocessing always publishes the complete canonical population once. It stores
 membership in each dataset member rather than recomputing or duplicating NPZ files. Choose the
 training amount in `wisdom_v1.yaml` or `wisdom_v2.yaml` with `subset: full` or, for example,
 `subset: replicate-00/train-25`. Validation and test remain unchanged for every subset.
+The supplied v1, v2, and v3 experiments select the balanced 25% view for economical initial
+screening; change them to `full` when confirming final results with the complete training split.
 
 The execution fields and scientific fields are intentionally separate. Changing `workers`, the
 download rate, retry count, progress interval, or requested resources changes how the same records are scheduled;
@@ -2204,8 +2207,11 @@ as `replicate-00/train-25`. No filename is interpreted as a label and no random 
 `file,label,split` CSV remains readable only for small tests and backwards-compatible local use.
 
 After filtering the requested split/view, `WisdomDataset` opens each NPZ with
-`allow_pickle=False`, checks the arrays and graph ranges required by the models, and converts only
-those arrays to tensors. It does not move points, recompute edges, or mutate preprocessing output.
+`allow_pickle=False`, checks the schema, required names and tensor shapes, and converts only those
+arrays to tensors. Complete finite-value, graph-range and operator validation already happened
+before immutable dataset publication (Section 4.7); repeating those full-array scans for every
+protein in every epoch would add CPU work without adding an independent scientific guarantee. The
+loader does not move points, recompute edges, or mutate preprocessing output.
 
 Proteins have different atom and surface counts. `WisdomCollator` concatenates atom/point rows but
 keeps proteins mathematically separate. It offsets atomic endpoints, activates spatial ranks
@@ -2461,8 +2467,8 @@ code reproduction. Every encoder runs forward/backward on variable-size syntheti
 default DiffusionNet and transfer additionally have rigid-motion and permutation tests. Morton
 serialization in PTv3/PointMamba is a deliberate orientation-sensitive experimental bias, not a
 property of the invariant v1/v2 default. The bounded table keeps local encoders at `O(M K_s D)`; spectral
-diffusion uses `O(M Q D)`. The experiment YAML is an exhaustive encoder ablation, not a second
-capacity HPO.
+diffusion uses `O(M Q D)`. The experiment YAML enumerates every encoder and uses adaptive seed
+racing to concentrate repetitions on plausible alternatives; it is not a second capacity HPO.
 
 The names summarize different communication rules. The dMaSIF-like encoder weights a small patch
 using distances and agreement between surface normals. DeltaConv alternates scalar features with
@@ -2501,21 +2507,40 @@ explicitly; automatic compatibility would hide a scientific change.
 | Configuration | Responsibility |
 |---|---|
 | `wisdom_v1.yaml` | One hundred sampled candidates over basic capacity, depth, dropout, learning rate, and weight decay; MAX pooling stays fixed. |
-| `wisdom_v2.yaml` | An exhaustive six-way pooling ablation with every backbone/training value fixed. |
-| `wisdom_v3.yaml` | An exhaustive five-way surface-encoder ablation with transfer and MAX fixed. |
+| `wisdom_v2.yaml` | Six fixed pooling alternatives; adaptive seed racing changes replication effort but no other model property. |
+| `wisdom_v3.yaml` | Five fixed surface encoders; adaptive seed racing changes replication effort while transfer and MAX stay fixed. |
 
-V1 optimizes validation AUPRC, never test. Its 100 sampled candidates use the ordered seed budget
-`[4,7,32,54,65,94,109,124,142,167]`. The adaptive successive-halving controller first evaluates
-all candidates with one seed, ranks them by validation AUPRC, retains approximately half, and gives
-the survivors progressively larger seed budgets. With `reduction_factor: 2`, the rounds use budgets
-of 1, 2, 4, 8, and 10 seeds. The conservative score subtracts one standard error from the mean, so
-a candidate is not promoted merely because one seed was unusually favourable.
+All three studies use the ordered seed budget `[4,7,32,54,65,94,109,124,142,167]`. Every candidate
+starts with at least one shared seed. LambdaForge requests another seed while the estimated
+probability that the candidate lies within `0.015` utility of the incumbent remains at least 5%.
+It then confirms the winning search result on fresh seeds that were not used to guide the search.
+V2 and v3 still test only one scientific factor: racing affects the amount of evidence collected,
+not architecture values, data membership, loss, or validation definitions.
 
-The v1 outer allocation exposes two GPUs. `runs_per_gpu: 1` and `max_parallel: 2` create two spawned
-training Runs at a time and restrict each child through its own `CUDA_VISIBLE_DEVICES`; CPU and host
-RAM are divided between those two children. `lf explain` still reports 1,000 planned Runs because
-100 candidates times 10 seeds is the reproducibility upper bound. Successive halving normally
-executes 266 of them: 100 + 50 + 50 + 52 + 14.
+Candidate quality is a geometric composite of four protein-level validation metrics measured at
+the same epoch. AUPRC has weight 0.35, balanced accuracy 0.25, and AUROC and Matthews correlation
+coefficient (MCC) 0.20 each. MCC summarizes all four cells of the binary confusion matrix. If
+`TP`, `TN`, `FP`, and `FN` denote true positives, true negatives, false positives, and false
+negatives at probability threshold 0.5, then
+
+```math
+\operatorname{MCC}=
+\frac{TP\,TN-FP\,FN}
+{\sqrt{(TP+FP)(TP+FN)(TN+FP)(TN+FN)}}.
+```
+
+MCC is +1 for perfect decisions, 0 for chance-like correlation, and -1 for complete inversion. It
+is unavailable rather than replaced by zero when any denominator factor vanishes. LambdaForge
+normalizes AUPRC, AUROC, and balanced accuracy from `[0,1]`, and MCC from `[-1,1]`, before applying
+the geometric weights. Consequently a candidate must remain useful across ranking and thresholded
+classification instead of winning through one unusually strong metric. Test metrics and surface
+ground truth never enter this utility.
+
+The outer allocation exposes two H100 GPUs. `runs_per_gpu: 4` and `max_parallel: 8` permit at most
+eight spawned Runs, with four independent processes sharing each device. The declared
+`gpu_memory: 20GiB` is the free-VRAM admission threshold for each child, not a forced allocation or
+PyTorch memory limit. LambdaForge launches a child only on a device that currently satisfies it;
+CPU and host RAM come from the shared 36-CPU/96-GiB outer reservation.
 
 GPU memory is controlled mainly by activations, not parameter count. Let `N` be atoms, `M` surface
 points, `K` active spatial neighbours, `J` nearby atoms per point, `Q` spectral modes, `D` hidden
@@ -2531,7 +2556,10 @@ different protein sizes, so `batch_size` is not a fixed memory unit. Reported `a
 atoms/points per batch, throughput, NPZ bytes, parameter count, and CUDA allocated/reserved/peak
 memory make this scaling observable.
 
-The current v1 configuration uses eight proteins per batch and `precision: auto`. On compatible
+The current v1 configuration uses sixteen proteins per batch and `precision: auto`. The previous
+batch of eight occupied only about 5 GiB on the observed H100 run, so doubling it uses part of the
+available memory while halving the number of optimizer steps; variable protein sizes still make the
+reported peak, rather than this estimate, authoritative. On compatible
 CUDA hardware it selects BF16 autocast. BF16 stores
 eligible activations in two bytes instead of four while retaining the same exponent range as FP32;
 model parameters and AdamW state remain FP32, and BF16 does not need FP16-style gradient scaling.
@@ -2544,7 +2572,18 @@ point targets on disk because the global-label loss does not consume them, and e
 is released before validation. These changes reduce memory and unnecessary I/O without changing
 the graph, label, loss, or model hypothesis.
 
-When `surface_metrics: true`, validation loads only `surface_target_hard` and
+Four persistent training-loader workers per v1 Run decompress and collate NPZ files while the
+preceding batch runs on the GPU. Validation/test use two temporary workers, keeping the trainer and
+both pools within its eight-CPU share. Each worker prefetches one batch, which bounds host memory;
+pinned host buffers and non-blocking copies then reduce transfer stalls. CPU prefix offsets remain on the host
+instead of being copied to CUDA and read back once per protein. Likewise, training loss stays as a
+CUDA scalar throughout the epoch and is converted to a Python number only once, rather than forcing
+a synchronization after every batch. Exhaustive value checks remain at dataset publication, while
+the hot model path keeps shape checks that do not read CUDA values back to the CPU. FP32 matrix
+multiplication uses PyTorch's `medium` policy; the explicitly protected sparse derivatives remain
+FP32 and BF16-compatible dense layers remain under autocast.
+
+When `surface_metrics: true`, a surface evaluation loads `surface_target_hard` and
 `surface_valid_mask` from the DNA sidecar. The mask removes the physical ambiguity band described
 in Section 3.6 and every point belonging to a positive protein without reliable local GT. Local
 probabilities are `sigmoid(surface_logits)`; they are compared with the sidecar only after the
@@ -2573,26 +2612,47 @@ sensitive to calibration.
 
 These names are deliberately separate from protein classification: for example,
 `val_surface_micro_auprc` and `val_surface_positive_macro_auprc` cannot be confused with the HPO
-objective `val_auprc`. Surface metrics may rise or fall during training, but only global
-`val_auprc` selects a checkpoint, resets patience, drives adaptive pruning, and ranks HPO
-candidates. Final test surface metrics are calculated only after that validation-selected
-checkpoint is restored. Setting `surface_metrics: false` disables sidecar loading and these
-diagnostics without changing training.
+components such as `val_auprc` and `val_mcc`. Surface metrics may rise or fall during training but
+never select a checkpoint, reset patience, prune a candidate, or rank HPO candidates. Within each
+Run, WISDOM selects its checkpoint and resets patience using global protein-level `val_auprc`.
+Across Runs, LambdaForge prunes, races seeds, and ranks candidates using the four-component global
+utility defined above. This distinction keeps local ground truth diagnostic while allowing HPO to
+consider more than one global classification property.
+
+Global validation still runs after every epoch because early stopping and HPO need its protein-level
+AUPRC. Surface validation is more expensive: it decompresses sidecars, retains a score for every
+surface point, and sorts large point collections for AUPRC and AUROC. The
+`surface_metrics_interval` setting therefore controls only this diagnostic work. A value of `0`,
+used by the supplied experiments, skips it during training and calculates it once on the validation
+set after restoring the best global checkpoint. A positive value `N` additionally calculates it
+after epochs `N`, `2N`, `3N`, and so on; missing intermediate points in the surface-metric curve are
+intentional. Final test surface metrics are still calculated once from the restored checkpoint.
+Setting `surface_metrics: false` disables all sidecar loading and local diagnostics without
+changing training. Adaptively pruned candidates perform neither final validation nor test surface
+evaluation because they cannot become the selected result.
 
 Two separate stopping rules avoid wasting those Runs. Within one training, `epochs: 500` is only a
 safety ceiling: the best validation checkpoint is retained, and `patience: 30` stops after 30
 consecutive validation epochs without an AUPRC gain of at least `minimum_delta: 0.001`. Separately,
-LambdaForge compares concurrent candidates after epoch 30 and cooperatively prunes the weaker half.
-The first rule detects a plateau in one learning curve; the second compares different
-hyperparameter candidates. A pruned candidate is checkpointed but does not evaluate test. The HPO
-cannot choose `trials` itself: 100 is the authored compute budget within which it samples and ranks
-configurations. Increasing it explores more settings but also costs more and can overfit repeated
-decisions to the same validation split.
+LambdaForge begins comparing concurrent composite-utility curves after epoch 40. It prunes only
+after three distinct confirmations and only when the estimated probability of remaining within
+`0.015` of a competitive candidate falls below 2%. The first rule detects a plateau in one learning
+curve; the second rejects a clearly uncompetitive hyperparameter candidate. Seed racing is a third,
+run-level allocation decision: it requests another authored seed only while the candidate has at
+least 5% estimated probability of practical equivalence to the incumbent. A pruned candidate is
+checkpointed but does not evaluate test. The HPO cannot choose `trials` itself: 100 is the authored
+candidate budget within which it samples and ranks configurations. Increasing it explores more
+settings but also costs more and can overfit repeated decisions to the same validation split.
 
 Every Run publishes structured metrics each epoch and emits one compact live line prefixed with its
-trial index and seed. The line includes training loss, validation AUPRC, AUROC, balanced accuracy,
-surface micro/macro AUPRC, surface macro AUROC, best AUPRC, patience, largest batched point/edge
-counts, and CUDA memory. `cuda_allocated` is memory
+trial index and seed. The line includes training and validation loss, validation AUPRC, AUROC,
+balanced accuracy, MCC, surface micro/macro AUPRC, surface macro AUROC, best AUPRC, used/total
+patience, largest batched point/edge counts, data-wait time, validation time, and CUDA memory.
+Structured curves expose the composite inputs `val_auprc`, `val_auroc`,
+`val_balanced_accuracy`, and `val_mcc` at the same integer epoch, together with `val_loss`,
+`val_patience_used`, and `val_patience_remaining`; the latter reaches zero when ordinary early
+stopping activates. `train_data_wait_seconds` separates input starvation from GPU computation,
+while `val_validation_seconds` exposes evaluation cost. `cuda_allocated` is memory
 occupied by live tensors; `cuda_reserved` also includes reusable blocks held by PyTorch's caching
 allocator; and `cuda_peak` is the largest live-tensor allocation observed in that epoch. Reserved
 memory commonly rises to the largest batch encountered and stays there, so that pattern alone is
@@ -2600,12 +2660,13 @@ not a leak. A continuing increase in allocated memory for comparable graph sizes
 warning sign. WISDOM deliberately does not call `empty_cache()` after every batch because that
 would discard reusable blocks and slow training without reducing the tensors required by the next
 forward pass. The progress line also updates LambdaForge's bounded epoch progress for `lf top`.
-Because v1 permits only two concurrent Runs, at most two clearly labelled sequences are interleaved.
+Because v1 permits eight concurrent Runs, at most eight clearly labelled sequences are interleaved.
 
-V2 expands MAX, mean, attention, top-k mean, diffusion/global-MAX, and normalized log-sum-exp
-exactly once per seed. The top-k fraction, attention width, regional depth, and log-sum-exp
-temperature are fixed controls in this first pooling comparison rather than additional confounded
-search dimensions.
+V2 enumerates MAX, mean, attention, top-k mean, diffusion/global-MAX, and normalized log-sum-exp.
+Every pooling receives the same first seed, and adaptive racing assigns further seeds according to
+the shared evidence rule above. The top-k fraction, attention width, regional depth, and
+log-sum-exp temperature are fixed controls in this first pooling comparison rather than additional
+confounded search dimensions.
 
 The callable receives `{dataset: wisdom-dna@5}`, not a machine-specific absolute path. LambdaForge
 resolves the selector to the managed root; `WisdomDataset` reads `index.jsonl`, filters the explicit

@@ -71,6 +71,8 @@ class SurfaceMetricSuite:
             raise ValueError("protein targets must be a non-empty binary vector")
         if owners.min() < 0 or owners.max() >= len(proteins):
             raise ValueError("surface point owner is outside the protein target vector")
+        if not torch.all(owners[1:] >= owners[:-1]):
+            raise ValueError("surface point owners must remain grouped in protein order")
 
         binary_suite = BinaryMetricSuite()
         output       = self._empty_output()
@@ -78,7 +80,7 @@ class SurfaceMetricSuite:
 
         output["surface_valid_points"] = float(valid_count)
         if valid_count:
-            micro = binary_suite.compute(scores[valid], truth[valid])
+            micro = binary_suite.compute(scores[valid], truth[valid], self.METRIC_NAMES)
             for name in self.METRIC_NAMES:
                 output[f"surface_micro_{name}"] = micro[name]
 
@@ -86,12 +88,21 @@ class SurfaceMetricSuite:
             name: []
             for name in self.METRIC_NAMES
         }
+        owner_counts = torch.bincount(owners, minlength=len(proteins))
+        owner_starts = torch.cat((torch.zeros(1, dtype=torch.long), owner_counts.cumsum(dim=0)))
+
         for protein_id in torch.nonzero(proteins == 1, as_tuple=False).view(-1).tolist():
-            selected = valid & (owners == protein_id)
-            if not selected.any():
+            start          = int(owner_starts[protein_id])
+            stop           = int(owner_starts[protein_id + 1])
+            protein_valid  = valid[start:stop]
+            if not protein_valid.any():
                 continue
 
-            metrics = binary_suite.compute(scores[selected], truth[selected])
+            metrics = binary_suite.compute(
+                scores[start:stop][protein_valid],
+                truth[start:stop][protein_valid],
+                self.METRIC_NAMES,
+            )
             if metrics["auprc"] is None:
                 continue
 

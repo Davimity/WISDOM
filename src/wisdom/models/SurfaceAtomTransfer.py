@@ -69,8 +69,7 @@ class SurfaceAtomTransfer(nn.Module):
             Weighted atomic context ``float [M,H]`` in exact surface point order.
 
         Raises:
-            ValueError: If tensor shapes disagree, valid endpoints leave ``[0,N)``, or a point has
-                no valid neighbor.
+            ValueError: If tensor shapes disagree with the persisted bounded-transfer contract.
         """
         point_count = neighbors.shape[0]
         if neighbors.ndim != 2:
@@ -82,13 +81,6 @@ class SurfaceAtomTransfer(nn.Module):
             raise ValueError("surface atom geometry and mask must share shape [M,J]")
         if atom_embeddings.ndim != 2 or atom_embeddings.shape[1] != self.hidden_dim:
             raise ValueError("atom embeddings must have shape [N,H]")
-        if torch.any(mask.sum(dim=1) == 0):
-            raise ValueError("every surface point requires at least one active atom")
-        if neighbors[mask].numel() and (
-            neighbors[mask].min() < 0 or neighbors[mask].max() >= len(atom_embeddings)
-        ):
-            raise ValueError("surface atom neighbor is out of range")
-
         outputs: list[Tensor] = []
         for start in range(0, point_count, self.chunk_size):
             stop       = min(start + self.chunk_size, point_count)

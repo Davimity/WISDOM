@@ -200,7 +200,8 @@ sin que el usuario lo vea. En este orden:
 3. reutiliza `./LambdaForge` o `../LambdaForge`, permite indicar otro checkout o clona el repositorio
    oficial;
 4. comprueba que LambdaForge satisface la versión mínima `>=0.13.0`;
-5. instala LambdaForge y `wisdom[dev]` en modo editable dentro del entorno Conda;
+5. elimina metadatos editables obsoletos de `wisdom-protein` anteriores a 0.13 e instala
+   LambdaForge y `wisdom[dev]` en modo editable dentro del entorno Conda;
 6. opcionalmente comprueba Python, la coherencia de dependencias, LambdaForge, MMseqs2, Foldseek,
    Biopython y el import de WISDOM.
 
@@ -1016,6 +1017,8 @@ El preprocesado siempre publica una vez la población canónica completa. Guarda
 diluciones en cada miembro del dataset, sin recalcular ni duplicar los NPZ. La cantidad de
 entrenamiento se elige en `wisdom_v1.yaml` o `wisdom_v2.yaml` mediante `subset: full` o, por ejemplo,
 `subset: replicate-00/train-25`. Validation y test permanecen idénticos en todos los subconjuntos.
+Los experimentos v1, v2 y v3 incluidos seleccionan la vista balanceada del 25 % para un cribado
+inicial económico; cámbialos a `full` al confirmar los resultados finales con todo el train.
 
 Los campos de ejecución y los científicos están separados deliberadamente. Cambiar `workers`, la
 tasa de descarga, los reintentos, el intervalo de progreso o los recursos solicitados cambia cómo se planifican los
@@ -2166,8 +2169,11 @@ aleatorio. El CSV antiguo `file,label,split` solo se conserva para tests pequeñ
 retrocompatible.
 
 Después de filtrar split/vista, `WisdomDataset` abre cada NPZ con `allow_pickle=False`, comprueba los
-arrays y rangos de grafo necesarios y convierte solo esos arrays en tensores. No desplaza puntos,
-recalcula aristas ni modifica el resultado del preprocesado.
+nombres, esquema y formas tensoriales necesarios y convierte solo esos arrays en tensores. La
+validación completa de valores finitos, rangos de grafos y operadores ya se realizó antes de la
+publicación inmutable (sección 4.7); recorrer de nuevo todos los arrays de cada proteína en cada
+época añadiría CPU sin aportar una garantía científica independiente. El cargador no desplaza
+puntos, recalcula aristas ni modifica el resultado del preprocesado.
 
 Las proteínas tienen distinto número de átomos y puntos. `WisdomCollator` concatena sus filas pero
 las mantiene matemáticamente separadas. Desplaza extremos atómicos, activa rangos espaciales `<=K`
@@ -2423,8 +2429,9 @@ Son implementaciones compactas de los mecanismos publicados, no reproducciones e
 código. Todos ejecutan forward/backward con proteínas sintéticas de tamaño variable; DiffusionNet y
 la transferencia por defecto tienen además tests de movimiento rígido y permutación. La
 serialización Morton de PTv3/PointMamba introduce deliberadamente un sesgo sensible a orientación,
-que no pertenece al modelo invariante por defecto v1/v2. La vecindad cuesta `O(M K_s D)` y la difusión espectral `O(M Q D)`. El YAML es una ablación exhaustiva de
-encoder, no otro HPO de capacidad.
+que no pertenece al modelo invariante por defecto v1/v2. La vecindad cuesta `O(M K_s D)` y la
+difusión espectral `O(M Q D)`. El YAML enumera todos los encoders y usa carrera adaptativa de
+semillas para concentrar repeticiones en alternativas plausibles; no es otro HPO de capacidad.
 
 Los nombres resumen reglas de comunicación diferentes. El encoder inspirado en dMaSIF pondera un
 parche pequeño mediante distancias y concordancia entre normales. DeltaConv alterna características
@@ -2463,22 +2470,40 @@ compatibilidad ocultaría un cambio científico.
 | Configuración | Responsabilidad |
 |---|---|
 | `wisdom_v1.yaml` | Cien candidatos muestreados de capacidad, profundidad, dropout, learning rate y weight decay; MAX permanece fijo. |
-| `wisdom_v2.yaml` | Ablación exhaustiva de seis poolings con toda la arquitectura base y el entrenamiento fijos. |
-| `wisdom_v3.yaml` | Ablación exhaustiva de cinco encoders superficiales con transferencia y MAX fijos. |
+| `wisdom_v2.yaml` | Seis poolings fijos; la carrera adaptativa de semillas cambia el esfuerzo de repetición, pero ninguna otra propiedad del modelo. |
+| `wisdom_v3.yaml` | Cinco encoders superficiales fijos; la carrera adaptativa cambia la repetición mientras transferencia y MAX permanecen fijos. |
 
-V1 optimiza AUPRC de validación, nunca test. Sus 100 candidatos muestreados usan el presupuesto
-ordenado de semillas `[4,7,32,54,65,94,109,124,142,167]`. El controlador adaptativo de reducción
-sucesiva evalúa primero todos los candidatos con una semilla, los ordena por AUPRC de validación,
-conserva aproximadamente la mitad y concede a los supervivientes presupuestos progresivamente
-mayores. Con `reduction_factor: 2`, las rondas usan 1, 2, 4, 8 y 10 semillas. La puntuación
-conservadora resta un error estándar de la media, por lo que un candidato no asciende solo porque
-una semilla haya sido inusualmente favorable.
+Los tres estudios usan el presupuesto ordenado de semillas `[4,7,32,54,65,94,109,124,142,167]`.
+Cada candidato comienza al menos con una semilla compartida. LambdaForge solicita otra mientras la
+probabilidad estimada de que el candidato esté a menos de `0.015` de utilidad del incumbent sea al
+menos del 5 %. Después confirma el ganador de la búsqueda con semillas nuevas que no guiaron la
+búsqueda. V2 y v3 siguen probando un solo factor científico: la carrera cambia la cantidad de
+evidencia, no los valores arquitectónicos, los datos, la pérdida ni la validación.
 
-La asignación exterior de v1 expone dos GPU. `runs_per_gpu: 1` y `max_parallel: 2` crean dos Runs de
-entrenamiento simultáneos en procesos separados y restringen cada hijo mediante su propio
-`CUDA_VISIBLE_DEVICES`; la CPU y RAM de host se dividen entre ambos hijos. `lf explain` sigue
-mostrando 1.000 Runs planificados porque 100 candidatos por 10 semillas es el límite superior de
-reproducibilidad. La reducción sucesiva ejecuta normalmente 266: 100 + 50 + 50 + 52 + 14.
+La calidad de un candidato es una composición geométrica de cuatro métricas globales de validación
+medidas en la misma época. AUPRC pesa 0,35, balanced accuracy 0,25, y AUROC y el coeficiente de
+correlación de Matthews (MCC) pesan 0,20 cada uno. MCC resume las cuatro celdas de la matriz de
+confusión binaria. Si `TP`, `TN`, `FP` y `FN` representan verdaderos positivos, verdaderos
+negativos, falsos positivos y falsos negativos al umbral de probabilidad 0,5, entonces
+
+```math
+\operatorname{MCC}=
+\frac{TP\,TN-FP\,FN}
+{\sqrt{(TP+FP)(TP+FN)(TN+FP)(TN+FN)}}.
+```
+
+MCC vale +1 para decisiones perfectas, 0 para correlación similar al azar y -1 para inversión
+completa. Si algún factor del denominador se anula, queda no disponible en lugar de sustituirse por
+cero. LambdaForge normaliza AUPRC, AUROC y balanced accuracy desde `[0,1]`, y MCC desde `[-1,1]`,
+antes de aplicar los pesos geométricos. Así, un candidato debe ser útil tanto al ordenar como al
+tomar decisiones con umbral y no puede ganar por una sola métrica excepcional. Test y el GT
+superficial nunca entran en esta utilidad.
+
+La asignación exterior expone dos GPU H100. `runs_per_gpu: 4` y `max_parallel: 8` permiten como
+máximo ocho Runs, con cuatro procesos independientes compartiendo cada dispositivo. El
+`gpu_memory: 20GiB` declarado es el umbral de VRAM libre para admitir cada hijo, no una asignación
+forzada ni un límite de memoria de PyTorch. LambdaForge solo lanza un hijo en un dispositivo que lo
+cumpla en ese momento; CPU y RAM proceden de la reserva exterior compartida de 36 CPU y 96 GiB.
 
 La memoria de GPU depende sobre todo de las activaciones, no del número de parámetros. Sean `N` los
 átomos, `M` los puntos, `K` vecinos espaciales activos, `J` átomos próximos por punto, `Q` modos
@@ -2494,8 +2519,11 @@ incidencias de un radio. Un batch aún suma proteínas de tamaños distintos. Po
 `K/J` activos, máximos de átomos/puntos, throughput, bytes NPZ, parámetros y memoria CUDA
 asignada/reservada/pico.
 
-La configuración v1 actual usa ocho proteínas por batch y `precision: auto`; en CUDA compatible
-elige autocast BF16. BF16 guarda las activaciones compatibles en dos bytes en vez de cuatro y
+La configuración v1 actual usa dieciséis proteínas por batch y `precision: auto`. El batch anterior
+de ocho ocupó solo unos 5 GiB en la ejecución H100 observada; duplicarlo aprovecha parte de la
+memoria disponible y divide aproximadamente por dos los pasos del optimizador. Como las proteínas
+tienen tamaños variables, manda el pico medido y no esta estimación. En CUDA compatible elige
+autocast BF16. BF16 guarda las activaciones compatibles en dos bytes en vez de cuatro y
 conserva el mismo rango de exponentes que
 FP32; los parámetros y el estado de AdamW siguen en FP32, y BF16 no necesita el escalado de
 gradientes propio de FP16.
@@ -2509,7 +2537,18 @@ coordenadas, normales y objetivos puntuales de ADN porque la función de pérdid
 terminado se libera antes de validar. Esto reduce memoria e I/O innecesarios sin cambiar grafo,
 etiqueta, función de pérdida ni hipótesis del modelo.
 
-Con `surface_metrics: true`, la validación carga del sidecar de ADN únicamente
+Cada Run de v1 mantiene cuatro procesos de entrenamiento que descomprimen y agrupan NPZ mientras la
+GPU procesa el batch anterior. Validación/test usan dos procesos temporales, de modo que el trainer
+y ambos grupos caben en sus ocho CPU. Cada proceso preobtiene un único batch para acotar la RAM; la
+memoria anclada del host y las copias no bloqueantes reducen después las esperas de transferencia. Los
+offsets usados como límites Python permanecen en CPU en vez de copiarse a CUDA y releerse una vez
+por proteína. Del mismo modo, la pérdida se acumula como escalar CUDA durante toda la época y solo
+se convierte una vez a número Python, evitando una sincronización por batch. La validación exhaustiva
+permanece en la publicación del dataset y el camino caliente conserva comprobaciones de forma que
+no leen valores CUDA desde CPU. Las multiplicaciones FP32 usan la política `medium` de PyTorch; las
+derivadas dispersas protegidas continúan en FP32 y las capas densas compatibles siguen bajo BF16.
+
+Con `surface_metrics: true`, una evaluación superficial carga del sidecar de ADN
 `surface_target_hard` y `surface_valid_mask`. La máscara elimina la banda de ambigüedad física
 descrita en 3.6 y todos los puntos de una proteína positiva sin GT local fiable. Las probabilidades
 locales son `sigmoid(surface_logits)`; se comparan con el sidecar solo después de la pasada directa y nunca
@@ -2537,27 +2576,50 @@ AUROC mide ordenación; balanced accuracy y F1 aplican el umbral local fijo de p
 más sensibles a la calibración.
 
 Los nombres distinguen explícitamente ambas escalas: `val_surface_micro_auprc` y
-`val_surface_positive_macro_auprc` no se confunden con el objetivo HPO `val_auprc`. Las métricas
-superficiales pueden subir o bajar, pero solo el `val_auprc` global selecciona checkpoint, reinicia
-la paciencia, dirige la poda adaptativa y ordena candidatos HPO. Las métricas superficiales de test
-solo se calculan tras restaurar el checkpoint elegido por validación. `surface_metrics: false`
-desactiva la lectura de sidecars y estos diagnósticos sin cambiar el entrenamiento.
+`val_surface_positive_macro_auprc` no se confunden con componentes HPO como `val_auprc` y
+`val_mcc`. Las métricas superficiales pueden subir o bajar durante el entrenamiento, pero nunca
+seleccionan checkpoint, reinician la paciencia, podan un candidato ni ordenan el HPO. Dentro de cada
+Run, WISDOM selecciona su checkpoint y reinicia la paciencia con `val_auprc` global a nivel de
+proteína. Entre Runs, LambdaForge poda, asigna semillas y ordena candidatos mediante la utilidad
+global de cuatro componentes definida arriba. Esta distinción mantiene el ground truth local como
+diagnóstico y permite al HPO considerar más de una propiedad de clasificación global.
+
+La validación global continúa tras cada época porque la parada temprana y el HPO necesitan su AUPRC
+a nivel de proteína. La validación superficial cuesta más: descomprime sidecars, conserva una
+puntuación por cada punto superficial y ordena grandes conjuntos de puntos para AUPRC y AUROC. Por
+eso `surface_metrics_interval` controla únicamente este trabajo diagnóstico. El valor `0`, usado en
+los experimentos incluidos, lo omite durante el entrenamiento y lo calcula una vez sobre validación
+después de restaurar el mejor checkpoint global. Un valor positivo `N` lo calcula además tras las
+épocas `N`, `2N`, `3N`, etc.; la ausencia de puntos intermedios en la curva superficial es
+intencionada. Las métricas superficiales de test se siguen calculando una única vez con el
+checkpoint restaurado. `surface_metrics: false` desactiva toda lectura de sidecars y todo diagnóstico
+local sin cambiar el entrenamiento. Los candidatos podados de forma adaptativa no hacen la
+evaluación superficial final de validación ni la de test porque ya no pueden convertirse en el
+resultado seleccionado.
 
 Dos reglas de parada distintas evitan desperdiciar esos Runs. Dentro de un entrenamiento,
 `epochs: 500` es solo un límite de seguridad: se conserva el mejor checkpoint de validación y
 `patience: 30` detiene el bucle tras 30 épocas de validación consecutivas sin aumentar AUPRC al
-menos `minimum_delta: 0.001`. Por separado, LambdaForge compara candidatos simultáneos después de
-la época 30 y poda cooperativamente la mitad más débil. La primera regla detecta una meseta en una
-curva de aprendizaje; la segunda compara configuraciones de hiperparámetros. Un candidato podado
-guarda su checkpoint, pero no evalúa test. El HPO no puede elegir por sí mismo `trials`: 100 es el
-presupuesto de cómputo declarado dentro del cual muestrea y ordena configuraciones. Aumentarlo
-explora más ajustes, pero también cuesta más y puede sobreajustar decisiones repetidas al mismo
-split de validación.
+menos `minimum_delta: 0.001`. Por separado, LambdaForge comienza a comparar curvas de utilidad
+compuesta después de la época 40. Solo poda tras tres confirmaciones distintas y cuando la
+probabilidad estimada de quedar a menos de `0.015` de un candidato competitivo baja del 2 %. La
+primera regla detecta una meseta en una curva; la segunda descarta un candidato de hiperparámetros
+claramente no competitivo. La carrera de semillas es una tercera decisión a nivel de Run: solicita
+otra semilla declarada mientras el candidato conserve al menos un 5 % de probabilidad estimada de
+equivalencia práctica con el incumbent. Un candidato podado guarda su checkpoint, pero no evalúa
+test. El HPO no puede elegir por sí mismo `trials`: 100 es el presupuesto de candidatos declarado
+dentro del cual muestrea y ordena configuraciones. Aumentarlo explora más ajustes, pero también
+cuesta más y puede sobreajustar decisiones repetidas al mismo split de validación.
 
 Cada Run publica métricas estructuradas en cada época y emite una única línea compacta en directo,
-prefijada con su índice de candidato y su semilla. La línea incluye función de pérdida de entrenamiento, AUPRC, AUROC
-y balanced accuracy de validación, AUPRC superficial micro/macro, AUROC superficial macro, mejor
-AUPRC, paciencia, mayores números de puntos/aristas en un batch y memoria CUDA. `cuda_allocated` es
+prefijada con su índice de candidato y su semilla. La línea incluye pérdidas de entrenamiento y
+validación, AUPRC, AUROC, balanced accuracy y MCC globales, AUPRC superficial micro/macro, AUROC
+superficial macro, mejor AUPRC, paciencia usada/total, mayores números de puntos/aristas, tiempo de
+espera de datos, tiempo de validación y memoria CUDA. Las curvas estructuradas exponen las entradas
+de la composición `val_auprc`, `val_auroc`, `val_balanced_accuracy` y `val_mcc` en la misma época
+entera, junto con `val_loss`, `val_patience_used` y `val_patience_remaining`; esta última llega a
+cero cuando actúa la parada temprana ordinaria. `train_data_wait_seconds` separa la espera de inputs
+del cómputo y `val_validation_seconds` muestra el coste de evaluación. `cuda_allocated` es
 la memoria ocupada por tensores vivos;
 `cuda_reserved` incluye además bloques reutilizables retenidos por el asignador con caché de
 PyTorch; y `cuda_peak` es la mayor asignación de tensores vivos observada durante esa época. La
@@ -2566,12 +2628,14 @@ patrón por sí solo no es una fuga. La señal preocupante sería que la memoria
 creciendo para grafos de tamaños comparables. WISDOM no llama a `empty_cache()` tras cada batch:
 descartar esos bloques reutilizables ralentizaría el entrenamiento sin reducir los tensores que
 necesita el siguiente forward. La línea también actualiza el progreso acotado por épocas que muestra
-`lf top`. Como v1 solo permite dos Runs simultáneos, se intercalan como máximo dos secuencias
+`lf top`. Como v1 permite ocho Runs simultáneos, se intercalan como máximo ocho secuencias
 claramente identificadas.
 
-V2 expande MAX, mean, attention, top-k mean, difusión/global-MAX y log-sum-exp normalizado una vez
-por semilla. La fracción top-k, anchura de atención, profundidad regional y temperatura log-sum-exp
-son controles fijos en esta primera comparación, no más dimensiones de búsqueda confundentes.
+V2 enumera MAX, mean, attention, top-k mean, difusión/global-MAX y log-sum-exp normalizado. Cada
+pooling recibe la misma primera semilla y la carrera adaptativa asigna más semillas según la regla
+común descrita arriba. La fracción top-k, anchura de atención, profundidad regional y temperatura
+log-sum-exp son controles fijos en esta primera comparación, no más dimensiones de búsqueda
+confundentes.
 
 El callable recibe `{dataset: wisdom-dna@5}`, no una ruta absoluta de máquina. LambdaForge resuelve
 el selector a la raíz gestionada; `WisdomDataset` lee `index.jsonl`, filtra la partición explícita

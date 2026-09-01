@@ -44,8 +44,9 @@ class WisdomDataset(Dataset[Mapping[str, Tensor | str]]):
             manifest: LambdaForge 0.13 managed dataset root containing ``index.jsonl``, or a legacy
                 CSV with exactly ``file,label,split`` columns.
             split: Explicit subset to expose; one of ``train``, ``val``, or ``test``.
-            subset: ``full`` or a dilution name such as ``replicate-00/train-25``. Managed dataset
-                members carry this view membership in metadata without duplicating heavy assets.
+            subset: ``full`` or a training dilution such as ``replicate-00/train-25``. Managed
+                training members carry this view membership without duplicating heavy assets;
+                validation and test always retain their complete fixed populations.
             include_surface_targets: Load only hard point targets and their validity mask for
                 evaluation-only surface metrics.
             include_diagnostics: Load surface coordinates, normals, and DNA point targets needed
@@ -144,7 +145,8 @@ class WisdomDataset(Dataset[Mapping[str, Tensor | str]]):
         Args:
             root: Resolved immutable LambdaForge dataset placement.
             split: Required main partition.
-            subset: ``full`` or one deterministic dilution name.
+            subset: ``full`` or one deterministic training-dilution name. The filter applies only
+                to train because validation and test membership is fixed across learning curves.
 
         Returns:
             Ordered base/annotation paths and labels consumed by ``__getitem__``.
@@ -163,7 +165,7 @@ class WisdomDataset(Dataset[Mapping[str, Tensor | str]]):
             if str(member.partitions.get("split", "")) != managed_split:
                 continue
             dilutions = member.metadata.get("dilutions", ())
-            if subset != "full" and (
+            if managed_split == "train" and subset != "full" and (
                 not isinstance(dilutions, (list, tuple)) or subset not in dilutions
             ):
                 continue
@@ -276,8 +278,8 @@ class WisdomDataset(Dataset[Mapping[str, Tensor | str]]):
 
         Raises:
             IndexError: If ``index`` is outside the selected split.
-            ValueError: If required arrays, shapes, finite values, relation semantics, or endpoint
-                ranges are inconsistent with the current WISDOM NPZ contract.
+            ValueError: If required arrays, schema version, shapes, or relation storage types are
+                inconsistent with the current WISDOM NPZ contract.
             OSError: If the NPZ cannot be opened.
         """
         path, annotation_path, label, identifier, tier = self.records[index]
@@ -338,30 +340,22 @@ class WisdomDataset(Dataset[Mapping[str, Tensor | str]]):
         atom_count    = len(values["atomic_numbers"])
         surface_count = len(values["surface_area_weights"])
 
-        # Categories and continuous point features establish model input dimensions.
+        # Dataset publication owns exhaustive numerical/range validation. The epoch hot path
+        # repeats only cheap schema and shape checks needed to establish model dimensions.
+
         if values["atomic_numbers"].shape != (atom_count,) or atom_count == 0:
             raise ValueError("atomic_numbers must have non-empty shape [N]")
         if values["residue_type_ids"].shape != (atom_count,):
             raise ValueError("residue_type_ids must have shape [N]")
-        if np.any(values["atomic_numbers"] <= 0):
-            raise ValueError("atomic_numbers must contain positive element identifiers")
-
         curvatures = values["surface_curvatures"]
         weights    = values["surface_area_weights"]
         if curvatures.ndim != 3 or curvatures.shape[0] != surface_count or curvatures.shape[2] != 3:
             raise ValueError("surface_curvatures must have shape [M,S,3]")
         if surface_count == 0 or weights.shape != (surface_count,):
             raise ValueError("surface_area_weights must have non-empty shape [M]")
-        if (
-            not np.isfinite(curvatures).all()
-            or not np.isfinite(weights).all()
-            or np.any(weights <= 0)
-        ):
-            raise ValueError(
-                "surface curvature and area tensors must be finite with positive weights"
-            )
 
         # Bounded atomic candidates remain inactive until the collator applies the requested K.
+
         atom_edges    = values["atom_edge_index"]
         is_covalent   = values["atom_edge_is_covalent"]
         spatial_rank  = values["atom_edge_spatial_rank"]
@@ -371,15 +365,6 @@ class WisdomDataset(Dataset[Mapping[str, Tensor | str]]):
             raise ValueError("atom_edge_is_covalent must be Boolean with shape [E]")
         if spatial_rank.shape != (atom_edges.shape[1],) or spatial_rank.dtype.kind not in "iu":
             raise ValueError("atom_edge_spatial_rank must be integer with shape [E]")
-        if np.any(~is_covalent & (spatial_rank == 0)):
-            raise ValueError("an atomic edge is neither covalent nor spatial")
-        if atom_edges.size and (
-            atom_edges.min() < 0
-            or atom_edges.max() >= atom_count
-            or not np.all(atom_edges[0] < atom_edges[1])
-        ):
-            raise ValueError("atom_edge_index endpoints/order are invalid")
-
         neighbor_shape = values["surface_atom_neighbors"].shape
         if len(neighbor_shape) != 2 or neighbor_shape[0] != surface_count:
             raise ValueError("surface_atom_neighbors must have shape [M,Jmax]")
@@ -393,19 +378,12 @@ class WisdomDataset(Dataset[Mapping[str, Tensor | str]]):
                 raise ValueError(f"{name} must have shape [M,Jmax]")
         atom_neighbors = values["surface_atom_neighbors"]
         atom_mask      = values["surface_atom_mask"]
-        if np.any(atom_mask.sum(axis=1) == 0) or np.any(atom_neighbors[~atom_mask] != -1):
-            raise ValueError("surface atom masks and sentinels are inconsistent")
-        if np.any(atom_neighbors[atom_mask] < 0) or np.any(
-            atom_neighbors[atom_mask] >= atom_count
-        ):
-            raise ValueError("surface atom neighbor is out of range")
-
-        mass         = values["diffusion_mass"]
-        eigenvalues  = values["diffusion_eigenvalues"]
-        eigenvectors = values["diffusion_eigenvectors"]
+        mass           = values["diffusion_mass"]
+        eigenvalues    = values["diffusion_eigenvalues"]
+        eigenvectors   = values["diffusion_eigenvectors"]
         gradient_index = values["diffusion_gradient_index"]
-        if mass.shape != (surface_count,) or np.any(mass <= 0.0):
-            raise ValueError("diffusion_mass must be positive with shape [M]")
+        if mass.shape != (surface_count,):
+            raise ValueError("diffusion_mass must have shape [M]")
         if eigenvectors.shape != (surface_count, len(eigenvalues)):
             raise ValueError("diffusion eigenvectors must have shape [M,Q]")
         if gradient_index.ndim != 2 or gradient_index.shape[0] != 2:
@@ -415,33 +393,39 @@ class WisdomDataset(Dataset[Mapping[str, Tensor | str]]):
                 raise ValueError(f"{name} must have shape [G]")
 
         output: dict[str, Tensor | str] = {
-            "atomic_numbers": torch.from_numpy(values["atomic_numbers"].astype(np.int64)),
-            "residue_type_ids": torch.from_numpy(values["residue_type_ids"].astype(np.int64)),
-            "atom_edge_index": torch.from_numpy(atom_edges.astype(np.int64)),
-            "atom_edge_is_covalent": torch.from_numpy(is_covalent.astype(np.bool_)),
-            "atom_edge_spatial_rank": torch.from_numpy(spatial_rank.astype(np.int64)),
-            "surface_curvatures": torch.from_numpy(curvatures.astype(np.float32)),
-            "surface_atom_neighbors": torch.from_numpy(atom_neighbors.astype(np.int64)),
+            "atomic_numbers": torch.from_numpy(
+                values["atomic_numbers"].astype(np.int64, copy=False)
+            ),
+            "residue_type_ids": torch.from_numpy(
+                values["residue_type_ids"].astype(np.int64, copy=False)
+            ),
+            "atom_edge_index": torch.from_numpy(atom_edges.astype(np.int64, copy=False)),
+            "atom_edge_is_covalent": torch.from_numpy(is_covalent.astype(np.bool_, copy=False)),
+            "atom_edge_spatial_rank": torch.from_numpy(spatial_rank.astype(np.int64, copy=False)),
+            "surface_curvatures": torch.from_numpy(curvatures.astype(np.float32, copy=False)),
+            "surface_atom_neighbors": torch.from_numpy(atom_neighbors.astype(np.int64, copy=False)),
             "surface_atom_distances": torch.from_numpy(
-                values["surface_atom_distances"].astype(np.float32)
+                values["surface_atom_distances"].astype(np.float32, copy=False)
             ),
             "surface_atom_normal_offsets": torch.from_numpy(
-                values["surface_atom_normal_offsets"].astype(np.float32)
+                values["surface_atom_normal_offsets"].astype(np.float32, copy=False)
             ),
             "surface_atom_tangential_distances": torch.from_numpy(
-                values["surface_atom_tangential_distances"].astype(np.float32)
+                values["surface_atom_tangential_distances"].astype(np.float32, copy=False)
             ),
-            "surface_atom_mask": torch.from_numpy(atom_mask.astype(np.bool_)),
-            "surface_area_weights": torch.from_numpy(weights.astype(np.float32)),
-            "diffusion_mass": torch.from_numpy(mass.astype(np.float32)),
-            "diffusion_eigenvalues": torch.from_numpy(eigenvalues.astype(np.float32)),
-            "diffusion_eigenvectors": torch.from_numpy(eigenvectors.astype(np.float32)),
-            "diffusion_gradient_index": torch.from_numpy(gradient_index.astype(np.int64)),
+            "surface_atom_mask": torch.from_numpy(atom_mask.astype(np.bool_, copy=False)),
+            "surface_area_weights": torch.from_numpy(weights.astype(np.float32, copy=False)),
+            "diffusion_mass": torch.from_numpy(mass.astype(np.float32, copy=False)),
+            "diffusion_eigenvalues": torch.from_numpy(eigenvalues.astype(np.float32, copy=False)),
+            "diffusion_eigenvectors": torch.from_numpy(eigenvectors.astype(np.float32, copy=False)),
+            "diffusion_gradient_index": torch.from_numpy(
+                gradient_index.astype(np.int64, copy=False)
+            ),
             "diffusion_gradient_x": torch.from_numpy(
-                values["diffusion_gradient_x"].astype(np.float32)
+                values["diffusion_gradient_x"].astype(np.float32, copy=False)
             ),
             "diffusion_gradient_y": torch.from_numpy(
-                values["diffusion_gradient_y"].astype(np.float32)
+                values["diffusion_gradient_y"].astype(np.float32, copy=False)
             ),
             "target": torch.tensor(float(label), dtype=torch.float32),
         }
@@ -456,7 +440,7 @@ class WisdomDataset(Dataset[Mapping[str, Tensor | str]]):
                 dtype = np.int64 if name == "surface_neighbors" else (
                     np.bool_ if name == "surface_neighbor_mask" else np.float32
                 )
-                output[name] = torch.from_numpy(values[name].astype(dtype))
+                output[name] = torch.from_numpy(values[name].astype(dtype, copy=False))
         if annotation_path is not None and (
             self.include_surface_targets or self.include_diagnostics
         ):
@@ -497,10 +481,10 @@ class WisdomDataset(Dataset[Mapping[str, Tensor | str]]):
                 output.update(
                     {
                         "surface_target_hard": torch.from_numpy(
-                            annotation["surface_target_hard"].astype(np.int64)
+                            annotation["surface_target_hard"].astype(np.int64, copy=False)
                         ),
                         "surface_valid_mask": torch.from_numpy(
-                            annotation["surface_valid_mask"].astype(np.bool_)
+                            annotation["surface_valid_mask"].astype(np.bool_, copy=False)
                         ),
                     }
                 )
@@ -508,18 +492,20 @@ class WisdomDataset(Dataset[Mapping[str, Tensor | str]]):
                     output.update(
                         {
                             "surface_target_soft": torch.from_numpy(
-                                annotation["surface_target_soft"].astype(np.float32)
+                                annotation["surface_target_soft"].astype(np.float32, copy=False)
                             ),
                             "surface_distance_to_dna": torch.from_numpy(
-                                annotation["surface_distance_to_dna"].astype(np.float32)
+                                annotation["surface_distance_to_dna"].astype(np.float32, copy=False)
                             ),
                             "surface_distance_valid": torch.from_numpy(
-                                annotation["surface_distance_valid"].astype(np.bool_)
+                                annotation["surface_distance_valid"].astype(np.bool_, copy=False)
                             ),
                             "surface_target_hard_sensitivity": torch.from_numpy(
-                                sensitivity.astype(np.int64)
+                                sensitivity.astype(np.int64, copy=False)
                             ),
-                            "sensitivity_gaps": torch.from_numpy(gaps.astype(np.float32)),
+                            "sensitivity_gaps": torch.from_numpy(
+                                gaps.astype(np.float32, copy=False)
+                            ),
                         }
                     )
         output["identifier"] = identifier

@@ -376,6 +376,8 @@ def test_evaluation_reports_surface_metrics_across_multiple_batches() -> None:
     )
 
     assert protein_metrics["auprc"] is not None
+    assert "mcc" in protein_metrics
+    assert protein_metrics["loss"] is not None and protein_metrics["loss"] > 0.0
     assert surface_metrics["surface_valid_points"] == 5.0
     assert surface_metrics["surface_positive_proteins"] == 1.0
     assert surface_metrics["surface_positive_macro_auprc"] is not None
@@ -402,16 +404,36 @@ def test_dataset_reads_managed_partitions_targets_and_dilutions(tmp_path: Path) 
                 metadata={"dilutions": ["25pct"]},
                 assets={"universal_npz": DatasetAsset(path="second.npz")},
             ),
+            DatasetMember(
+                member_id="VALIDATION_A",
+                partitions={"split": "validation", "tier": "core"},
+                targets={"dna_binding": 1},
+                metadata={"dilutions": []},
+                assets={"universal_npz": DatasetAsset(path="first.npz")},
+            ),
+            DatasetMember(
+                member_id="TEST_A",
+                partitions={"split": "test", "tier": "core"},
+                targets={"dna_binding": 0},
+                metadata={"dilutions": []},
+                assets={"universal_npz": DatasetAsset(path="second.npz")},
+            ),
         ),
     )
 
-    full  = WisdomDataset(tmp_path, "train")
-    small = WisdomDataset(tmp_path, "train", subset="10pct")
+    full       = WisdomDataset(tmp_path, "train")
+    small      = WisdomDataset(tmp_path, "train", subset="10pct")
+    validation = WisdomDataset(tmp_path, "val", subset="10pct")
+    test       = WisdomDataset(tmp_path, "test", subset="10pct")
 
     assert len(full) == 2
     assert len(small) == 1
+    assert len(validation) == 1
+    assert len(test) == 1
     assert small[0]["identifier"] == "FIRST_A"
     assert small[0]["tier"] == "core"
+    assert validation[0]["identifier"] == "VALIDATION_A"
+    assert test[0]["identifier"] == "TEST_A"
 
 
 def test_collator_activates_nested_topology_and_offsets_atom_tables() -> None:
