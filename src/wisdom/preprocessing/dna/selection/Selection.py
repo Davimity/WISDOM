@@ -4,6 +4,7 @@ import lambdaforge as lf
 
 from typing import Any
 from pathlib import Path
+from collections.abc import Sequence
 from wisdom.preprocessing.dna.selection.audit import audit_dataset
 from wisdom.preprocessing.dna.selection.report import write_design
 from wisdom.preprocessing.dna.selection.splits import assign_splits
@@ -64,7 +65,7 @@ class Selection(lf.Work):
         train_fraction              : float             = 0.70,
         validation_fraction         : float             = 0.15,
         test_fraction               : float             = 0.15,
-        dilution_fractions          : tuple[float, ...] = (1.0, 0.75, 0.50, 0.25, 0.10),
+        dilution_fractions          : Sequence[float]  = (1.0, 0.75, 0.50, 0.25, 0.10),
         dilution_replicates         : int               = 1,
         seed                        : int               = 2026,
 

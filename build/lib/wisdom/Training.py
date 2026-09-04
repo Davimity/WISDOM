@@ -1,17 +1,18 @@
-"""Version-resolved trainable WISDOM Work for LambdaForge 0.13."""
+"""Version-resolved trainable WISDOM Work for LambdaForge 0.14."""
 
 from __future__ import annotations
 
 import time
 import json
+import math
 import torch
 import inspect
 import importlib
 import lambdaforge as lf
 
-from typing import Any
 from pathlib import Path
 from torch import Tensor
+from typing import Any, cast
 from collections.abc import Mapping
 from torch.nn import functional as F
 from torch.utils.data import DataLoader
@@ -27,6 +28,14 @@ from wisdom.models.DiffusionSurfaceEncoder import DiffusionSurfaceEncoder
 _MODEL_INPUT_NAMES = (
     "atomic_numbers",
     "residue_type_ids",
+    "atom_role_ids",
+    "atom_hybridization_ids",
+    "formal_charges",
+    "atom_aromaticity",
+    "atom_hbond_donor",
+    "atom_hbond_acceptor",
+    "residue_hydropathy",
+    "residue_polarity",
     "atom_edge_index",
     "atom_edge_types",
     "surface_curvatures",
@@ -59,7 +68,18 @@ class Training(lf.Work):
         subset               : str = "full",
         hidden_dim           : int = 128,
         embedding_dim        : int = 32,
+        residue_embedding_dim: int | None = None,
         use_residue_type     : bool = True,
+        atom_feature_preset  : str = "legacy",
+        use_element          : bool = True,
+        use_formal_charge    : bool = False,
+        use_aromaticity      : bool = False,
+        use_hbond_donor      : bool = False,
+        use_hbond_acceptor   : bool = False,
+        use_hybridization    : bool = False,
+        use_atom_role        : bool = False,
+        use_residue_hydropathy: bool = False,
+        use_residue_polarity : bool = False,
         atomic_layers        : int = 2,
         projection_depth     : int = 1,
         surface_layers       : int = 2,
@@ -69,6 +89,14 @@ class Training(lf.Work):
         surface_atom_radius  : float = 6.0,
         surface_chunk_size   : int = 8192,
         atomic_message_chunk_size: int = 65536,
+        relation_mode        : str = "full_relational",
+        transfer_geometry    : str = "full",
+        surface_feature_mode : str = "chemistry_geometry",
+        curvature_scale_count: int = 0,
+        use_mean_curvature   : bool = True,
+        use_gaussian_curvature: bool = True,
+        use_curvedness       : bool = True,
+        use_shape_index      : bool = False,
         dropout              : float = 0.2,
         surface_encoder_type : str = "diffusion",
         surface_patch_size   : int = 64,
@@ -86,6 +114,7 @@ class Training(lf.Work):
         precision            : str = "auto",
         surface_metrics      : bool = True,
         surface_metrics_interval: int = 0,
+        evaluate_test        : bool = True,
         data_workers         : int = 4,
     ) -> dict[str, Any]:
         """Train and evaluate one compatible WISDOM generation from a managed DatasetVersion.
@@ -100,7 +129,19 @@ class Training(lf.Work):
             subset: Full data or a deterministic training-view name.
             hidden_dim: Shared atom/surface latent width.
             embedding_dim: Element and optional residue embedding width.
+            residue_embedding_dim: Independent residue embedding width; ``None`` reuses
+                ``embedding_dim`` for backward compatibility.
             use_residue_type: Include learned residue category features when true.
+            atom_feature_preset: Named generic atom-feature bundle or ``custom``.
+            use_element: Include element identity for a custom/legacy feature configuration.
+            use_formal_charge: Include source formal charge in elementary-charge units.
+            use_aromaticity: Include conservative aromaticity.
+            use_hbond_donor: Include conservative hydrogen-bond donor identity.
+            use_hbond_acceptor: Include conservative hydrogen-bond acceptor identity.
+            use_hybridization: Include graph-derived hybridization category.
+            use_atom_role: Include structural atom role.
+            use_residue_hydropathy: Include normalized residue hydropathy.
+            use_residue_polarity: Include coarse residue polarity.
             atomic_layers: Relation-aware atomic graph layer count.
             projection_depth: Atom-context/curvature projection MLP depth.
             surface_layers: Surface-encoder block count.
@@ -110,6 +151,14 @@ class Training(lf.Work):
             surface_atom_radius: Physical transfer cutoff used for feature normalization.
             surface_chunk_size: Maximum surface points in one atom-transfer chunk.
             atomic_message_chunk_size: Maximum atomic messages materialized per RGCN chunk.
+            relation_mode: Full, unified, spatial-only, or covalent-only graph information.
+            transfer_geometry: Distance-only or full invariant atom-to-surface geometry.
+            surface_feature_mode: Chemistry-only, geometry-only, or combined surface input.
+            curvature_scale_count: Number of smallest persisted scales; zero retains all.
+            use_mean_curvature: Include mean curvature.
+            use_gaussian_curvature: Include Gaussian curvature.
+            use_curvedness: Include curvedness.
+            use_shape_index: Include derived shape index.
             dropout: Dropout probability in ``[0,1)``.
             surface_encoder_type: V3 surface-propagation hypothesis; v1 requires ``diffusion``.
             surface_patch_size: V3 serialized-attention patch bound.
@@ -122,14 +171,18 @@ class Training(lf.Work):
             weight_decay: Non-negative AdamW decoupled weight decay.
             batch_size: Positive number of disjoint protein graphs per optimizer step.
             epochs: Positive maximum training epoch count.
-            patience: Validation epochs without a meaningful AUPRC improvement before stopping.
-            minimum_delta: Minimum absolute validation AUPRC increase that resets ``patience``.
+            patience: Validation epochs without a meaningful composite-utility improvement before
+                stopping.
+            minimum_delta: Minimum absolute validation composite-utility increase that resets
+                ``patience``.
             precision: ``auto``, ``float32``, ``bfloat16``, or ``float16`` activation policy.
             surface_metrics: Report evaluation-only local metrics on validation and final test
                 without exposing them to loss, checkpoint selection, pruning, or HPO ranking.
             surface_metrics_interval: Validation-epoch interval for local metrics. Zero evaluates
                 them only once after restoring the best checkpoint; a positive value also evaluates
                 them every N epochs. The final held-out test evaluation remains unchanged.
+            evaluate_test: Evaluate the held-out test split once after selecting the validation
+                checkpoint. Experimental screening may disable it to prevent repeated test access.
             data_workers: Persistent training-loader subprocesses used to overlap NPZ decoding
                 with GPU work. Validation and test use half this count, rounded down to one.
 
@@ -139,7 +192,7 @@ class Training(lf.Work):
 
         Raises:
             ValueError: If a model, data view, parameter, or metric contract is invalid.
-            RuntimeError: If validation AUPRC is mathematically undefined for every epoch.
+            RuntimeError: If the composite validation utility is undefined for every epoch.
             OSError: If managed arrays or checkpoint/report artifacts cannot be accessed.
         """
         return _train_wisdom(
@@ -149,7 +202,18 @@ class Training(lf.Work):
             subset=subset,
             hidden_dim=hidden_dim,
             embedding_dim=embedding_dim,
+            residue_embedding_dim=residue_embedding_dim,
             use_residue_type=use_residue_type,
+            atom_feature_preset=atom_feature_preset,
+            use_element=use_element,
+            use_formal_charge=use_formal_charge,
+            use_aromaticity=use_aromaticity,
+            use_hbond_donor=use_hbond_donor,
+            use_hbond_acceptor=use_hbond_acceptor,
+            use_hybridization=use_hybridization,
+            use_atom_role=use_atom_role,
+            use_residue_hydropathy=use_residue_hydropathy,
+            use_residue_polarity=use_residue_polarity,
             atomic_layers=atomic_layers,
             projection_depth=projection_depth,
             surface_layers=surface_layers,
@@ -159,6 +223,14 @@ class Training(lf.Work):
             surface_atom_radius=surface_atom_radius,
             surface_chunk_size=surface_chunk_size,
             atomic_message_chunk_size=atomic_message_chunk_size,
+            relation_mode=relation_mode,
+            transfer_geometry=transfer_geometry,
+            surface_feature_mode=surface_feature_mode,
+            curvature_scale_count=curvature_scale_count,
+            use_mean_curvature=use_mean_curvature,
+            use_gaussian_curvature=use_gaussian_curvature,
+            use_curvedness=use_curvedness,
+            use_shape_index=use_shape_index,
             dropout=dropout,
             surface_encoder_type=surface_encoder_type,
             surface_patch_size=surface_patch_size,
@@ -176,6 +248,7 @@ class Training(lf.Work):
             precision=precision,
             surface_metrics=surface_metrics,
             surface_metrics_interval=surface_metrics_interval,
+            evaluate_test=evaluate_test,
             data_workers=data_workers,
             seed=self.seed or 0,
         )
@@ -188,7 +261,18 @@ def _train_wisdom(
     subset               : str = "full",
     hidden_dim           : int = 128,
     embedding_dim        : int = 32,
+    residue_embedding_dim: int | None = None,
     use_residue_type     : bool = True,
+    atom_feature_preset  : str = "legacy",
+    use_element          : bool = True,
+    use_formal_charge    : bool = False,
+    use_aromaticity      : bool = False,
+    use_hbond_donor      : bool = False,
+    use_hbond_acceptor   : bool = False,
+    use_hybridization    : bool = False,
+    use_atom_role        : bool = False,
+    use_residue_hydropathy: bool = False,
+    use_residue_polarity : bool = False,
     atomic_layers        : int = 2,
     projection_depth     : int = 1,
     surface_layers       : int = 2,
@@ -198,6 +282,14 @@ def _train_wisdom(
     surface_atom_radius  : float = 6.0,
     surface_chunk_size   : int = 8192,
     atomic_message_chunk_size: int = 65536,
+    relation_mode        : str = "full_relational",
+    transfer_geometry    : str = "full",
+    surface_feature_mode : str = "chemistry_geometry",
+    curvature_scale_count: int = 0,
+    use_mean_curvature   : bool = True,
+    use_gaussian_curvature: bool = True,
+    use_curvedness       : bool = True,
+    use_shape_index      : bool = False,
     dropout              : float = 0.2,
     surface_encoder_type : str = "diffusion",
     surface_patch_size   : int = 64,
@@ -215,6 +307,7 @@ def _train_wisdom(
     precision            : str = "auto",
     surface_metrics      : bool = True,
     surface_metrics_interval: int = 0,
+    evaluate_test        : bool = True,
     data_workers         : int = 4,
     seed                 : int = 0,
 ) -> dict[str, Any]:
@@ -230,7 +323,19 @@ def _train_wisdom(
         subset: Full data or a deterministic view such as ``replicate-00/train-25``.
         hidden_dim: Shared atom/surface latent width.
         embedding_dim: Element and optional residue embedding width.
+        residue_embedding_dim: Independent residue embedding width or ``None`` for the legacy
+            shared width.
         use_residue_type: Include learned residue category features when true.
+        atom_feature_preset: Named atom-feature bundle or ``custom``.
+        use_element: Include element identity in a custom configuration.
+        use_formal_charge: Include source formal charge in elementary-charge units.
+        use_aromaticity: Include aromaticity.
+        use_hbond_donor: Include donor identity.
+        use_hbond_acceptor: Include acceptor identity.
+        use_hybridization: Include hybridization identity.
+        use_atom_role: Include structural atom role.
+        use_residue_hydropathy: Include normalized residue hydropathy.
+        use_residue_polarity: Include coarse residue polarity.
         atomic_layers: Relation-aware atomic graph layer count.
         projection_depth: Atom-context/curvature projection MLP depth.
         surface_layers: Surface-encoder block count.
@@ -240,6 +345,14 @@ def _train_wisdom(
         surface_atom_radius: Transfer geometry normalization radius in Å.
         surface_chunk_size: Maximum transfer points per activation chunk.
         atomic_message_chunk_size: Maximum RGCN messages per chunk.
+        relation_mode: Atomic relation information retained by the collator.
+        transfer_geometry: Geometry received by atom-to-surface attention.
+        surface_feature_mode: Chemistry/geometry surface input choice.
+        curvature_scale_count: Number of smallest persisted curvature scales; zero means all.
+        use_mean_curvature: Include mean curvature.
+        use_gaussian_curvature: Include Gaussian curvature.
+        use_curvedness: Include curvedness.
+        use_shape_index: Include shape index.
         dropout: Dropout probability in ``[0,1)``.
         surface_encoder_type: V3 controlled surface encoder name.
         surface_patch_size: V3 serialized-attention patch bound.
@@ -252,14 +365,18 @@ def _train_wisdom(
         weight_decay: Non-negative AdamW decoupled weight decay.
         batch_size: Positive number of disjoint protein graphs per optimizer step.
         epochs: Positive maximum training epoch count.
-        patience: Validation epochs without a meaningful AUPRC improvement before stopping.
-        minimum_delta: Minimum absolute validation AUPRC increase that resets ``patience``.
+        patience: Validation epochs without a meaningful composite-utility improvement before
+            stopping.
+        minimum_delta: Minimum absolute validation composite-utility increase that resets
+            ``patience``.
         precision: ``auto``, ``float32``, ``bfloat16``, or ``float16`` activation policy.
         surface_metrics: Report evaluation-only local metrics on validation and final test without
             using them for optimization or model selection.
         surface_metrics_interval: Validation-epoch interval for local metrics. Zero evaluates them
             only on the restored best checkpoint; a positive integer additionally evaluates every
             N epochs. Ignored when ``surface_metrics`` is false.
+        evaluate_test: Evaluate held-out test exactly once after validation selection. False keeps
+            HPO and screening completely isolated from test members.
         data_workers: Persistent training-loader subprocesses used to overlap NPZ decoding with
             GPU work. Validation and test use half this count, rounded down to one.
         seed: Reproducible seed injected by LambdaForge for each expanded run.
@@ -270,7 +387,7 @@ def _train_wisdom(
 
     Raises:
         ValueError: If a model, data view, parameter, or metric contract is invalid.
-        RuntimeError: If validation AUPRC is mathematically undefined for every epoch.
+        RuntimeError: If the composite validation utility is undefined for every epoch.
         OSError: If managed arrays or checkpoint/report artifacts cannot be read or written.
     """
     if isinstance(model_version, bool) or model_version < 1:
@@ -324,7 +441,8 @@ def _train_wisdom(
     trial_index = work.trial.index if work.trial is not None else 0
     run_label   = f"trial={trial_index} seed={seed}"
 
-    work.log(f"[Training {run_label}] loading managed train, validation, and test splits")
+    requested_splits = ("train", "val", "test") if evaluate_test else ("train", "val")
+    work.log(f"[Training {run_label}] loading managed splits: {requested_splits}")
 
     datasets = {
         split: WisdomDataset(
@@ -334,7 +452,7 @@ def _train_wisdom(
             include_surface_targets=False,
             include_surface_geometry=model_version == 3,
         )
-        for split in ("train", "val", "test")
+        for split in requested_splits
     }
     loader_datasets = dict(datasets)
 
@@ -351,19 +469,22 @@ def _train_wisdom(
             include_surface_targets=True,
             include_surface_geometry=model_version == 3,
         )
-        loader_datasets["test_surface"] = WisdomDataset(
-            dataset,
-            "test",
-            subset=subset,
-            include_surface_targets=True,
-            include_surface_geometry=model_version == 3,
-        )
+        if evaluate_test:
+            loader_datasets["test_surface"] = WisdomDataset(
+                dataset,
+                "test",
+                subset=subset,
+                include_surface_targets=True,
+                include_surface_geometry=model_version == 3,
+            )
 
     generator = torch.Generator().manual_seed(seed)
     collator  = WisdomCollator(
         atom_spatial_k=atom_spatial_k,
         surface_atom_k=surface_atom_k,
         diffusion_spectral_modes=diffusion_spectral_modes,
+        relation_mode=relation_mode,
+        curvature_scale_count=curvature_scale_count,
     )
     loaders: dict[str, DataLoader[Any]] = {}
     evaluation_workers = max(1, data_workers // 2) if data_workers else 0
@@ -411,7 +532,20 @@ def _train_wisdom(
                 f"{tuple(curvature.shape)}"
             )
 
-        curvature_widths[split] = int(curvature.shape[1] * curvature.shape[2])
+        selected_scale_count = (
+            curvature.shape[1]
+            if curvature_scale_count == 0
+            else min(curvature_scale_count, curvature.shape[1])
+        )
+        descriptor_count = sum(
+            (
+                use_mean_curvature,
+                use_gaussian_curvature,
+                use_curvedness,
+                use_shape_index,
+            )
+        )
+        curvature_widths[split] = int(selected_scale_count * descriptor_count)
 
     if len(set(curvature_widths.values())) != 1:
         raise ValueError(f"dataset splits disagree on curvature feature width: {curvature_widths}")
@@ -421,7 +555,18 @@ def _train_wisdom(
     available_parameters = {
         "hidden_dim":           hidden_dim,
         "embedding_dim":        embedding_dim,
+        "residue_embedding_dim": residue_embedding_dim,
         "use_residue_type":     use_residue_type,
+        "atom_feature_preset":  atom_feature_preset,
+        "use_element":          use_element,
+        "use_formal_charge":    use_formal_charge,
+        "use_aromaticity":      use_aromaticity,
+        "use_hbond_donor":      use_hbond_donor,
+        "use_hbond_acceptor":   use_hbond_acceptor,
+        "use_hybridization":    use_hybridization,
+        "use_atom_role":        use_atom_role,
+        "use_residue_hydropathy": use_residue_hydropathy,
+        "use_residue_polarity": use_residue_polarity,
         "atomic_layers":        atomic_layers,
         "projection_depth":     projection_depth,
         "surface_layers":       surface_layers,
@@ -431,6 +576,12 @@ def _train_wisdom(
         "surface_atom_radius":  surface_atom_radius,
         "surface_chunk_size":   surface_chunk_size,
         "atomic_message_chunk_size": atomic_message_chunk_size,
+        "transfer_geometry":    transfer_geometry,
+        "surface_feature_mode": surface_feature_mode,
+        "use_mean_curvature":   use_mean_curvature,
+        "use_gaussian_curvature": use_gaussian_curvature,
+        "use_curvedness":       use_curvedness,
+        "use_shape_index":      use_shape_index,
         "dropout":              dropout,
         "surface_encoder_type": surface_encoder_type,
         "surface_patch_size":   surface_patch_size,
@@ -477,6 +628,8 @@ def _train_wisdom(
     work.log(
         f"[Training {run_label}] starting on {device.type}; splits={split_sizes}; "
         f"architecture={architecture_name}; curvature_features={curvature_features}; "
+        f"atom_features={getattr(model, 'atom_features', {})}; relation_mode={relation_mode}; "
+        f"surface_features={surface_feature_mode}; transfer_geometry={transfer_geometry}; "
         f"batch_size={batch_size}; "
         f"data_workers=train:{data_workers}/eval:{evaluation_workers}; "
         f"precision={effective_precision}; "
@@ -487,7 +640,9 @@ def _train_wisdom(
     )
 
     best_auprc                 = float("-inf")
+    best_selection_utility     = float("-inf")
     best_val_loss              = float("inf")
+    best_validation_metrics    : dict[str, float | None] = {}
     best_epoch                 = 0
     epochs_completed           = 0
     epochs_without_improvement = 0
@@ -664,16 +819,26 @@ def _train_wisdom(
             if optional_metric is not None:
                 work.metrics.log(name, optional_metric, step=epoch, split="val")
 
-        objective       = validation["auprc"]
-        validation_loss = validation["loss"]
+        objective         = validation["auprc"]
+        selection_utility = _validation_utility(validation)
+        validation_loss   = validation["loss"]
         if validation_loss is None:
             raise RuntimeError("validation loss is unavailable for a non-empty split")
+        if selection_utility is not None:
+            work.metrics.log("selection_utility", selection_utility, step=epoch, split="val")
 
         epochs_completed = epoch
 
-        if objective is not None and objective > best_auprc + minimum_delta:
+        if (
+            selection_utility is not None
+            and selection_utility > best_selection_utility + minimum_delta
+        ):
+            if objective is None:
+                raise RuntimeError("composite utility cannot exist without validation AUPRC")
             best_auprc                 = objective
+            best_selection_utility     = selection_utility
             best_val_loss              = validation_loss
+            best_validation_metrics    = dict(validation)
             best_epoch                 = epoch
             epochs_without_improvement = 0
 
@@ -682,15 +847,24 @@ def _train_wisdom(
                     "model_version":    model_version,
                     "model_parameters": model_parameters,
                     "pooling_type":     pooling_type,
+                    "data_parameters": {
+                        "relation_mode":            relation_mode,
+                        "atom_spatial_k":           atom_spatial_k,
+                        "surface_atom_k":           surface_atom_k,
+                        "diffusion_spectral_modes": diffusion_spectral_modes,
+                        "curvature_scale_count":    curvature_scale_count,
+                    },
                     "state_dict":       model.state_dict(),
                     "seed":             seed,
                     "epoch":            epoch,
                     "val_auprc":        objective,
                     "val_loss":         best_val_loss,
+                    "validation_metrics": best_validation_metrics,
+                    "selection_utility": best_selection_utility,
                 },
                 checkpoint,
             )
-        elif objective is not None:
+        else:
             epochs_without_improvement += 1
 
         work.metrics.log(
@@ -706,7 +880,7 @@ def _train_wisdom(
             split="val",
         )
 
-        # One compact, labelled line per epoch remains readable with eight interleaved GPU Runs.
+        # One compact, labelled line per epoch remains readable with ten interleaved GPU Runs.
         # The complete metric suite is still stored structurally by LambdaForge above.
 
         auroc    = validation["auroc"]
@@ -718,6 +892,12 @@ def _train_wisdom(
         balanced_text = "n/a" if balanced is None else f"{balanced:.4f}"
         mcc_text      = "n/a" if mcc is None else f"{mcc:.4f}"
         best_text     = "n/a" if best_epoch == 0 else f"{best_auprc:.4f}"
+        best_utility_text = (
+            "n/a" if best_epoch == 0 else f"{best_selection_utility:.4f}"
+        )
+        utility_text  = (
+            "n/a" if selection_utility is None else f"{selection_utility:.4f}"
+        )
         val_loss_text = _metric_text(validation, "loss")
 
         surface_micro_text = _metric_text(surface_validation, "surface_micro_auprc")
@@ -734,7 +914,8 @@ def _train_wisdom(
 
         progress_message = (
             f"{run_label}; train_loss={train_loss:.5f}; val_loss={val_loss_text}; "
-            f"val_auprc={auprc_text}; surface_macro_auprc={surface_macro_text}; "
+            f"val_auprc={auprc_text}; utility={utility_text}; "
+            f"surface_macro_auprc={surface_macro_text}; "
             f"patience={epochs_without_improvement}/{patience}; best={best_text}"
         )
 
@@ -771,7 +952,8 @@ def _train_wisdom(
         work.log(
             f"[Training {run_label}] epoch={epoch}/{epochs} train_loss={train_loss:.5f} "
             f"protein_val[loss={val_loss_text},auprc={auprc_text},auroc={auroc_text},"
-            f"balanced_accuracy={balanced_text},mcc={mcc_text},best_auprc={best_text}] "
+            f"balanced_accuracy={balanced_text},mcc={mcc_text},utility={utility_text},"
+            f"best_utility={best_utility_text},best_auprc={best_text}] "
             f"surface_val[status={surface_status},micro_auprc={surface_micro_text},"
             f"positive_macro_auprc={surface_macro_text},"
             f"positive_macro_auroc={surface_auroc_text}] "
@@ -794,23 +976,29 @@ def _train_wisdom(
             break
 
         # Patience prevents an otherwise healthy Run from spending epochs on a validation plateau.
-        # AUPRC must improve by minimum_delta, so negligible floating-point changes do not reset it.
+        # Composite utility must improve by minimum_delta, so negligible changes do not reset it.
 
         if epochs_without_improvement >= patience:
             stop_reason = "validation-patience"
             work.log(
-                f"Stopping after epoch {epoch}: validation AUPRC did not improve by "
+                f"Stopping after epoch {epoch}: composite validation utility did not improve by "
                 f"{minimum_delta:g} for {patience} epochs"
             )
             break
 
     if best_epoch == 0:
-        raise RuntimeError("validation AUPRC remained undefined; both classes are required")
+        raise RuntimeError(
+            "composite validation utility remained undefined; all four metrics and both classes "
+            "are required"
+        )
 
     # Candidate ranking must use the best validation checkpoint rather than the final plateau
     # observation. This unstepped summary does not alter LambdaForge's per-epoch pruning history.
 
-    work.metrics.log("auprc", best_auprc, split="val")
+    for name in ("auprc", "auroc", "balanced_accuracy", "mcc"):
+        value = best_validation_metrics.get(name)
+        if value is not None:
+            work.metrics.log(name, value, split="val")
 
     best_surface_metrics: dict[str, float | None] | None = None
     test_metrics        : dict[str, float | None] | None = None
@@ -824,8 +1012,8 @@ def _train_wisdom(
         saved = torch.load(checkpoint, map_location=device, weights_only=True)
         model.load_state_dict(saved["state_dict"])
 
-        # Local validation is always reported once for the exact checkpoint selected by global
-        # validation AUPRC. This is the only local pass when the configured interval is zero.
+        # Local validation is always reported once for the exact checkpoint selected by the global
+        # four-metric utility. This is the only local pass when the configured interval is zero.
 
         if surface_metrics:
             _, best_surface_metrics = _evaluate(
@@ -839,19 +1027,20 @@ def _train_wisdom(
                 if optional_metric is not None:
                     work.metrics.log(name, optional_metric, split="val")
 
-        test_metrics, test_surface_metrics = _evaluate(
-            model,
-            loaders["test_surface"] if surface_metrics else loaders["test"],
-            device,
-            autocast_dtype,
-        )
+        if evaluate_test:
+            test_metrics, test_surface_metrics = _evaluate(
+                model,
+                loaders["test_surface"] if surface_metrics else loaders["test"],
+                device,
+                autocast_dtype,
+            )
 
-        for name, optional_metric in test_metrics.items():
-            if optional_metric is not None:
-                work.metrics.log(name, optional_metric, split="test")
-        for name, optional_metric in test_surface_metrics.items():
-            if optional_metric is not None:
-                work.metrics.log(name, optional_metric, split="test")
+            for name, optional_metric in test_metrics.items():
+                if optional_metric is not None:
+                    work.metrics.log(name, optional_metric, split="test")
+            for name, optional_metric in test_surface_metrics.items():
+                if optional_metric is not None:
+                    work.metrics.log(name, optional_metric, split="test")
 
     report = {
         "model_version":               model_version,
@@ -862,12 +1051,14 @@ def _train_wisdom(
         "epochs_completed":            epochs_completed,
         "best_epoch":                  best_epoch,
         "best_val_auprc":              best_auprc,
+        "best_selection_utility":       best_selection_utility,
         "best_val_loss":               best_val_loss,
         "early_stopping_patience":     patience,
         "early_stopping_minimum_delta": minimum_delta,
         "precision":                   effective_precision,
         "surface_metrics_enabled":     surface_metrics,
         "surface_metrics_interval":    surface_metrics_interval,
+        "test_evaluated":              evaluate_test,
         "stop_reason":                 stop_reason,
         "best_validation_surface":     best_surface_metrics,
         "test":                        test_metrics,
@@ -972,6 +1163,42 @@ def _evaluate(
     return protein_metrics, local_metrics
 
 
+def _validation_utility(metrics: Mapping[str, float | None]) -> float | None:
+    """Reproduce WISDOM's declared four-component checkpoint utility.
+
+    LambdaForge owns HPO ranking and computes the same geometric utility from the four metrics
+    logged at one real epoch. Training needs the identical local rule only to make ``best-model.pt``
+    represent that selected epoch rather than an AUPRC-only epoch. The fixed normalized weights are
+    0.35 AUPRC, 0.20 AUROC, 0.25 balanced accuracy, and 0.20 MCC; MCC is mapped from ``[-1,1]`` to
+    ``[0,1]`` before aggregation.
+
+    Args:
+        metrics: Protein-level validation metrics from one epoch.
+
+    Returns:
+        Weighted geometric utility in ``[0,1]``, or ``None`` when any component is undefined.
+    """
+    names   = ("auprc", "auroc", "balanced_accuracy", "mcc")
+    weights = (0.35, 0.20, 0.25, 0.20)
+    values  = [metrics.get(name) for name in names]
+    if any(value is None for value in values):
+        return None
+
+    numeric = [float(cast(float, value)) for value in values]
+    normalized = [
+        numeric[0],
+        numeric[1],
+        numeric[2],
+        (numeric[3] + 1.0) / 2.0,
+    ]
+    if any(value <= 0.0 for value in normalized):
+        return 0.0
+    utility = math.exp(
+        sum(weight * math.log(value) for weight, value in zip(weights, normalized, strict=True))
+    )
+    return min(1.0, max(0.0, utility))
+
+
 def _metric_text(metrics: Mapping[str, float | None], name: str) -> str:
     """Format one optional metric for compact interleaved training logs.
 
@@ -1034,15 +1261,21 @@ def _create_model(
     # dense surface-graph implementation. Keep this check at construction time so an accidental
     # source regression fails before loading an epoch of data or allocating CUDA activations.
 
+    expected_surface_encoder = (
+        isinstance(getattr(model, "surface_encoder", None), DiffusionSurfaceEncoder)
+        if int(available_parameters.get("surface_layers", 2)) > 0
+        else isinstance(getattr(model, "surface_encoder", None), torch.nn.Identity)
+    )
     if model_version == 1 and (
         type(model) is not WisdomV1
         or getattr(model, "ARCHITECTURE_NAME", None) != "bounded-atomic-diffusionnet"
         or getattr(model, "STRUCTURAL_SCHEMA_VERSION", None)
         != WisdomDataset.STRUCTURAL_SCHEMA_VERSION
-        or not isinstance(getattr(model, "surface_encoder", None), DiffusionSurfaceEncoder)
+        or not expected_surface_encoder
     ):
         raise RuntimeError(
-            "WISDOM v1 must use schema-3 bounded atomic topology and DiffusionSurfaceEncoder"
+            "WISDOM v1 must use schema-3 bounded topology and DiffusionNet, except for the "
+            "explicit surface_layers=0 message-passing ablation"
         )
 
     return model, parameters

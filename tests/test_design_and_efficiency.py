@@ -8,6 +8,7 @@ import inspect
 import json
 import re
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import pytest
@@ -19,7 +20,10 @@ from yaml import safe_load
 from wisdom.preprocessing.dna.preprocessing.DatasetManifests import DatasetManifests
 from wisdom.preprocessing.dna.preprocessing.geometry import _process_geometry, generate_geometry
 from wisdom.preprocessing.dna.preprocessing.Preprocessing import Preprocessing
-from wisdom.preprocessing.dna.preprocessing.structures import _validate_structure
+from wisdom.preprocessing.dna.preprocessing.structures import (
+    _validate_structure,
+    validate_structure_snapshot,
+)
 from wisdom.preprocessing.dna.selection.Selection import Selection
 from wisdom.preprocessing.structure.PreprocessConfig import PreprocessConfig
 from wisdom.preprocessing.structure.ProteinPreprocessor import ProteinPreprocessor
@@ -68,6 +72,88 @@ def test_structure_snapshot_validation_reports_exact_digest_mismatch(tmp_path: P
 
     assert "uncompressed structure snapshot changed for 1ABC" in str(error.value)
     assert f"observed {observed}" in str(error.value)
+
+
+def test_selective_preprocessing_accepts_a_complete_structure_snapshot(
+    tmp_path: Path,
+) -> None:
+    """A train dilution validates only its PDBs while retaining the complete design snapshot.
+
+    Args:
+        tmp_path: Isolated complete-snapshot fixture and index root.
+    """
+
+    class SnapshotWork:
+        """Execute the bounded validation map synchronously for this focused contract test."""
+
+        def __init__(self) -> None:
+            """Create an empty collection of emitted progress messages."""
+            self.messages: list[str] = []
+
+        def log(self, message: str) -> None:
+            """Retain one user-facing validation message.
+
+            Args:
+                message: Progress or selected-subset explanation.
+            """
+            self.messages.append(message)
+
+        def resume_map(
+            self,
+            items   : list[dict[str, Any]],
+            function: Any,
+            **options: Any,
+        ) -> list[dict[str, str]]:
+            """Run selected validation jobs without emulating LambdaForge persistence.
+
+            Args:
+                items: Selected PDB validation records.
+                function: Bound archive validator.
+                options: LambdaForge map settings unused by the synchronous fixture.
+
+            Returns:
+                Validator results in selected PDB order.
+            """
+            del options
+            return [function(item) for item in items]
+
+    source  = Path(__file__).parent / "data" / "tiny.pdb"
+    archive = tmp_path / "1abc.pdb.gz"
+    with source.open("rb") as input_stream, gzip.open(archive, "wb") as output_stream:
+        output_stream.write(input_stream.read())
+
+    uncompressed_digest = hashlib.sha256(source.read_bytes()).hexdigest()
+    index = {
+        "schema_version": "1.0",
+        "structures": [
+            {
+                "pdb_id":              "1abc",
+                "file":                archive.name,
+                "compressed_sha256":   hashlib.sha256(archive.read_bytes()).hexdigest(),
+                "uncompressed_sha256": uncompressed_digest,
+            },
+            {
+                "pdb_id":              "2xyz",
+                "file":                "2xyz.cif.gz",
+                "compressed_sha256":   "0" * 64,
+                "uncompressed_sha256": "1" * 64,
+            },
+        ],
+    }
+    (tmp_path / "index.json").write_text(json.dumps(index), encoding="utf-8")
+    work = SnapshotWork()
+
+    result = validate_structure_snapshot(
+        work,  # type: ignore[arg-type]
+        ({"pdb_id": "1abc", "structure_sha256": uncompressed_digest},),
+        tmp_path,
+        workers=1,
+        progress_log_seconds=60.0,
+        verbose=False,
+    )
+
+    assert result == tmp_path
+    assert any("1 unused PDB archives" in message for message in work.messages)
 
 
 def test_one_class_per_source_file_and_reader_public_api() -> None:
@@ -264,6 +350,17 @@ def test_npz_schema_is_sparse_compact_and_has_no_learned_features(
         assert "surface_atom_edge_index" not in archive.files
         assert archive["atomic_numbers"].dtype == np.uint8
         assert archive["surface_positions"].dtype == np.float32
+        assert {
+            "atom_hybridization_ids",
+            "atom_aromaticity",
+            "atom_hbond_donor",
+            "atom_hbond_acceptor",
+            "residue_hydropathy",
+            "residue_polarity",
+        } <= set(archive.files)
+        assert archive["atom_hybridization_ids"].shape == (atom_count,)
+        assert archive["atom_aromaticity"].dtype == np.bool_
+        assert archive["residue_hydropathy"].dtype == np.float32
 
 
 def test_geometry_worker_returns_a_non_reusable_failure_record(tmp_path: Path) -> None:
@@ -357,8 +454,13 @@ def test_preprocessing_configuration_reuses_complete_design() -> None:
     assert preprocess_values["with"]["catalog"] == {"from": "select.catalog"}
     assert preprocess_values["with"]["dilutions"] == {"from": "select.dilutions"}
     assert preprocess_values["with"]["structures"] == {"from": "select.structures"}
-    assert preprocess_values["with"]["dataset_version"] == "5"
-    assert preprocess_values["with"]["curvature_scales"] == [1.0, 2.0, 3.0, 5.0, 10.0]
+    assert preprocess_values["with"]["dataset_name"] == "wisdom-dna-reduced"
+    assert preprocess_values["with"]["dataset_version"] == "6"
+    assert preprocess_values["with"]["include_full_train"] is False
+    assert preprocess_values["with"]["train_dilutions"] == ["replicate-00/train-25"]
+    assert preprocess_values["with"]["include_validation"] is True
+    assert preprocess_values["with"]["include_test"] is False
+    assert preprocess_values["with"]["curvature_scales"] == [1.5, 2.5, 5.0, 7.5, 10.0]
     assert visualization_values["run"] == (
         "wisdom.visualization.Visualization.Visualization"
     )
@@ -368,7 +470,7 @@ def test_preprocessing_configuration_reuses_complete_design() -> None:
         "storage": "10GiB",
         "time": "2h",
     }
-    assert visualization_values["with"]["skip"] is False
+    assert visualization_values["with"]["skip"] is True
     assert visualization_values["with"]["dataset"] == {"from": "preprocess.dataset"}
     assert visualization_values["with"]["maximum_vdw_atoms"] == 1500
     assert any(name == "map" for name, _ in inspect.getmembers(Work, inspect.isfunction))
@@ -509,6 +611,89 @@ def test_preprocessing_joins_existing_labelled_views_to_catalog(tmp_path: Path) 
     assert loaded[1]["assembly_rotation"] == np.eye(3).tolist()
 
 
+def test_preprocessing_selects_train_dilution_before_geometry(tmp_path: Path) -> None:
+    """Train25 plus validation excludes larger-only train members and every test member."""
+    def record(identifier: str, label: int, split: str, views: list[str]) -> dict[str, Any]:
+        """Create one complete manifest row for selective-loading verification.
+
+        Args:
+            identifier: Unique synthetic PDB-chain identifier.
+            label: Binary protein target.
+            split: Canonical supervised split.
+            views: Nested training-view memberships.
+
+        Returns:
+            Complete JSON-compatible preprocessing record.
+        """
+        return {
+            "identifier": identifier,
+            "label": label,
+            "split": split,
+            "leakage_group": f"group-{identifier}",
+            "global_phenotype": "G_NOISE",
+            "interface_phenotype": "I_NOISE",
+            "origin": "fixture",
+            "label_evidence": "fixture",
+            "pdb_id": identifier[:4],
+            "protein_chain": identifier.split("_", 1)[1],
+            "assembly_id": "1",
+            "protein_copy": 1,
+            "structure_sha256": "a" * 64,
+            "dna_chains": [],
+            "binding_residue_indices": [],
+            "local_gt_expected": True,
+            "local_gt_method": "fixture",
+            "assembly_rotation": np.eye(3).tolist(),
+            "assembly_translation": [0.0, 0.0, 0.0],
+            "dilutions": views,
+        }
+
+    split_rows = {
+        "train.jsonl": [
+            record("1AAA_A", 0, "train", ["replicate-00/train-25"]),
+            record("2AAA_A", 1, "train", ["replicate-00/train-25"]),
+            record("3AAA_A", 0, "train", ["replicate-00/train-50"]),
+            record("4AAA_A", 1, "train", []),
+        ],
+        "val.jsonl": [record("5AAA_A", 1, "validation", [])],
+        "test.jsonl": [record("6AAA_A", 0, "test", [])],
+    }
+    paths: dict[str, Path] = {}
+    for name, records in split_rows.items():
+        path = tmp_path / name
+        path.write_text(
+            "".join(json.dumps(value) + "\n" for value in records),
+            encoding="utf-8",
+        )
+        paths[name] = path
+
+    class Log:
+        """Accept selective-loader progress messages."""
+
+        def log(self, message: str, level: str = "info") -> None:
+            """Accept one fixture message.
+
+            Args:
+                message: Human-readable progress line.
+                level: LambdaForge-compatible severity.
+            """
+
+    selected = DatasetManifests(
+        paths["train.jsonl"],
+        paths["val.jsonl"],
+        paths["test.jsonl"],
+    ).load(
+        Log(),
+        include_full_train=False,
+        train_dilutions=("replicate-00/train-25",),
+        include_validation=True,
+        include_test=False,
+    )
+
+    assert {row["identifier"] for row in selected} == {"1AAA_A", "2AAA_A", "5AAA_A"}
+    assert all(row["identifier"] != "6AAA_A" for row in selected)
+
+
 @pytest.mark.parametrize(
     "filename",
     ("wisdom_v1.yaml", "wisdom_v2.yaml", "wisdom_v3.yaml"),
@@ -518,35 +703,59 @@ def test_training_catalog_resolves_before_every_dry_run(
 ) -> None:
     project_root = Path(__file__).parents[1]
     try:
-        record = DatasetRegistry().get("wisdom-dna@5")
+        record = DatasetRegistry().get("wisdom-dna-reduced@6")
     except KeyError:
-        pytest.skip("wisdom-dna@5 is not published in the LambdaForge DatasetRegistry")
+        pytest.skip("wisdom-dna-reduced@6 is not published in the LambdaForge DatasetRegistry")
     local = next(
         (placement for placement in record.placements if placement.cluster == "local"),
         None,
     )
     if local is None:
-        pytest.skip("wisdom-dna@5 has no local placement")
+        pytest.skip("wisdom-dna-reduced@6 has no local placement")
     expected = Path(local.root).resolve()
     assert expected.is_dir()
     config = WorkConfig.from_yaml(project_root / "experiments" / filename)
     plan   = WorkRunner().plan(config)
 
-    # Every expanded LambdaForge 0.13 Run resolves the same exact DatasetVersion marker at launch.
+    # Every expanded LambdaForge 0.14 Run resolves the same exact DatasetVersion marker at launch.
     expected_runs = {
-        "wisdom_v1.yaml": 1000,
-        "wisdom_v2.yaml": 18,
-        "wisdom_v3.yaml": 15,
+        "wisdom_v1.yaml": 1003,
+        "wisdom_v2.yaml": 63,
+        "wisdom_v3.yaml": 53,
     }
     assert len(plan.levels[0]) == expected_runs[filename]
     assert config.raw["objective"] == {
-        "metric": "val_auprc",
-        "mode": "max",
+        "metrics": {
+            "val_auprc": {
+                "mode": "max",
+                "weight": 0.35,
+                "range": [0.0, 1.0],
+            },
+            "val_auroc": {
+                "mode": "max",
+                "weight": 0.20,
+                "range": [0.0, 1.0],
+            },
+            "val_balanced_accuracy": {
+                "mode": "max",
+                "weight": 0.25,
+                "range": [0.0, 1.0],
+            },
+            "val_mcc_objective": {
+                "mode": "max",
+                "weight": 0.20,
+                "range": [0.0, 1.0],
+            },
+        },
+        "aggregation": "geometric",
     }
 
 
-@pytest.mark.parametrize("scales", [(), (2.5, 2.5), (2.5, 0.0), (2.5, -1.0)])
-def test_curvature_scales_reject_empty_duplicate_or_nonpositive_values(
+@pytest.mark.parametrize(
+    "scales",
+    [(), (2.5, 2.5), (2.5, 0.0), (2.5, -1.0), (5.0, 2.5)],
+)
+def test_curvature_scales_reject_nonpositive_duplicate_or_unordered_values(
     scales: tuple[float, ...],
 ) -> None:
     with pytest.raises(ValueError, match="curvature_scales"):

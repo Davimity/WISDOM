@@ -15,6 +15,7 @@ class SurfaceAtomTransfer(nn.Module):
         radius     : float = 6.0,
         score_width: int = 16,
         chunk_size : int = 8192,
+        geometry_mode: str = "full",
     ) -> None:
         """Build the scalar geometric scorer and bounded execution policy.
 
@@ -24,6 +25,8 @@ class SurfaceAtomTransfer(nn.Module):
             score_width: Hidden width of the two-layer scalar attention scorer.
             chunk_size: Maximum surface points evaluated together; peak gathered activations are
                 proportional to ``chunk_size * J * H`` rather than all proteins' old edge count.
+            geometry_mode: ``distance_only`` scores ``d/r``; ``full`` scores invariant
+                ``(d/r,z/r,rho/r)``.
 
         Raises:
             ValueError: If a width, radius, or chunk size is non-positive.
@@ -31,15 +34,18 @@ class SurfaceAtomTransfer(nn.Module):
         super().__init__()
         if hidden_dim < 1 or radius <= 0.0 or score_width < 1 or chunk_size < 1:
             raise ValueError("transfer dimensions, radius, and chunk size must be positive")
+        if geometry_mode not in {"distance_only", "full"}:
+            raise ValueError("transfer geometry mode must be distance_only or full")
 
         self.scorer = nn.Sequential(
-            nn.Linear(3, score_width),
+            nn.Linear(1 if geometry_mode == "distance_only" else 3, score_width),
             nn.SiLU(),
             nn.Linear(score_width, 1),
         )
         self.hidden_dim = hidden_dim
         self.radius     = float(radius)
         self.chunk_size = chunk_size
+        self.geometry_mode = geometry_mode
 
     def forward(
         self,
@@ -84,16 +90,19 @@ class SurfaceAtomTransfer(nn.Module):
         outputs: list[Tensor] = []
         for start in range(0, point_count, self.chunk_size):
             stop       = min(start + self.chunk_size, point_count)
-            chunk_mask = mask[start:stop]
+            chunk_mask = mask[start:stop] & (distances[start:stop] <= self.radius)
             chunk_ids  = neighbors[start:stop].clamp_min(0)
-            geometry   = torch.stack(
-                (
-                    distances[start:stop],
-                    normal_offsets[start:stop],
-                    tangential_distances[start:stop],
-                ),
-                dim=-1,
-            ) / self.radius
+            if self.geometry_mode == "distance_only":
+                geometry = distances[start:stop].unsqueeze(-1) / self.radius
+            else:
+                geometry = torch.stack(
+                    (
+                        distances[start:stop],
+                        normal_offsets[start:stop],
+                        tangential_distances[start:stop],
+                    ),
+                    dim=-1,
+                ) / self.radius
             scores  = self.scorer(geometry).squeeze(-1)
             scores  = scores.masked_fill(~chunk_mask, -torch.inf)
             weights = torch.softmax(scores, dim=1).masked_fill(~chunk_mask, 0.0)

@@ -6,7 +6,7 @@ import lambdaforge as lf
 
 from typing import Any
 from pathlib import Path
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 
 
 class DatasetManifests:
@@ -69,12 +69,24 @@ class DatasetManifests:
         self.catalog    = catalog
         self.dilutions  = dilutions
 
-    def load(self, work: lf.Work, verbose: bool = False) -> list[dict[str, Any]]:
+    def load(
+        self,
+        work               : lf.Work,
+        verbose            : bool          = False,
+        include_full_train : bool          = True,
+        train_dilutions    : Sequence[str] = (),
+        include_validation : bool          = True,
+        include_test       : bool          = True,
+    ) -> list[dict[str, Any]]:
         """Decode the fixed population and attach deterministic dilution memberships.
 
         Args:
             work: Active Work used for phase and optional per-protein logging.
             verbose: Log every decoded identifier, label, assembly, and copy when true.
+            include_full_train: Include the complete canonical training population.
+            train_dilutions: Training-view memberships to union when full train is excluded.
+            include_validation: Include the complete fixed validation split.
+            include_test: Include the complete fixed held-out test split.
 
         Returns:
             Identifier-sorted JSON-compatible records with explicit split and binary label.
@@ -132,6 +144,39 @@ class DatasetManifests:
                 set(str(value) for value in row["dilutions"])
                 | set(memberships.get(identifier, ()))
             )
+
+        requested_views = set(str(value) for value in train_dilutions)
+        available_views = {
+            str(view)
+            for row in rows
+            for view in row["dilutions"]
+        }
+        missing_views = requested_views - available_views
+        if missing_views:
+            raise ValueError(f"unknown training dilution views: {sorted(missing_views)}")
+        if not include_full_train and not requested_views:
+            raise ValueError("select at least one train_dilution when full train is excluded")
+
+        # Filtering happens before geometry, so each retained identifier produces one universal
+        # NPZ regardless of how many selected nested views contain it. Validation and test remain
+        # indivisible fixed populations when requested.
+
+        selected_rows: list[dict[str, Any]] = []
+        for row in rows:
+            split = str(row["split"])
+            if split == "train":
+                memberships_for_row = set(str(value) for value in row["dilutions"])
+                selected = include_full_train or bool(memberships_for_row & requested_views)
+                if not include_full_train:
+                    row["dilutions"] = sorted(memberships_for_row & requested_views)
+            else:
+                selected = (
+                    (split == "validation" and include_validation)
+                    or (split == "test" and include_test)
+                )
+            if selected:
+                selected_rows.append(row)
+        rows = selected_rows
         rows.sort(key=lambda row: str(row["identifier"]))
 
         work.log(

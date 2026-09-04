@@ -37,7 +37,18 @@ class WisdomV2(WisdomV1):
         self,
         hidden_dim               : int = 128,
         embedding_dim            : int = 32,
+        residue_embedding_dim    : int | None = None,
         use_residue_type         : bool = True,
+        atom_feature_preset      : str = "legacy",
+        use_element              : bool = True,
+        use_formal_charge        : bool = False,
+        use_aromaticity          : bool = False,
+        use_hbond_donor          : bool = False,
+        use_hbond_acceptor       : bool = False,
+        use_hybridization        : bool = False,
+        use_atom_role            : bool = False,
+        use_residue_hydropathy   : bool = False,
+        use_residue_polarity     : bool = False,
         atomic_layers            : int = 2,
         projection_depth         : int = 1,
         surface_layers           : int = 2,
@@ -51,6 +62,12 @@ class WisdomV2(WisdomV1):
         surface_atom_radius      : float = 6.0,
         surface_chunk_size       : int = 8192,
         atomic_message_chunk_size: int = 65536,
+        transfer_geometry        : str = "full",
+        surface_feature_mode     : str = "chemistry_geometry",
+        use_mean_curvature       : bool = True,
+        use_gaussian_curvature   : bool = True,
+        use_curvedness           : bool = True,
+        use_shape_index          : bool = False,
         pooling_type             : PoolingType | str = PoolingType.MAX,
         topk_fraction            : float = 0.05,
         attention_hidden_dim     : int = 32,
@@ -62,7 +79,18 @@ class WisdomV2(WisdomV1):
         Args:
             hidden_dim: Fixed reviewed v1 latent width.
             embedding_dim: Fixed reviewed v1 embedding width.
+            residue_embedding_dim: Independent residue embedding width or the element width.
             use_residue_type: Fixed reviewed v1 residue-feature switch.
+            atom_feature_preset: Coherent generic atom-feature family inherited from v1.
+            use_element: Include element identity in a custom feature set.
+            use_formal_charge: Include scaled formal charge.
+            use_aromaticity: Include conservative aromatic identity.
+            use_hbond_donor: Include conservative donor identity.
+            use_hbond_acceptor: Include conservative acceptor identity.
+            use_hybridization: Include graph-derived hybridization identity.
+            use_atom_role: Include structural atom role.
+            use_residue_hydropathy: Include normalized residue hydropathy.
+            use_residue_polarity: Include coarse residue polarity.
             atomic_layers: Fixed reviewed v1 atomic depth.
             projection_depth: Fixed reviewed v1 pointwise projection depth.
             surface_layers: Fixed reviewed v1 DiffusionNet depth.
@@ -76,6 +104,12 @@ class WisdomV2(WisdomV1):
             surface_atom_radius: Transfer geometry normalization radius in Å.
             surface_chunk_size: Atom-transfer point chunk size.
             atomic_message_chunk_size: RGCN edge-message chunk size.
+            transfer_geometry: Distance-only or full invariant transfer geometry.
+            surface_feature_mode: Chemistry-only, geometry-only, or combined input.
+            use_mean_curvature: Include mean curvature.
+            use_gaussian_curvature: Include Gaussian curvature.
+            use_curvedness: Include curvedness.
+            use_shape_index: Include derived bounded shape index.
             pooling_type: Closed v2 pooling hypothesis.
             topk_fraction: Point fraction retained by top-k mean.
             attention_hidden_dim: Hidden width of learned attention scoring.
@@ -88,7 +122,18 @@ class WisdomV2(WisdomV1):
         super().__init__(
             hidden_dim                = hidden_dim,
             embedding_dim             = embedding_dim,
+            residue_embedding_dim     = residue_embedding_dim,
             use_residue_type          = use_residue_type,
+            atom_feature_preset       = atom_feature_preset,
+            use_element               = use_element,
+            use_formal_charge         = use_formal_charge,
+            use_aromaticity           = use_aromaticity,
+            use_hbond_donor           = use_hbond_donor,
+            use_hbond_acceptor        = use_hbond_acceptor,
+            use_hybridization         = use_hybridization,
+            use_atom_role             = use_atom_role,
+            use_residue_hydropathy    = use_residue_hydropathy,
+            use_residue_polarity      = use_residue_polarity,
             atomic_layers             = atomic_layers,
             projection_depth          = projection_depth,
             surface_layers            = surface_layers,
@@ -102,6 +147,12 @@ class WisdomV2(WisdomV1):
             surface_atom_radius       = surface_atom_radius,
             surface_chunk_size        = surface_chunk_size,
             atomic_message_chunk_size = atomic_message_chunk_size,
+            transfer_geometry         = transfer_geometry,
+            surface_feature_mode      = surface_feature_mode,
+            use_mean_curvature        = use_mean_curvature,
+            use_gaussian_curvature    = use_gaussian_curvature,
+            use_curvedness            = use_curvedness,
+            use_shape_index           = use_shape_index,
         )
         try:
             self.pooling_type = PoolingType(pooling_type)
@@ -146,12 +197,32 @@ class WisdomV2(WisdomV1):
         surface_batch                     : Tensor,
         surface_operators                 : Sequence[Mapping[str, Tensor]],
         surface_ptr                       : Tensor,
+        surface_positions                 : Tensor | None = None,
+        surface_normals                   : Tensor | None = None,
+        surface_neighbors                 : Tensor | None = None,
+        surface_neighbor_mask             : Tensor | None = None,
+        atom_role_ids                     : Tensor | None = None,
+        atom_hybridization_ids            : Tensor | None = None,
+        formal_charges                    : Tensor | None = None,
+        atom_aromaticity                  : Tensor | None = None,
+        atom_hbond_donor                  : Tensor | None = None,
+        atom_hbond_acceptor               : Tensor | None = None,
+        residue_hydropathy                : Tensor | None = None,
+        residue_polarity                  : Tensor | None = None,
     ) -> dict[str, Tensor]:
         """Encode the fixed v1 backbone, pool local logits, and expose map diagnostics.
 
         Args:
             atomic_numbers: Element IDs ``[N]``.
             residue_type_ids: Residue IDs ``[N]``.
+            atom_role_ids: Structural atom-role IDs ``[N]``.
+            atom_hybridization_ids: Hybridization IDs ``[N]``.
+            formal_charges: Scaled formal charges ``[N]``.
+            atom_aromaticity: Aromatic flags ``[N]``.
+            atom_hbond_donor: Donor flags ``[N]``.
+            atom_hbond_acceptor: Acceptor flags ``[N]``.
+            residue_hydropathy: Normalized residue hydropathy ``[N]``.
+            residue_polarity: Polar-residue flags ``[N]``.
             atom_edge_index: Active bidirectional atomic topology ``[2,Ea]``.
             atom_edge_types: Atomic relations ``[Ea]``.
             surface_curvatures: Curvature invariants ``[M,S,3]``.
@@ -164,6 +235,10 @@ class WisdomV2(WisdomV1):
             surface_batch: Point-to-protein ownership ``[M]``.
             surface_operators: Per-protein intrinsic operator packs.
             surface_ptr: Point prefix boundaries ``[B+1]``.
+            surface_positions: Optional V3 positions; unused by v2.
+            surface_normals: Optional V3 normals; unused by v2.
+            surface_neighbors: Optional V3 neighbors; unused by v2.
+            surface_neighbor_mask: Optional V3 neighbor mask; unused by v2.
 
         Returns:
             Protein/local logits and localization diagnostics.
@@ -175,18 +250,26 @@ class WisdomV2(WisdomV1):
             len(surface_ptr) - 1,
         )
         embeddings, surface_logits = self.encode_surface(
-            atomic_numbers,
-            residue_type_ids,
-            atom_edge_index,
-            atom_edge_types,
-            surface_curvatures,
-            surface_atom_neighbors,
-            surface_atom_distances,
-            surface_atom_normal_offsets,
-            surface_atom_tangential_distances,
-            surface_atom_mask,
-            surface_operators,
-            surface_ptr,
+            atomic_numbers                    = atomic_numbers,
+            residue_type_ids                  = residue_type_ids,
+            atom_edge_index                   = atom_edge_index,
+            atom_edge_types                   = atom_edge_types,
+            surface_curvatures                = surface_curvatures,
+            surface_atom_neighbors            = surface_atom_neighbors,
+            surface_atom_distances            = surface_atom_distances,
+            surface_atom_normal_offsets       = surface_atom_normal_offsets,
+            surface_atom_tangential_distances = surface_atom_tangential_distances,
+            surface_atom_mask                 = surface_atom_mask,
+            surface_operators                 = surface_operators,
+            surface_ptr                       = surface_ptr,
+            atom_role_ids                     = atom_role_ids,
+            atom_hybridization_ids             = atom_hybridization_ids,
+            formal_charges                    = formal_charges,
+            atom_aromaticity                  = atom_aromaticity,
+            atom_hbond_donor                  = atom_hbond_donor,
+            atom_hbond_acceptor               = atom_hbond_acceptor,
+            residue_hydropathy                = residue_hydropathy,
+            residue_polarity                  = residue_polarity,
         )
         pooled = self.pool_surface_logits(
             surface_logits,

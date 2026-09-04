@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
 from typing import Any
+from itertools import pairwise
+from dataclasses import asdict, dataclass
 
 
 @dataclass(frozen=True, slots=True)
@@ -97,6 +98,8 @@ class PreprocessConfig:
             raise ValueError("curvature_scales must contain only positive values")
         if len(set(self.curvature_scales)) != len(self.curvature_scales):
             raise ValueError("curvature_scales cannot contain duplicates")
+        if any(right <= left for left, right in pairwise(self.curvature_scales)):
+            raise ValueError("curvature_scales must be strictly increasing")
 
     def scientific_dict(self) -> dict[str, Any]:
         """Build the canonical configuration payload that identifies scientific output.

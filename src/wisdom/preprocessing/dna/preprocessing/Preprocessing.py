@@ -20,42 +20,46 @@ class Preprocessing(lf.Work):
 
         # Skip the complete dataset build when only Selection should run.
 
-        skip                : bool            = False,
+        skip                         : bool            = False,
 
         # The complete fixed population is represented by exactly three immutable files.
 
-        train               : Path | None     = None,
-        validation          : Path | None     = None,
-        test                : Path | None     = None,
-        catalog             : Path | None     = None,
-        dilutions           : Path | None     = None,
-        structures          : Path | None     = None,
-        dataset_name        : str             = "wisdom-dna",
-        dataset_version     : str             = "5",
+        train                        : Path | None     = None,
+        validation                   : Path | None     = None,
+        test                         : Path | None     = None,
+        catalog                      : Path | None     = None,
+        dilutions                    : Path | None     = None,
+        structures                   : Path | None     = None,
+        dataset_name                 : str             = "wisdom-dna",
+        dataset_version              : str             = "5",
+        include_full_train           : bool            = True,
+        train_dilutions              : Sequence[str]   = (),
+        include_validation           : bool            = True,
+        include_test                 : bool            = True,
 
         # Operational concurrency and researcher-facing progress.
 
-        workers             : int             = 36,
-        progress_log_seconds: float           = 120.0,
-        verbose             : bool            = False,
+        workers                      : int             = 36,
+        progress_log_seconds         : float           = 120.0,
+        verbose                      : bool            = False,
 
         # Universal, label-free protein geometry.
 
-        surface_resolution  : float           = 1.0,
-        probe_radius        : float           = 1.4,
+        surface_resolution           : float           = 1.0,
+        probe_radius                 : float           = 1.4,
         atom_spatial_radius          : float           = 6.0,
         atom_spatial_k_max           : int             = 32,
         surface_atom_radius          : float           = 6.0,
         surface_atom_k_max           : int             = 32,
         diffusion_spectral_modes_max : int             = 128,
         surface_neighbor_k_max       : int             = 24,
-        curvature_scales    : Sequence[float] = (2.5, 5.0),
+        curvature_scales             : Sequence[float] = (2.5, 5.0),
 
         # Evaluation-only projection of DNA contacts onto the fixed surface.
 
-        positive_gap        : float           = 1.4,
-        negative_gap        : float           = 3.0,
-        sensitivity_gaps    : Sequence[float] = (1.0, 1.4, 2.0),
+        positive_gap                 : float           = 1.4,
+        negative_gap                 : float           = 3.0,
+        sensitivity_gaps             : Sequence[float] = (1.0, 1.4, 2.0),
     ) -> dict[str, Any]:
         """Execute preprocessing as five explicit, resumable scientific stages.
 
@@ -69,6 +73,11 @@ class Preprocessing(lf.Work):
             structures: Immutable coordinate snapshot published by the same Selection.
             dataset_name: Stable LambdaForge Dataset Registry family.
             dataset_version: Immutable release identifier selected by the researcher.
+            include_full_train: Geometrically preprocess the complete canonical train split.
+            train_dilutions: Nested training views to preprocess when full train is disabled.
+            include_validation: Preprocess the complete fixed validation population.
+            include_test: Preprocess the complete held-out test population. Disable during HPO
+                dataset construction when test must remain unopened.
             workers: Concurrent structure-validation threads and spawned protein processes.
             progress_log_seconds: Seconds between liveness messages during long maps.
             verbose: Emit per-protein debug messages in addition to normal phase summaries.
@@ -135,7 +144,14 @@ class Preprocessing(lf.Work):
             catalog,
             dilutions,
         )
-        rows = manifests.load(self, verbose)
+        rows = manifests.load(
+            self,
+            verbose,
+            include_full_train = include_full_train,
+            train_dilutions    = train_dilutions,
+            include_validation = include_validation,
+            include_test       = include_test,
+        )
 
         # ==============================================================================
         # 2. Validate the exact coordinate files published by Selection.
@@ -181,13 +197,13 @@ class Preprocessing(lf.Work):
             progress_log_seconds = progress_log_seconds,
             surface_resolution   = surface_resolution,
             probe_radius         = probe_radius,
-            atom_spatial_radius          = atom_spatial_radius,
-            atom_spatial_k_max           = atom_spatial_k_max,
-            surface_atom_radius          = surface_atom_radius,
-            surface_atom_k_max           = surface_atom_k_max,
+            atom_spatial_radius   = atom_spatial_radius,
+            atom_spatial_k_max    = atom_spatial_k_max,
+            surface_atom_radius   = surface_atom_radius,
+            surface_atom_k_max    = surface_atom_k_max,
             diffusion_spectral_modes_max = diffusion_spectral_modes_max,
             surface_neighbor_k_max       = surface_neighbor_k_max,
-            curvature_scales     = curvature_scales,
+            curvature_scales             = curvature_scales,
             verbose              = verbose,
         )
 

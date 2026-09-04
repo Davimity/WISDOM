@@ -37,11 +37,13 @@ def validate_structure_snapshot(
         verbose: Emit one debug line for every validated PDB when true.
 
     Returns:
-        The unchanged, fully validated snapshot directory consumed by geometry and annotation.
+        The unchanged snapshot directory after every structure required by the selected subset has
+        passed exact index, digest, gzip, and coordinate validation. Unselected design structures
+        remain available but are not read.
 
     Raises:
-        ValueError: If the index, membership, compressed bytes, uncompressed bytes, or mmCIF
-            contents disagree with the selected catalog.
+        ValueError: If a selected PDB is absent or its index, compressed bytes, uncompressed bytes,
+            or mmCIF contents disagree with the selected catalog.
         OSError: If snapshot files cannot be read.
     """
     index_path = structures / "index.json"
@@ -70,11 +72,21 @@ def validate_structure_snapshot(
             raise ValueError(f"Selection structure index has duplicate or empty PDB ID {pdb_id!r}")
         by_pdb[pdb_id] = value
 
-    if set(by_pdb) != set(catalog_hashes):
-        missing = sorted(set(catalog_hashes) - set(by_pdb))
-        extra   = sorted(set(by_pdb) - set(catalog_hashes))
-        raise ValueError(
-            f"Selection structure snapshot and manifests differ: missing={missing}, extra={extra}"
+    selected_pdbs = set(catalog_hashes)
+    snapshot_pdbs = set(by_pdb)
+    missing       = sorted(selected_pdbs - snapshot_pdbs)
+    if missing:
+        raise ValueError(f"Selection structure snapshot is missing selected PDBs: {missing}")
+
+    # A selective build intentionally consumes a train dilution and/or selected fixed splits from
+    # the complete audited design. Its structure snapshot is therefore a valid superset. Ignoring
+    # unused entries prevents needless hashing and parsing without weakening any published member.
+
+    unused = snapshot_pdbs - selected_pdbs
+    if unused:
+        work.log(
+            f"Selection snapshot contains {len(unused)} unused PDB archives; validating only the "
+            f"{len(selected_pdbs)} required by this dataset view"
         )
 
     jobs: list[dict[str, Any]] = []

@@ -1,14 +1,16 @@
 # Keep the v1 backbone fixed and compare only WISDOM v2 protein-level pooling hypotheses.
 name: wisdom-v2                                      # Stable LambdaForge experiment name.
-run: wisdom.Training.Training                       # Same LambdaForge 0.13 Work class as v1.
+run: wisdom.Training.Training                       # Same LambdaForge 0.14 Work class as v1.
 
 with:                                                # Fixed Training.run(...) arguments.
   dataset:                                           # Resolve one immutable managed placement.
-    dataset: wisdom-dna@5                            # Exact schema-3 release used by v1.
+    dataset: wisdom-dna-reduced@6                    # Exact reduced schema-3 release used by v1.
   model_version: 2                                  # Enable only the v2 pooling extension.
-  subset: replicate-00/train-25                     # Compare pooling on the balanced 25% train view.
+  subset: full                                      # Use every train member already retained in this release.
   hidden_dim: 128                                   # Fixed reviewed v1 latent width.
   embedding_dim: 32                                 # Fixed reviewed v1 embedding width.
+  residue_embedding_dim: 32                         # Independent residue width, fixed to legacy value.
+  atom_feature_preset: legacy                       # Preserve pre-expansion element/residue inputs.
   use_residue_type: true                            # Fixed reviewed v1 atom features.
   atomic_layers: 2                                  # Fixed reviewed v1 atomic depth.
   projection_depth: 1                              # Fixed reviewed v1 projection depth.
@@ -16,6 +18,14 @@ with:                                                # Fixed Training.run(...) a
   atom_spatial_k: 16                                # Fixed reviewed v1 atomic-neighbor budget.
   surface_atom_k: 16                                # Fixed reviewed v1 transfer-neighbor budget.
   diffusion_spectral_modes: 128                     # Fixed reviewed v1 intrinsic frequency budget.
+  relation_mode: full_relational                    # Preserve spatial/covalent/both relation IDs.
+  transfer_geometry: full                           # Preserve distance/normal/tangent transfer.
+  surface_feature_mode: chemistry_geometry          # Preserve transferred chemistry plus geometry.
+  curvature_scale_count: 0                          # Use every persisted curvature scale.
+  use_mean_curvature: true                          # Include mean curvature.
+  use_gaussian_curvature: true                      # Include Gaussian curvature.
+  use_curvedness: true                              # Include curvedness.
+  use_shape_index: false                            # Preserve the former descriptor set.
   surface_atom_radius: 6.0                          # Fixed transfer geometry normalization in Å.
   surface_chunk_size: 8192                          # Bound atom-transfer gathered activations.
   atomic_message_chunk_size: 65536                  # Bound LambdaForge RGCN edge activations.
@@ -29,16 +39,18 @@ with:                                                # Fixed Training.run(...) a
   batch_size: 2                                     # Variable-size proteins per step.
   epochs: 100                                       # Maximum epochs per pooling/seed run.
   patience: 30                                      # Stop a plateau without changing model selection.
-  minimum_delta: 0.001                              # Meaningful validation AUPRC improvement threshold.
+  minimum_delta: 0.001                              # Meaningful composite validation-utility improvement.
   precision: auto                                   # BF16 dense CUDA layers with FP32 sparse derivatives.
   surface_metrics: true                             # Compare local maps without supervising them.
   surface_metrics_interval: 0                       # Evaluate surfaces only on the best checkpoint.
+  evaluate_test: false                              # Keep test unopened during pooling comparison.
   data_workers: 2                                   # Overlap NPZ decoding without consuming all four CPUs.
 
 # Fixed Training.run option reference:
-# Values shown above equal public defaults except model_version=2, subset, and data_workers=2.
-# subset="full" by default; this experiment selects "replicate-00/train-25" while preserving full
-# validation/test. Widths and depths/K/J/mode budgets are positive; dropout is in [0,1);
+# Values shown above equal public defaults except model_version=2,
+# residue_embedding_dim=32, evaluate_test=false, and data_workers=2.
+# subset="full" selects every train member retained by this reduced release; validation/test are
+# never filtered by a training view. Widths and depths/K/J/mode budgets are positive; dropout is in [0,1);
 # topk_fraction is in (0,1];
 # attention_hidden_dim and regional_diffusion_scale are positive; log_sum_exp_beta and learning_rate are positive; weight_decay and
 # data_workers=4 by default; this 4-CPU experiment selects two so the trainer retains CPU capacity.
@@ -81,7 +93,7 @@ objective:                                           # Same global composite uti
     val_auprc: {mode: max, weight: 0.35, range: [0.0, 1.0]} # Imbalance-aware ranking.
     val_auroc: {mode: max, weight: 0.20, range: [0.0, 1.0]} # Two-class ranking.
     val_balanced_accuracy: {mode: max, weight: 0.25, range: [0.0, 1.0]} # Thresholded balance.
-    val_mcc: {mode: max, weight: 0.20, range: [-1.0, 1.0]} # Prediction-label correlation.
+    val_mcc_objective: {mode: max, weight: 0.20, range: [0.0, 1.0]} # Total MCC utility; zero penalizes one-class predictions.
   aggregation: geometric                            # Reward candidates strong across every component.
 
 resources:                                           # Fixed outer allocation for the complete study.

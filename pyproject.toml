@@ -11,7 +11,7 @@ requires-python = ">=3.10"
 dependencies = [
   "biopython>=1.84,<2",
   "gemmi>=0.7,<0.8",
-  "lambdaforge[clustering,cluster-password]>=0.13.0",
+  "lambdaforge[clustering,cluster-password]>=0.14.0",
   "matplotlib>=3.7",
   "numpy>=1.24,<2.5",
   "plotly>=6.5,<7",

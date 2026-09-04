@@ -1,0 +1,44 @@
+# Discover sparse candidate concepts once an explicit winning V1 checkpoint exists.
+name: wisdom-v1-sparse-concepts                        # Separate post-HPO experiment identity.
+run: wisdom.interpretability.SparseConceptDiscovery.SparseConceptDiscovery # Frozen analysis Work.
+
+with:                                                  # Arguments passed to SparseConceptDiscovery.run(...).
+  checkpoint: {file: ../best-model.pt}                 # Copy the official winning artifact here explicitly.
+  dataset: {dataset: wisdom-dna@5}                    # Use the same immutable predictor dataset.
+  subset: replicate-00/train-25                       # Fit concepts on the predictor's exact train view.
+  lambda_values: []                                   # Empty activates the seven-value automatic grid.
+  selected_lambda: null                               # Null chooses a deterministic Pareto knee.
+  calibration_seeds: [17, 29, 43]                     # Small seed set for concept stability.
+  maximum_points_per_protein: 4096                    # Uniformly cap each protein to limit size bias.
+  epochs: 80                                          # Sparse-candidate optimization ceiling.
+  patience: 12                                        # Label-free validation patience.
+  batch_size: 4096                                    # Surface embeddings per sparse update.
+  learning_rate: 0.001                                # Adam rate for the sparse model only.
+  near_dead_threshold: 0.001                          # <=0.1% activation is practically near-dead.
+  dominant_threshold: 0.95                            # >=95% activation is globally dominant.
+  redundancy_threshold: 0.95                         # Decoder cosine warning threshold.
+  stability_threshold: 0.80                          # Matched mean cosine required across seeds.
+  top_activations_per_concept: 10                     # Visualization references retained per concept.
+  output_directory: ../data/dna/interpretability     # Durable human-facing result directory.
+  overwrite_output: false                             # Refuse to replace an earlier interpretation.
+
+# SparseConceptDiscovery.run defaults equal the selected values above except checkpoint and dataset,
+# which have no defaults, and maximum_points_per_protein=0. This experiment selects 4096 to prevent
+# large proteins from dominating calibration; zero retains every point when that is desired.
+# lambda_values=() uses [0,1e-5,1e-4,1e-3,1e-2,1e-1,1]; a supplied list
+# must be non-negative. selected_lambda=null uses the Pareto knee and otherwise must name a tested
+# value. Positive maximum_points_per_protein values uniformly cap each protein.
+# epochs, patience, batch_size, and top_activations_per_concept are positive; learning_rate>0;
+# 0<=near_dead_threshold<dominant_threshold<=1; redundancy/stability thresholds lie in (0,1].
+# output_directory=null retains only the LambdaForge artifact; overwrite_output=false is safe.
+
+resources:                                             # One post-HPO analysis allocation.
+  gpu: 1                                               # Predictor extraction and sparse fitting use one GPU.
+  cpu: 8                                               # NPZ decoding and orchestration capacity.
+  memory: 48GiB                                        # Embedding and report storage in host memory.
+  storage: 30GiB                                       # Interpretability tables and checkpoints.
+  time: 24h                                            # Complete calibration/final-fit ceiling.
+
+# This Work has no seeds/search/objective: it runs exactly once. LambdaForge currently cannot bind
+# the artifact of the adaptively selected HPO winner as a downstream named output. Export/copy the
+# winning `best-model` artifact explicitly and update checkpoint above; WISDOM never guesses a trial.

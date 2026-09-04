@@ -97,7 +97,7 @@ steps:                                                          # LambdaForge ru
   - name: preprocess                                            # Generate NPZ data and publish DatasetVersion.
     run: wisdom.preprocessing.dna.preprocessing.Preprocessing.Preprocessing # Design-to-dataset Work.
     with:                                                       # Arguments passed to Preprocessing.run(...).
-      skip: false                                                # Generate schema-3 archives and publish wisdom-dna@5.
+      skip: false                                               # Publish the selected schema-3 reduced dataset.
 
       # train: null                                                # No manifest is resolved while this Work is skipped.
       # validation: null                                           # No validation manifest participates.
@@ -114,8 +114,19 @@ steps:                                                          # LambdaForge ru
       dilutions: {from: select.dilutions}                       # Nested labelled training views.
       structures: {from: select.structures}                     # Exact audited mmCIF snapshot.
 
-      dataset_name: wisdom-dna                                  # Stable LambdaForge Registry family.
-      dataset_version: "5"                                     # Schema-3 bounded topology/Diffusion release.
+      dataset_name: wisdom-dna-reduced                          # Stable LambdaForge Registry family.
+      dataset_version: "6"                                     # Immutable release for train25 plus validation.
+
+      # include_full_train: true                                # Build the complete canonical training split.
+      # train_dilutions: []                                     # Extra nested train views; no duplicate NPZs.
+      # include_validation: true                                # Build the complete fixed validation split.
+      # include_test: true                                      # Build held-out test only for a final dataset.
+
+      # Experimental train25 + validation recipe (publish under a new dataset_version):
+      include_full_train: false                                 # Exclude train members outside the view below.
+      train_dilutions: [replicate-00/train-25]                  # Resolve membership before geometry starts.
+      include_validation: true                                  # Keep the complete validation population.
+      include_test: false                                       # Keep held-out test bytes absent during HPO.
 
       workers: 36                                               # Snapshot threads and spawned protein processes.
       progress_log_seconds: 120.0                               # Parent liveness log every two minutes.
@@ -129,7 +140,7 @@ steps:                                                          # LambdaForge ru
       surface_atom_k_max: 32                                    # Persist the nearest 32 atoms per surface point.
       diffusion_spectral_modes_max: 128                         # Persist at most 128 lowest intrinsic modes.
       surface_neighbor_k_max: 24                                # Bounded local surface table for operators/V3.
-      curvature_scales: [1.0, 2.0, 3.0, 5.0, 10.0]              # Curvature radii in resolution units.
+      curvature_scales: [1.5, 2.5, 5.0, 7.5, 10.0]              # Superset of curvature radii in resolution units.
 
       positive_gap: 1.4                                         # Largest confidently contacting gap in Å.
       negative_gap: 3.0                                         # Smallest confidently non-contacting gap in Å.
@@ -151,20 +162,23 @@ steps:                                                          # LambdaForge ru
     # skip=false. train, validation, and test default to null and are required when skip=false.
     # catalog=null and is required for the labelled TXT contract selected here; dilutions=null.
     # structures=null and is always required because it is the immutable coordinate evidence.
-    # dataset_name="wisdom-dna", dataset_version="5", workers=36,
+    # dataset_name="wisdom-dna", dataset_version="5", include_full_train=true,
+    # train_dilutions=(), include_validation=true, include_test=true, workers=36,
     # progress_log_seconds=120.0, verbose=false,
     # surface_resolution=1.0 Å, probe_radius=1.4 Å, atom_spatial_radius=6.0 Å,
     # atom_spatial_k_max=32, surface_atom_radius=6.0 Å, surface_atom_k_max=32,
     # diffusion_spectral_modes_max=128, surface_neighbor_k_max=24,
     # curvature_scales=(2.5,5.0), positive_gap=1.4 Å,
     # negative_gap=3.0 Å, and sensitivity_gaps=(1.0,1.4,2.0) are true defaults. This YAML
-    # deliberately overrides curvature scales. skip=true performs no snapshot validation, geometry,
+    # deliberately persists the ordered superset (1.5,2.5,5,7.5,10); curvature scales must be a
+    # non-empty strictly increasing positive sequence, and trials select prefixes without
+    # rebuilding NPZ files. skip=true performs no snapshot validation, geometry,
     # annotation, validation, or Dataset Registry publication.
 
   - name: visualize                                             # Inspect immutable members without changing data.
     run: wisdom.visualization.Visualization.Visualization        # Dataset-to-HTML/PLY inspection Work.
     with:                                                        # Arguments passed to Visualization.run(...).
-      skip: false                                                 # Render after the active Preprocessing step succeeds.
+      skip: true                                                 # Do not render during this reduced dataset build.
       dataset: {from: preprocess.dataset}                        # DatasetVersion published by the preceding step.
 
       # Visualization-only recipe; use it together with preprocess.skip=true:
@@ -173,7 +187,7 @@ steps:                                                          # LambdaForge ru
       overwrite_output: true                                     # Replace a different prior gallery after success.
 
       identifiers: []                                            # Empty selects a balanced deterministic sample.
-      splits: [train, validation, test]                           # Eligible split strata for automatic sampling.
+      splits: [train, validation]                                # Eligible split strata for automatic sampling.
       labels: [0, 1]                                             # Include curated negatives and verified positives.
       maximum_proteins: 12                                       # Automatic cap; zero renders every eligible member.
 
@@ -209,7 +223,7 @@ steps:                                                          # LambdaForge ru
     # The mesh is a non-authoritative alpha-complex reconstruction;
     # positive mesh_alpha values change only its visual topology, never NPZ bytes or model inputs.
 
-# LambdaForge 0.13 step options: steps is a non-empty sequential list; each step accepts name, run,
+# LambdaForge 0.14 step options: steps is a non-empty sequential list; each step accepts name, run,
 # with, resources, seeds, search, and objective. `{from: STEP.OUTPUT}` fingerprints and resolves a
 # prior named artifact. The three skip booleans choose Selection, Preprocessing, and Visualization.
 # The active Visualization input consumes `preprocess.dataset`, so it is resolved only after that

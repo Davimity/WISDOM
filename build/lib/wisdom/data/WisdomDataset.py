@@ -4,14 +4,16 @@ from __future__ import annotations
 
 import csv
 import json
-from collections.abc import Mapping
-from pathlib import Path
-
-import numpy as np
 import torch
-from lambdaforge.data import DatasetIndex
+import numpy as np
+
+from pathlib import Path
 from torch import Tensor
+from collections.abc import Mapping
 from torch.utils.data import Dataset
+from lambdaforge.data import DatasetIndex
+
+from wisdom.utils.structure.AtomicDescriptors import AtomicDescriptors
 
 
 class WisdomDataset(Dataset[Mapping[str, Tensor | str]]):
@@ -41,7 +43,7 @@ class WisdomDataset(Dataset[Mapping[str, Tensor | str]]):
         NPZ files remain unopened until ``__getitem__`` so DataLoader workers do not share handles.
 
         Args:
-            manifest: LambdaForge 0.13 managed dataset root containing ``index.jsonl``, or a legacy
+            manifest: LambdaForge 0.14 managed dataset root containing ``index.jsonl``, or a legacy
                 CSV with exactly ``file,label,split`` columns.
             split: Explicit subset to expose; one of ``train``, ``val``, or ``test``.
             subset: ``full`` or a training dilution such as ``replicate-00/train-25``. Managed
@@ -322,6 +324,32 @@ class WisdomDataset(Dataset[Mapping[str, Tensor | str]]):
             if missing:
                 raise ValueError(f"{path.name} is missing schema-3 arrays: {sorted(missing)}")
             values = {name: archive[name] for name in required if name != "metadata_json"}
+
+            # Early schema-3 archives predate the optional generic chemistry fields. Neutral
+            # fallbacks preserve their original V1 behaviour; current archives provide every
+            # field and therefore support the complete physicochemical feature study.
+
+            atom_count = len(values["atomic_numbers"])
+            edge_count = values["atom_edge_index"].shape[1]
+            optional_defaults = {
+                "atom_role_ids":       np.zeros(atom_count, dtype=np.int8),
+                "formal_charges":      np.zeros(atom_count, dtype=np.int8),
+                "atom_names":          np.full(atom_count, "", dtype="U4"),
+                "residue_names":       np.full(atom_count, "UNK", dtype="U4"),
+                "atom_edge_bond_order": np.zeros(edge_count, dtype=np.float32),
+            }
+            for name, default in optional_defaults.items():
+                values[name] = archive[name] if name in archive.files else default
+
+            descriptor_names = set(AtomicDescriptors.ARRAY_NAMES)
+            available_descriptors = descriptor_names & set(archive.files)
+            if available_descriptors and available_descriptors != descriptor_names:
+                missing_descriptors = descriptor_names - available_descriptors
+                raise ValueError(
+                    f"{path.name} has incomplete generic descriptors: "
+                    f"{sorted(missing_descriptors)}"
+                )
+            values.update({name: archive[name] for name in available_descriptors})
             if self.include_diagnostics or self.include_surface_geometry:
                 geometry_names = {
                     "surface_positions",
@@ -392,6 +420,27 @@ class WisdomDataset(Dataset[Mapping[str, Tensor | str]]):
             if values[name].shape != (gradient_index.shape[1],):
                 raise ValueError(f"{name} must have shape [G]")
 
+        # Current archives load precomputed generic chemistry. Early schema-3 archives derive the
+        # exact same values once per load, preserving compatibility without weakening new output.
+
+        descriptor_names = set(AtomicDescriptors.ARRAY_NAMES)
+        if descriptor_names <= values.keys():
+            descriptors = {
+                name: values[name]
+                for name in descriptor_names
+            }
+            descriptors["formal_charges"] = values["formal_charges"].astype(np.float32)
+        else:
+            descriptors = AtomicDescriptors.derive(
+                values["atomic_numbers"],
+                values["atom_names"],
+                values["residue_names"],
+                values["formal_charges"],
+                atom_edges,
+                values["atom_edge_bond_order"],
+                is_covalent,
+            )
+
         output: dict[str, Tensor | str] = {
             "atomic_numbers": torch.from_numpy(
                 values["atomic_numbers"].astype(np.int64, copy=False)
@@ -399,6 +448,18 @@ class WisdomDataset(Dataset[Mapping[str, Tensor | str]]):
             "residue_type_ids": torch.from_numpy(
                 values["residue_type_ids"].astype(np.int64, copy=False)
             ),
+            "atom_role_ids": torch.from_numpy(
+                values["atom_role_ids"].astype(np.int64, copy=False)
+            ),
+            "atom_hybridization_ids": torch.from_numpy(
+                descriptors["atom_hybridization_ids"].astype(np.int64, copy=False)
+            ),
+            "formal_charges": torch.from_numpy(descriptors["formal_charges"]),
+            "atom_aromaticity": torch.from_numpy(descriptors["atom_aromaticity"]),
+            "atom_hbond_donor": torch.from_numpy(descriptors["atom_hbond_donor"]),
+            "atom_hbond_acceptor": torch.from_numpy(descriptors["atom_hbond_acceptor"]),
+            "residue_hydropathy": torch.from_numpy(descriptors["residue_hydropathy"]),
+            "residue_polarity": torch.from_numpy(descriptors["residue_polarity"]),
             "atom_edge_index": torch.from_numpy(atom_edges.astype(np.int64, copy=False)),
             "atom_edge_is_covalent": torch.from_numpy(is_covalent.astype(np.bool_, copy=False)),
             "atom_edge_spatial_rank": torch.from_numpy(spatial_rank.astype(np.int64, copy=False)),

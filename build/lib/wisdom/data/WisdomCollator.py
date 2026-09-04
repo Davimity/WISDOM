@@ -17,6 +17,8 @@ class WisdomCollator:
         atom_spatial_k          : int = 16,
         surface_atom_k          : int = 16,
         diffusion_spectral_modes: int = 128,
+        relation_mode           : str = "full_relational",
+        curvature_scale_count   : int = 0,
     ) -> None:
         """Set runtime topology budgets without changing persisted scientific geometry.
 
@@ -24,16 +26,30 @@ class WisdomCollator:
             atom_spatial_k: Active per-atom spatial rank ``K``; covalent edges always remain.
             surface_atom_k: Prefix width ``J`` selected from every compact atom-neighbor row.
             diffusion_spectral_modes: Maximum low-frequency modes selected per protein.
+            relation_mode: ``full_relational``, ``unified_relation``, ``spatial_only``, or
+                ``covalent_only``; this changes edge information, not message computation.
+            curvature_scale_count: Number of smallest persisted scales to retain. Zero keeps all.
 
         Raises:
             ValueError: If any runtime budget is not positive.
         """
         if atom_spatial_k < 1 or surface_atom_k < 1 or diffusion_spectral_modes < 1:
             raise ValueError("collator K, J, and spectral-mode budgets must be positive")
+        if relation_mode not in {
+            "full_relational",
+            "unified_relation",
+            "spatial_only",
+            "covalent_only",
+        }:
+            raise ValueError("unsupported atomic relation mode")
+        if curvature_scale_count < 0:
+            raise ValueError("curvature_scale_count cannot be negative")
 
         self.atom_spatial_k           = atom_spatial_k
         self.surface_atom_k           = surface_atom_k
         self.diffusion_spectral_modes = diffusion_spectral_modes
+        self.relation_mode            = relation_mode
+        self.curvature_scale_count    = curvature_scale_count
 
     def __call__(
         self,
@@ -66,6 +82,14 @@ class WisdomCollator:
             for name in (
                 "atomic_numbers",
                 "residue_type_ids",
+                "atom_role_ids",
+                "atom_hybridization_ids",
+                "formal_charges",
+                "atom_aromaticity",
+                "atom_hbond_donor",
+                "atom_hbond_acceptor",
+                "residue_hydropathy",
+                "residue_polarity",
                 "atom_edge_index",
                 "atom_edge_types",
                 "atom_batch",
@@ -119,6 +143,23 @@ class WisdomCollator:
 
             values["atomic_numbers"].append(atomic_numbers)
             values["residue_type_ids"].append(self._tensor(sample, "residue_type_ids"))
+            integer_features = ("atom_role_ids", "atom_hybridization_ids")
+            scalar_features  = (
+                "formal_charges",
+                "atom_aromaticity",
+                "atom_hbond_donor",
+                "atom_hbond_acceptor",
+                "residue_hydropathy",
+                "residue_polarity",
+            )
+            for name in integer_features:
+                values[name].append(
+                    self._optional_atom_tensor(sample, name, atomic_numbers, torch.long)
+                )
+            for name in scalar_features:
+                values[name].append(
+                    self._optional_atom_tensor(sample, name, atomic_numbers, torch.float32)
+                )
             values["atom_batch"].append(
                 torch.full((atom_count,), batch_index, dtype=torch.long)
             )
@@ -129,14 +170,27 @@ class WisdomCollator:
             covalent     = self._tensor(sample, "atom_edge_is_covalent").bool()
             ranks        = self._tensor(sample, "atom_edge_spatial_rank")
             spatial     = (ranks > 0) & (ranks <= self.atom_spatial_k)
-            active      = covalent | spatial
+
+            if self.relation_mode == "spatial_only":
+                active = spatial
+            elif self.relation_mode == "covalent_only":
+                active = covalent
+            else:
+                active = covalent | spatial
 
             active_edges = stored_edges[:, active] + atom_offset
-            active_types = torch.where(
-                covalent[active] & spatial[active],
-                torch.full_like(ranks[active], 2),
-                torch.where(covalent[active], torch.ones_like(ranks[active]), ranks[active] * 0),
-            ).long()
+            if self.relation_mode == "full_relational":
+                active_types = torch.where(
+                    covalent[active] & spatial[active],
+                    torch.full_like(ranks[active], 2),
+                    torch.where(
+                        covalent[active],
+                        torch.ones_like(ranks[active]),
+                        ranks[active] * 0,
+                    ),
+                ).long()
+            else:
+                active_types = torch.zeros_like(ranks[active], dtype=torch.long)
             values["atom_edge_index"].extend((active_edges, active_edges.flip(0)))
             values["atom_edge_types"].extend((active_types, active_types))
 
@@ -152,7 +206,14 @@ class WisdomCollator:
             neighbors = stored_neighbors[:, : self.surface_atom_k].clone()
             neighbors[atom_mask] += atom_offset
 
-            values["surface_curvatures"].append(self._tensor(sample, "surface_curvatures"))
+            curvatures = self._tensor(sample, "surface_curvatures")
+            if self.curvature_scale_count:
+                if self.curvature_scale_count > curvatures.shape[1]:
+                    raise ValueError(
+                        "curvature_scale_count exceeds the persisted curvature-scale count"
+                    )
+                curvatures = curvatures[:, : self.curvature_scale_count]
+            values["surface_curvatures"].append(curvatures)
             values["surface_atom_neighbors"].append(neighbors)
             values["surface_atom_distances"].append(
                 self._tensor(sample, "surface_atom_distances")[:, : self.surface_atom_k]
@@ -218,6 +279,14 @@ class WisdomCollator:
         tensor_names = (
             "atomic_numbers",
             "residue_type_ids",
+            "atom_role_ids",
+            "atom_hybridization_ids",
+            "formal_charges",
+            "atom_aromaticity",
+            "atom_hbond_donor",
+            "atom_hbond_acceptor",
+            "residue_hydropathy",
+            "residue_polarity",
             "atom_batch",
             "surface_curvatures",
             "surface_atom_neighbors",
@@ -267,6 +336,38 @@ class WisdomCollator:
             batch["sensitivity_gaps"] = sensitivity_gaps
 
         return batch
+
+    @staticmethod
+    def _optional_atom_tensor(
+        sample   : Mapping[str, Tensor | str],
+        name     : str,
+        reference: Tensor,
+        dtype    : torch.dtype,
+    ) -> Tensor:
+        """Read one generic atom descriptor with a legacy zero fallback.
+
+        The fallback keeps direct callers that construct old in-memory samples operational. Real
+        schema-3 datasets always provide the descriptors through :class:`WisdomDataset`, so an
+        enabled modern feature never silently loses information in managed training.
+
+        Args:
+            sample: One protein tensor mapping.
+            name: Descriptor field to read.
+            reference: Atomic-number vector defining atom count and device.
+            dtype: Required output dtype.
+
+        Returns:
+            Existing descriptor ``[N]`` or a zero vector with the same atom count.
+
+        Raises:
+            ValueError: If an existing descriptor is not a tensor with shape ``[N]``.
+        """
+        value = sample.get(name)
+        if value is None:
+            return torch.zeros(reference.shape, dtype=dtype, device=reference.device)
+        if not isinstance(value, Tensor) or value.shape != reference.shape:
+            raise ValueError(f"{name} must be a tensor with shape [N]")
+        return value.to(dtype=dtype)
 
     @staticmethod
     def _tensor(mapping: Mapping[str, Any], name: str) -> Tensor:

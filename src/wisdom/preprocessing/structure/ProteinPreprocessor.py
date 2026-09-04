@@ -11,6 +11,7 @@ from pathlib import Path
 from collections.abc import Mapping
 
 from wisdom.preprocessing.structure.ProteinSink import ProteinSink
+from wisdom.utils.structure.AtomicDescriptors import AtomicDescriptors
 from wisdom.preprocessing.structure.ProteinReader import ProteinReader
 from wisdom.preprocessing.structure.SurfaceBuilder import SurfaceBuilder
 from wisdom.preprocessing.structure.ProteinArchive import ProteinArchive
@@ -82,6 +83,26 @@ class ProteinPreprocessor:
             self.config.atom_spatial_radius,
             self.config.atom_spatial_k_max,
         ).build(protein)
+
+        # Derive generic chemistry once during preprocessing. Persisting these fixed descriptors
+        # avoids repeating graph/name analysis every time HPO opens the same protein in a new epoch.
+
+        descriptors = AtomicDescriptors.derive(
+            arrays["atomic_numbers"],
+            arrays["atom_names"],
+            arrays["residue_names"],
+            arrays["formal_charges"],
+            arrays["atom_edge_index"],
+            arrays["atom_edge_bond_order"],
+            arrays["atom_edge_is_covalent"],
+        )
+        arrays.update(
+            {
+                name: values
+                for name, values in descriptors.items()
+                if name != "formal_charges"
+            }
+        )
 
         surface_arrays, warnings = SurfaceBuilder(
             resolution       = self.config.surface_resolution,

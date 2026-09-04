@@ -330,19 +330,22 @@ class DatasetValidator:
             result["sha256"] = digest.hexdigest()
             result["file_bytes"] = archive_path.stat().st_size
 
-            # Exact member names reject missing arrays, hidden extras, and pickle-bearing objects.
+            # Accept either complete schema-3 generation; reject partial optional groups or extras.
             with np.load(archive_path, allow_pickle=False) as archive:
-                expected_names = {*ProteinArchive.ARRAY_NAMES, ProteinArchive.METADATA_NAME}
-                actual_names   = set(archive.files)
-                if actual_names != expected_names:
-                    missing = sorted(expected_names - actual_names)
-                    extra   = sorted(actual_names - expected_names)
+                required_names = {
+                    *ProteinArchive.ARRAY_NAMES,
+                    ProteinArchive.METADATA_NAME,
+                }
+                current_names = required_names | set(ProteinArchive.OPTIONAL_ARRAY_NAMES)
+                actual_names  = set(archive.files)
+                if actual_names not in (required_names, current_names):
+                    missing = sorted(required_names - actual_names)
+                    extra   = sorted(actual_names - current_names)
                     errors.append(f"archive schema mismatch; missing={missing}, extra={extra}")
 
                 arrays = {
                     name: archive[name]
-                    for name in ProteinArchive.ARRAY_NAMES
-                    if name in actual_names
+                    for name in actual_names - {ProteinArchive.METADATA_NAME}
                 }
                 metadata_array = archive[ProteinArchive.METADATA_NAME]
                 if metadata_array.shape != () or metadata_array.dtype.kind != "U":

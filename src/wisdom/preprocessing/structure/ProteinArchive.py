@@ -2,22 +2,23 @@
 
 from __future__ import annotations
 
-import hashlib
-import json
 import os
-from collections.abc import Mapping
-from importlib import metadata
-from pathlib import Path
-from typing import Any, cast
-from uuid import uuid4
-from zipfile import BadZipFile
-
-import lambdaforge
-import numpy as np
+import json
 import scipy
+import hashlib
+import numpy as np
+import lambdaforge
 import scipy.sparse
 
+from uuid import uuid4
+from pathlib import Path
+from typing import Any, cast
+from importlib import metadata
+from zipfile import BadZipFile
+from collections.abc import Mapping
+
 from wisdom.utils.structure.models.Protein import Protein
+from wisdom.utils.structure.AtomicDescriptors import AtomicDescriptors
 from wisdom.preprocessing.structure.PreprocessConfig import PreprocessConfig
 from wisdom.preprocessing.structure.PreprocessingProvenance import PreprocessingProvenance
 from wisdom.preprocessing.structure.SurfaceAtomNeighborhoodBuilder import (
@@ -28,9 +29,10 @@ from wisdom.preprocessing.structure.SurfaceAtomNeighborhoodBuilder import (
 class ProteinArchive:
     """Own the WISDOM NPZ schema, provenance, resume checks, and atomic persistence."""
 
-    SCHEMA_VERSION = "3.0"
-    METADATA_NAME  = "metadata_json"
-    ARRAY_NAMES    = (
+    SCHEMA_VERSION        = "3.0"
+    METADATA_NAME         = "metadata_json"
+    OPTIONAL_ARRAY_NAMES = AtomicDescriptors.ARRAY_NAMES
+    ARRAY_NAMES           = (
         "atom_positions",
         "atomic_numbers",
         "residue_type_ids",
@@ -194,6 +196,37 @@ class ProteinArchive:
                 raise ValueError(f"{name} must have shape [N]")
         if np.any(arrays["atomic_numbers"] == 0) or np.any(arrays["residue_indices"] < 0):
             raise ValueError("atomic numbers and residue indices must be valid")
+
+        # Current schema-3 writers persist all generic descriptors. Early schema-3 archives may
+        # omit the complete group and remain readable through deterministic loader derivation.
+
+        descriptor_names    = set(AtomicDescriptors.ARRAY_NAMES)
+        present_descriptors = descriptor_names & arrays.keys()
+        if present_descriptors and present_descriptors != descriptor_names:
+            missing_descriptors = descriptor_names - present_descriptors
+            raise ValueError(
+                f"generic atom descriptors are incomplete: {sorted(missing_descriptors)}"
+            )
+        for name in present_descriptors:
+            if arrays[name].shape != (atom_count,):
+                raise ValueError(f"{name} must have shape [N]")
+        for name in (
+            "atom_aromaticity",
+            "atom_hbond_donor",
+            "atom_hbond_acceptor",
+            "residue_polarity",
+        ):
+            if name in present_descriptors and arrays[name].dtype != np.bool_:
+                raise ValueError(f"{name} must be Boolean")
+        if "atom_hybridization_ids" in present_descriptors and (
+            arrays["atom_hybridization_ids"].dtype.kind not in "iu"
+            or np.any(arrays["atom_hybridization_ids"] > 3)
+        ):
+            raise ValueError("atom_hybridization_ids must contain integer IDs in [0,3]")
+        if "residue_hydropathy" in present_descriptors and not np.isfinite(
+            arrays["residue_hydropathy"]
+        ).all():
+            raise ValueError("residue_hydropathy contains non-finite values")
 
         # Delegate cohesive bounded-topology and intrinsic-operator invariants.
         self._validate_undirected_edges(
@@ -392,10 +425,15 @@ class ProteinArchive:
         # Metadata identity is necessary but insufficient: validate the exact reusable arrays too.
         try:
             with np.load(path, allow_pickle=False) as archive:
-                expected_names = {*self.ARRAY_NAMES, self.METADATA_NAME}
-                if set(archive.files) != expected_names:
+                required_names = {*self.ARRAY_NAMES, self.METADATA_NAME}
+                current_names  = required_names | set(self.OPTIONAL_ARRAY_NAMES)
+                actual_names   = set(archive.files)
+                if actual_names not in (required_names, current_names):
                     return False
-                arrays = {name: archive[name] for name in self.ARRAY_NAMES}
+                arrays = {
+                    name: archive[name]
+                    for name in actual_names - {self.METADATA_NAME}
+                }
             self.validate(arrays)
         except (OSError, ValueError, KeyError, BadZipFile, EOFError):
             return False

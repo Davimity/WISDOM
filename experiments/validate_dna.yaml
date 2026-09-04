@@ -1,5 +1,5 @@
 name: wisdom-dna-validate                         # Stable read-only scientific validation Work.
-run: wisdom.preprocessing.dna.DNAValidation.DNAValidation # Direct LambdaForge 0.13 Work class.
+run: wisdom.preprocessing.dna.DNAValidation.DNAValidation # Direct LambdaForge 0.14 Work class.
 
 with:                                             # Keyword arguments passed to DNAValidation.run(...).
   dataset:                                        # Resolve and fingerprint the immutable placement.
@@ -16,5 +16,5 @@ resources:                                        # Portable validation reservat
   memory: 16GiB                                   # Enough memory for several complete surface archives.
   time: 2h                                        # Bounded audit wall time for the complete placement.
 
-# LambdaForge 0.13 accepts cpu, memory, gpu, gpu_memory, time, storage, and processes. This audit
+# LambdaForge 0.14 accepts cpu, memory, gpu, gpu_memory, time, storage, and processes. This audit
 # selects cpu=4, memory=16GiB, and time=2h; omitted gpu/storage/processes use framework defaults.

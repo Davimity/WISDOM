@@ -20,7 +20,7 @@ from wisdom.models.WisdomV1 import WisdomV1
 from wisdom.models.WisdomV2 import WisdomV2
 from wisdom.preprocessing.structure.PreprocessConfig import PreprocessConfig
 from wisdom.preprocessing.structure.ProteinPreprocessor import ProteinPreprocessor
-from wisdom.Training import _create_model, _evaluate
+from wisdom.Training import _create_model, _evaluate, _mcc_objective, _validation_utility
 
 MODEL_INPUT_NAMES = (
     "atomic_numbers",
@@ -153,6 +153,112 @@ def _model() -> WisdomV1:
     )
 
 
+def test_legacy_defaults_equal_the_explicit_previous_feature_contract() -> None:
+    """The default element-plus-residue path matches the same switches written explicitly."""
+    parameters = {
+        "hidden_dim": 8,
+        "embedding_dim": 4,
+        "atomic_layers": 2,
+        "projection_depth": 1,
+        "surface_layers": 2,
+        "dropout": 0.0,
+        "curvature_features": 6,
+        "atom_spatial_k": 2,
+        "surface_atom_k": 16,
+        "diffusion_spectral_modes": 8,
+    }
+    torch.manual_seed(108)
+    legacy = WisdomV1(**parameters)
+    torch.manual_seed(108)
+    explicit = WisdomV1(
+        **parameters,
+        atom_feature_preset="custom",
+        use_element=True,
+        use_residue_type=True,
+    )
+    batch = dict(WisdomCollator(atom_spatial_k=2)((_sample(3, 2, 1.0),)))
+
+    legacy_output   = legacy(**_model_inputs(batch))
+    explicit_output = explicit(**_model_inputs(batch))
+
+    assert legacy.state_dict().keys() == explicit.state_dict().keys()
+    assert all(
+        torch.equal(legacy.state_dict()[name], explicit.state_dict()[name])
+        for name in legacy.state_dict()
+    )
+    assert torch.equal(legacy_output["logits"], explicit_output["logits"])
+    assert torch.equal(legacy_output["surface_logits"], explicit_output["surface_logits"])
+
+
+@pytest.mark.parametrize(
+    ("preset", "expected_width"),
+    (
+        ("identity", 8),
+        ("identity_residue", 20),
+        ("identity_chemistry", 16),
+        ("identity_structural", 16),
+        ("full_generic", 38),
+        ("constant", 8),
+    ),
+)
+def test_atom_feature_presets_resolve_input_width(
+    preset        : str,
+    expected_width: int,
+) -> None:
+    """Coherent feature families calculate RGCN input width without hard-coded YAML dimensions."""
+    model = WisdomV1(
+        hidden_dim=8,
+        embedding_dim=8,
+        residue_embedding_dim=12,
+        atom_feature_preset=preset,
+        curvature_features=6,
+        surface_layers=0,
+    )
+
+    assert model.atomic_input_width == expected_width
+
+
+@pytest.mark.parametrize(
+    ("mode", "edge_count", "relation_types"),
+    (
+        ("full_relational", 4, {0, 2}),
+        ("unified_relation", 4, {0}),
+        ("spatial_only", 4, {0}),
+        ("covalent_only", 2, {0}),
+    ),
+)
+def test_atomic_relation_modes_preserve_both_edge_semantics(
+    mode          : str,
+    edge_count    : int,
+    relation_types: set[int],
+) -> None:
+    """The covalent-and-spatial edge is retained once before bidirectional expansion."""
+    batch = WisdomCollator(relation_mode=mode)((_sample(3, 2, 1.0),))
+
+    assert batch["atom_edge_index"].shape[1] == edge_count
+    assert set(batch["atom_edge_types"].tolist()) == relation_types
+
+
+def test_structural_bypasses_and_shape_index_are_trainable() -> None:
+    """Zero message depths and derived shape index retain the public forward contract."""
+    batch = dict(WisdomCollator(curvature_scale_count=1)((_sample(3, 2, 1.0),)))
+    model = WisdomV1(
+        hidden_dim=8,
+        embedding_dim=4,
+        atom_feature_preset="constant",
+        atomic_layers=0,
+        projection_depth=1,
+        surface_layers=0,
+        curvature_features=4,
+        use_shape_index=True,
+    )
+
+    output = model(**_model_inputs(batch))
+
+    assert output["logits"].shape == (1,)
+    assert output["surface_logits"].shape == (2,)
+
+
 def _write_npz(path: Path, sample: dict[str, Tensor]) -> None:
     """Write the model-facing portion of a pickle-free schema-3 archive.
 
@@ -234,6 +340,24 @@ def test_training_resolves_model_generations_by_convention() -> None:
 
     with pytest.raises(ValueError, match="unsupported WISDOM model version"):
         _create_model(999, parameters)
+
+
+def test_validation_utility_matches_the_declared_hpo_objective() -> None:
+    """Local checkpoint selection reproduces LambdaForge's geometric HPO utility."""
+    metrics = {
+        "auprc":             0.81,
+        "auroc":             0.64,
+        "balanced_accuracy": 0.49,
+        "mcc":               0.0,
+    }
+    expected = 0.81**0.35 * 0.64**0.20 * 0.49**0.25 * 0.50**0.20
+
+    assert _validation_utility(metrics) == pytest.approx(expected)
+    assert _validation_utility({**metrics, "mcc": None}) == 0.0
+    assert _validation_utility({**metrics, "mcc": -1.0}) == 0.0
+    assert _mcc_objective(None) == 0.0
+    assert _mcc_objective(0.0) == pytest.approx(0.5)
+    assert _mcc_objective(1.0) == 1.0
 
 
 def test_dataset_accepts_extensionless_managed_npz_assets(tmp_path: Path) -> None:
