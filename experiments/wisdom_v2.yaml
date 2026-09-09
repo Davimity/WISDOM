@@ -2,36 +2,28 @@
 name: wisdom-v2                                      # Stable LambdaForge experiment name.
 run: wisdom.Training.Training                       # Same LambdaForge 0.14 Work class as v1.
 
-with:                                                # Fixed Training.run(...) arguments.
+with:                                                # Replace these fixed backbone values with the V1 winner.
   dataset:                                           # Resolve one immutable managed placement.
     dataset: wisdom-dna-reduced@6                    # Exact reduced schema-3 release used by v1.
   model_version: 2                                  # Enable only the v2 pooling extension.
   subset: full                                      # Use every train member already retained in this release.
   hidden_dim: 128                                   # Fixed reviewed v1 latent width.
   embedding_dim: 32                                 # Fixed reviewed v1 embedding width.
-  residue_embedding_dim: 32                         # Independent residue width, fixed to legacy value.
-  atom_feature_preset: legacy                       # Preserve pre-expansion element/residue inputs.
-  use_residue_type: true                            # Fixed reviewed v1 atom features.
+  residue_embedding_dim: 32                         # Fixed winning v1 residue embedding width.
   atomic_layers: 2                                  # Fixed reviewed v1 atomic depth.
   projection_depth: 1                              # Fixed reviewed v1 projection depth.
   surface_layers: 2                                 # Fixed reviewed v1 surface depth.
   atom_spatial_k: 16                                # Fixed reviewed v1 atomic-neighbor budget.
   surface_atom_k: 16                                # Fixed reviewed v1 transfer-neighbor budget.
   diffusion_spectral_modes: 128                     # Fixed reviewed v1 intrinsic frequency budget.
-  relation_mode: full_relational                    # Preserve spatial/covalent/both relation IDs.
-  transfer_geometry: full                           # Preserve distance/normal/tangent transfer.
-  surface_feature_mode: chemistry_geometry          # Preserve transferred chemistry plus geometry.
-  curvature_scale_count: 0                          # Use every persisted curvature scale.
-  use_mean_curvature: true                          # Include mean curvature.
-  use_gaussian_curvature: true                      # Include Gaussian curvature.
-  use_curvedness: true                              # Include curvedness.
-  use_shape_index: false                            # Preserve the former descriptor set.
+  atomic_edge_distance_scale: 6.0                   # Fixed winning v1 edge-distance scale in Å.
   surface_atom_radius: 6.0                          # Fixed transfer geometry normalization in Å.
   surface_chunk_size: 8192                          # Bound atom-transfer gathered activations.
   atomic_message_chunk_size: 65536                  # Bound LambdaForge RGCN edge activations.
   dropout: 0.2                                      # Fixed reviewed v1 dropout.
   learning_rate: 0.0003                             # Fixed reviewed v1 AdamW rate.
   weight_decay: 0.0001                              # Fixed reviewed v1 AdamW decay.
+  gate_lambda: 0.001                                # Fixed winning v1 L0 pressure; gates relearn per pooling.
   topk_fraction: 0.05                               # Retained fraction for top-k mean.
   attention_hidden_dim: 32                          # Attention scoring-network width.
   regional_diffusion_scale: 2.5                     # Physical smoothing length in Å before MAX.
@@ -48,7 +40,9 @@ with:                                                # Fixed Training.run(...) a
 
 # Fixed Training.run option reference:
 # Values shown above equal public defaults except model_version=2,
-# residue_embedding_dim=32, evaluate_test=false, and data_workers=2.
+# residue_embedding_dim=32, gate_lambda=0.001, evaluate_test=false, and data_workers=2.
+# Semantic gates are reinitialized and learned for every pooling candidate; their definitions and
+# Hard-Concrete constants are fixed, so pooling_type remains the only architectural comparison.
 # subset="full" selects every train member retained by this reduced release; validation/test are
 # never filtered by a training view. Widths and depths/K/J/mode budgets are positive; dropout is in [0,1);
 # topk_fraction is in (0,1];

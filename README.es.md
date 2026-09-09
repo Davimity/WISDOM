@@ -13,12 +13,15 @@ vecinos y los operadores necesarios para difundir información sobre esa superfi
 de ADN se guardan aparte, por lo que el mismo NPZ estructural puede reutilizarse para otra pregunta
 científica. La sección 4 presenta cada array antes de introducir sus ecuaciones.
 
-Las tres versiones del modelo responden preguntas distintas. V1 busca la arquitectura básica que
-lleva información de los átomos a la superficie. V2 mantiene esa arquitectura y compara formas de
-combinar las puntuaciones puntuales en una predicción para la proteína. V3 mantiene la parte atómica
-y la combinación final y compara encoders de superficie. El entrenamiento solo utiliza la etiqueta
-de la proteína; los puntos donde se conoce contacto con ADN sirven únicamente para medir si el mapa
-superficial aprendido tiene sentido.
+Las tres versiones del modelo responden preguntas distintas. V1 aprende qué información atómica y
+superficial genérica utiliza la tarea, mientras el HPO elige capacidad y resolución física; su ruta
+fija es grafo atómico de dos ramas → DiffusionNet → evidencia local → MAX. V2 fija el backbone de V1
+y compara formas de combinar las puntuaciones puntuales en una predicción para la proteína. V3 fija
+el pooling elegido en V2 y compara encoders de superficie. El entrenamiento solo
+utiliza la etiqueta de la proteína; los puntos donde se conoce contacto con ADN sirven únicamente
+para medir si el mapa superficial aprendido tiene sentido. Tras el HPO de V1, un análisis opcional
+separado puede comprimir la representación superficial ganadora en candidatos latentes sparse sin
+modificar el predictor ni usar etiquetas.
 
 ## 0. Índice
 
@@ -46,7 +49,7 @@ superficial aprendido tiene sentido.
   - [4.9. Limitaciones científicas](#49-limitaciones-científicas)
 - [5. Modelos entrenables de WISDOM](#5-modelos-entrenables-de-wisdom)
   - [5.1. Índice del dataset y batching de grafos](#51-índice-del-dataset-y-batching-de-grafos)
-  - [5.2. Modelos, ecuaciones y formas tensoriales de WISDOMv1](#52-modelos-ecuaciones-y-formas-tensoriales-de-wisdomv1)
+  - [5.2. Arquitectura adaptativa semántica y WISDOMv1](#52-arquitectura-adaptativa-semántica-y-wisdomv1)
   - [5.3. Pooling y diagnósticos de localización de WISDOMv2](#53-pooling-y-diagnósticos-de-localización-de-wisdomv2)
   - [5.4. Comparación de encoders superficiales WISDOMv3](#54-comparación-de-encoders-superficiales-wisdomv3)
   - [5.5. Entrenamiento, evaluación y artefactos](#55-entrenamiento-evaluación-y-artefactos)
@@ -2241,18 +2244,26 @@ Por tanto, «collation» solo cambia contabilidad. No crea aristas científicas,
 altera coordenadas ni permite fuga de información. Las filas quedan contiguas por eficiencia, pero
 los grafos siguen siendo matemáticamente disjuntos.
 
-| Estado activo | ID R-GCN | Significado |
-|---:|---:|---|
-| rango `<=K`, no covalente | `0` | solo proximidad espacial |
-| covalente, rango ausente o `>K` | `1` | solo enlace covalente |
-| covalente y rango `<=K` | `2` | espacial y covalente |
+| Estado de la arista tras agrupar | Máscara espacial | Máscara covalente | Aporte al modelo |
+|---|---:|---:|---|
+| rango `<=K`, sin enlace | `true` | `false` | solo rama espacial |
+| enlazada, rango ausente o `>K` | `false` | `true` | solo rama covalente |
+| enlazada y rango `<=K` | `true` | `true` | un aporte de cada rama física |
 
-### 5.2. Modelos, ecuaciones y formas tensoriales de WISDOMv1
+El último caso no se codifica como una tercera relación «ambas». Proximidad y enlace siguen siendo
+dos hechos físicos distintos, por lo que sus gates globales pueden apagar cada aporte por separado.
+
+<!-- La arquitectura discreta anterior queda en el historial, no en la documentación renderizada.
+
+Documentación retirada de WISDOMv1 con características discretas
 
 `WisdomV1` combina un encoder atómico acotado, transferencia átomo–superficie aprendida, bloques
-DiffusionNet y pooling MAX fijo. Nunca construye un grafo superficial entrenable. Las elecciones
-`K`, `J` y `Q` toman prefijos de los candidatos inmutables guardados al preprocesar, de modo que el
-HPO cambia el coste sin cambiar la identidad del dataset.
+DiffusionNet, una cabeza de evidencia local y pooling MAX fijo. Tres interruptores pequeños prueban
+si ayudan la distancia de arista atómica, la identidad del átomo durante la transferencia y el
+contexto superficial regional explícito. Sus valores por defecto seleccionan exactamente el V1
+anterior. Nunca construye un grafo superficial entrenable. Las elecciones `K`, `J` y `Q` toman
+prefijos de candidatos inmutables guardados al preprocesar, de modo que el HPO cambia el coste sin
+cambiar la identidad del dataset.
 
 Esta arquitectura es un contrato obligatorio, no un modo de compatibilidad seleccionable. Una
 ejecución v1 solo acepta el esquema estructural 3.0, construye la clase exacta `WisdomV1` y comprueba
@@ -2270,23 +2281,25 @@ simplemente una descripción numérica que recibe o produce el modelo. El recorr
 ```mermaid
 flowchart LR
     A["Categorías atómicas"] --> B["Grafo atómico relacional"]
-    B --> C["Embeddings atómicos"]
-    C --> D["Transferencia aprendida a puntos cercanos"]
-    D --> E["Curvatura + química superficial"]
-    E --> F["Encoder superficial DiffusionNet"]
-    F --> G["Un logit por punto"]
-    G --> H["Pooling MAX"]
-    H --> I["Un logit por proteína"]
+    B --> C["Mensajes opcionalmente condicionados por distancia"]
+    C --> D["Embeddings atómicos"]
+    D --> E["Transferencia geométrica o sensible al átomo"]
+    E --> F["Curvatura + química superficial"]
+    F --> G["Encoder superficial DiffusionNet"]
+    G --> H["Cabeza de evidencia puntual o multiescala"]
+    H --> I["Un logit por punto"]
+    I --> J["Pooling MAX"]
+    J --> K["Un logit por proteína"]
 ```
 
 | Componente | Implementación | Entrada → salida | Qué aprende |
 |---|---|---|---|
 | Entrada atómica | embeddings más descriptores escalares | registros de átomos `[N]` → `[N,D_in]` | Selecciona identidad, química genérica y contexto estructural sin etiquetas de la tarea. |
-| Encoder atómico | LambdaForge `RelationalGCN` | características `[N,E]` o `[N,2E]`, aristas acotadas y relaciones → `[N,D]` | Separa mensajes covalentes y espaciales conservando todo enlace. |
-| Transferencia átomo→superficie | `SurfaceAtomTransfer` | embeddings y geometría `[M,J]` → `[M,D]` | Aprende pesos invariantes condicionados por distancia y dirección local. |
+| Encoder atómico | LambdaForge `RelationalGCN`, con distancia opcional | features `[N,E]` o `[N,2E]`, aristas acotadas, relaciones y distancias opcionales → `[N,D]` | Separa mensajes covalentes/espaciales y puede distinguir aristas cercanas de lejanas. |
+| Transferencia átomo→superficie | `SurfaceAtomTransfer` | embeddings y geometría `[M,J]` → `[M,D]` | Aprende pesos invariantes solo de la geometría o de la geometría más el contenido atómico. |
 | Proyección superficial | LambdaForge `MLP` | features elegidas `[M,D_chem+G]` → `[M,D]` | Fusiona la información activa; una de las dos partes puede faltar en una ablación. |
 | Encoder superficial | `DiffusionSurfaceEncoder` | características y operadores espectrales/de gradiente → `[M,D]` | Alterna difusión aprendida, productos de gradientes independientes del marco tangente y MLP puntuales. |
-| Capa de salida local (`head`) | `torch.nn.Linear(D,1)` | embedding superficial `[M,D]` → logits `[M]` | Produce evidencia local de clase. |
+| Cabeza de evidencia local | control lineal o un único MLP pequeño | `[M,D]` o multiescala `[M,3D]` → logits `[M]` | Compara evidencia puntual con contexto regional corto/medio explícito. |
 | Reducción global | LambdaForge `SparseMaxPooling` | logits y `surface_batch` → `[B]` | Implementa la regla existencial MAX MIL fija. |
 
 Un embedding es una tabla de consulta entrenable, no un descriptor químico escrito a mano. R-GCN
@@ -2328,7 +2341,21 @@ Los cuatro valores de `relation_mode` solo cambian las aristas que recibe la mis
 está entre los primeros `K` vecinos se guarda una vez como «ambas». `unified_relation` conserva la
 unión pero asigna un solo tipo. `spatial_only` conserva las parejas cuyo rango espacial no supera
 `K`, incluidas las enlazadas que cumplen esa condición. `covalent_only` conserva todo enlace y
-elimina la proximidad sin enlace. El batch expande cada pareja no dirigida en dos mensajes.
+elimina la proximidad sin enlace. El batch expande cada pareja no dirigida en dos mensajes y copia
+la misma `atom_edge_distance` en ambas direcciones. Con `atomic_edge_features: none`, WISDOM llama a
+la R-GCN original de LambdaForge, que es el control exacto. Con `distance`, cada mensaje relacional
+ordinario `m_ij` se multiplica por una puerta escalar aprendida:
+
+```math
+m'_{ij}=2\,\sigma\!\left(a_l\frac{d_{ij}}{r_d}+b_l\right)m_{ij}.
+```
+
+Aquí `d_ij` es la distancia entre centros atómicos en ångströms, `r_d` es
+`atomic_edge_distance_scale` (6 Å por defecto), `a_l` y `b_l` son dos escalares aprendidos para la
+capa `l` y `σ` es sigmoid. El factor dos hace que la puerta valga uno cuando su entrada afín vale
+cero. Las matrices relacionales, la transformación propia del nodo, la media por relación, los
+residuales y los chunks acotados siguen siendo las operaciones nativas de R-GCN. La distancia cambia
+la intensidad del mensaje; no crea aristas ni revela etiquetas de ADN.
 
 Sean `N` los átomos totales, `M` los puntos superficiales, `B` las proteínas, `E` la anchura del
 embedding, `D` la anchura oculta y `S` las escalas de curvatura. La tabla de residuos se omite por
@@ -2342,11 +2369,14 @@ sean `d_pa` su distancia, `z_pa` el offset firmado sobre la normal, `rho_pa` su 
 ```math
 h_{A\to S}(p)=\sum_{a\in A_J(p)}\alpha_{pa}W_hh_a,
 \qquad
-\alpha_{pa}=\operatorname{softmax}_{a\in A_J(p)}
-g\!\left(d_{pa}/r_{sa},z_{pa}/r_{sa},\rho_{pa}/r_{sa}\right).
+\alpha_{pa}=\operatorname{softmax}_{a\in A_J(p)}g(s_{pa}).
 ```
 
-El MLP `g` solo recibe esos escalares geométricos invariantes y la máscara excluye el padding. El
+En `geometry_only`, la entrada es `s_pa=(d_pa/r_sa,z_pa/r_sa,rho_pa/r_sa)`, exactamente el
+comportamiento anterior. En `geometry_atom`, `s_pa` incluye además el embedding atómico invariante
+`h_a`; así, dos átomos químicamente distintos pueden recibir pesos diferentes aunque su geometría
+relativa coincida. La máscara excluye el padding antes de softmax: los pesos válidos suman uno y el
+padding recibe exactamente cero. El
 cálculo se divide en chunks, por lo que las activaciones crecen como `O(chunk_size J D)` y no como
 `O(M J D)`. Los `S` tripletes `[H,K,C]` contienen curvatura media, curvatura gaussiana y
 *curvedness*. En esta frase `K` es una curvatura, no el presupuesto de vecinos. Cada descriptor
@@ -2369,7 +2399,36 @@ concretos elegidos en el plano tangente.
 splits cargados deben coincidir. Cinco escalas con cuatro descriptores producen 20 escalares; tres
 escalas con `[H,K,C]` producen nueve. Así el HPO compara prefijos sin reescribir el dataset.
 
-Una capa lineal convierte cada embedding superficial en un logit local `l_p`. Un «logit» es un
+La cabeza de evidencia local tiene dos alternativas. `pointwise`, el valor por defecto compatible
+con versiones anteriores, aplica la misma capa lineal al embedding final `h_p∈R^D`.
+`multiscale_diffusion` le aporta primero contexto fijo de corto y medio alcance. Para una longitud
+de difusión `ell`, calcula
+
+```math
+\mathcal D_{\ell}(H)=\Phi
+\operatorname{diag}\!\left(e^{-\lambda_q\ell^2}\right)
+\Phi^\top A H.
+```
+
+`H∈R^{M×D}` reúne el embedding final de cada punto, `A` contiene las masas de área, `Phi∈R^{M×Q}`
+los autovectores retenidos del Laplaciano y `lambda_q` la frecuencia del modo `q` en Å⁻². El tiempo
+térmico es `ell²`: `ell` es una longitud característica de suavizado, no un vecindario de radio
+duro. Cada proteína se difunde por separado y cada escala sigue devolviendo `[M,D]`. WISDOM usa las
+longitudes fijas 3 y 6 Å y concatena
+
+```math
+E=\left[H\;\middle|\;\mathcal D_{3\,\text{Å}}(H)\;\middle|\;
+\mathcal D_{6\,\text{Å}}(H)\right]\in\mathbb R^{M\times 3D},
+\qquad
+l=\operatorname{MLP}_{3D\to16\to1}(E).
+```
+
+Esto **no** ejecuta tres DiffusionNet. El encoder aprendido se ejecuta una vez; después, el operador
+espectral ya almacenado suaviza dos veces sus canales finales. Solo tras concatenarlos, un único MLP
+pequeño compartido produce un logit por punto. Por tanto, `surface_logits[p]` es evidencia directa
+del punto en modo `pointwise` y evidencia regional centrada en `p` en modo multiescala.
+
+La cabeza local convierte cada fila de evidencia en un logit local `l_p`. Un «logit» es un
 número real previo a sigmoid: positivo favorece clase `1`, negativo clase `0` y cero equivale a
 probabilidad `0,5`. Para la proteína `b`, sea `P_b` su conjunto de puntos. El logit v1 es MAX:
 
@@ -2400,7 +2459,10 @@ aprendidas. Los tests de movimiento rígido conservan la salida dentro de la tol
 `wisdom_v1.yaml` es el único experimento V1. La búsqueda adaptativa de LambdaForge muestrea en
 conjunto familias de información, relaciones, química/geometría, transferencia, prefijos de
 curvatura, anchuras, profundidades, vecinos acotados, modos espectrales, radio, dropout, tasa de
-aprendizaje y weight decay. El preset `constant`, cero capas atómicas y cero capas superficiales
+aprendizaje y weight decay. También muestrea las tres preguntas binarias independientes
+`atomic_edge_features`, `transfer_attention_mode` y `surface_evidence_mode`; su escala de
+normalización, las dos longitudes de difusión y la anchura de la cabeza permanecen fijas para no
+abrir otra búsqueda enorme. El preset `constant`, cero capas atómicas y cero capas superficiales
 incluyen los controles sin química, sin R-GCN y sin DiffusionNet sin crear experimentos separados.
 Una profundidad cero es un bypass explícito, no otro algoritmo. La poda adaptativa y la carrera de
 semillas evitan evaluar el producto cartesiano completo de este espacio amplio.
@@ -2410,12 +2472,259 @@ decay** reduce gradualmente pesos grandes para desincentivar soluciones innecesa
 El **dropout** oculta al azar una fracción configurada de activaciones intermedias durante el
 entrenamiento, evitando depender de un único camino; se desactiva al validar y evaluar.
 
+-->
+
+### 5.2. Arquitectura adaptativa semántica y WISDOMv1
+
+WISDOM debe poder reutilizarse más allá del benchmark actual de unión a ADN. Una característica
+inútil para una tarea puede ser esencial para otra, por lo que V1 ya no pide a la optimización de
+hiperparámetros (HPO) que construya una arquitectura de entrada distinta en cada entrenamiento.
+Siempre ofrece la misma información física, genérica y barata, y aprende qué fuentes opcionales
+puede apagar. Esta es la **arquitectura adaptativa semántica**.
+
+La diferencia es importante. Un peso neuronal normal responde «¿cómo transformo esta señal
+numérica?». Un **gate semántico** responde una pregunta más amplia y con nombre, por ejemplo
+«¿utiliza esta tarea la identidad del residuo?» o «¿aporta algo la rama covalente?». Los gates son
+parámetros globales: un valor se comparte entre todos los átomos, puntos, proteínas y capas. No se
+deciden de nuevo para cada proteína.
+
+```mermaid
+flowchart LR
+    A["Todos los descriptores atómicos genéricos"] --> B["Gates semánticos"]
+    B --> C["Ramas atómicas espacial + covalente"]
+    C --> D["Transferencia por distancia + orientación/contenido"]
+    D --> E["Contexto atómico + curvaturas con gate"]
+    E --> F["Proyección superficial"]
+    F --> G["V1: DiffusionNet"]
+    G --> H["Un logit local por punto"]
+    H --> I["V1: pooling MAX"]
+    I --> J["Un logit por proteína"]
+```
+
+**Por qué se necesita un gate Hard Concrete.** Multiplicar una característica por un escalar libre
+no crea un interruptor fiable: un peso posterior puede crecer y compensar un multiplicador pequeño.
+WISDOM utiliza la relajación Hard Concrete de una decisión L0. L0 significa contar caminos activos,
+no reducir el tamaño de sus pesos. Para el gate `g`, el modelo aprende un parámetro real
+`log_alpha_g`. Durante entrenamiento obtiene un número uniforme `u` en `(0,1)` y calcula
+
+```math
+s_g=\sigma\!\left(\frac{\log u-\log(1-u)+\log\alpha_g}{\beta}\right),
+\qquad
+z_g=\min\!\left(1,\max\!\left(0,s_g(\zeta-\gamma)+\gamma\right)\right).
+```
+
+Aquí `sigma` es la sigmoide, `beta=2/3` es la temperatura fija y los extremos fijos son
+`gamma=-0.1` y `zeta=1.1`. Estirar fuera de `[0,1]` y recortar después crea ceros y unos exactos.
+La muestra conserva gradiente dentro del intervalo, por lo que la retropropagación normal aprende
+`log_alpha_g`. Antes de los logaritmos, `u` se separa numéricamente de cero y uno. Todos los gates
+empiezan con una probabilidad activa cercana a 0,95: el modelo recibe inicialmente casi toda la
+información razonable y el entrenamiento debe aportar evidencia para eliminarla.
+
+En validación, test e inferencia no se muestrea. Se usa el valor reproducible
+
+```math
+\bar z_g=\min\!\left(1,\max\!\left(0,
+\sigma(\log\alpha_g)(\zeta-\gamma)+\gamma\right)\right).
+```
+
+La probabilidad analítica de que un gate no sea cero es
+
+```math
+p_g=P(z_g>0)=\sigma\!\left(\log\alpha_g-
+\beta\log\!\left(\frac{-\gamma}{\zeta}\right)\right).
+```
+
+`p_g` es una probabilidad esperada de actividad; `bar z_g` es el multiplicador determinista de una
+predicción. Ninguno demuestra que una característica sea biológicamente importante. Fuentes
+correlacionadas pueden sustituirse y un gate puede seguir activo porque su coste sea bajo. El
+diagnóstico causal adecuado es una ablación forzada posterior: cargar el mismo checkpoint, forzar
+un gate a cero y medir el cambio de rendimiento.
+
+**El término L0 de entrenamiento.** Las etiquetas de proteína siguen definiendo la pérdida
+predictiva. Si `L_task` es la entropía cruzada binaria y `lambda_gate` es el parámetro YAML
+`gate_lambda`, se minimiza
+
+```math
+\mathcal L_{train}=\mathcal L_{task}+\lambda_{gate}\,\mathcal L_{gate}.
+```
+
+Cada gate cuesta una unidad. Para un gate sin padre, su coste efectivo esperado es `p_g`. Para un
+hijo se multiplican las probabilidades de todo su camino. Por ejemplo,
+
+```math
+p_{effective}(\text{orden de enlace})=
+p(\text{contexto atómico superficial})\,
+p(\text{rama covalente})\,
+p(\text{orden de enlace}).
+```
+
+Si `G` es la cantidad de gates y `A(g)` contiene el gate `g` y todos sus ancestros, el regularizador
+implementado, con coste unitario, es
+
+```math
+\mathcal L_{gate}=\frac{1}{G}\sum_{g=1}^{G}
+\prod_{a\in A(g)}p_a.
+```
+
+Por tanto, es la media de las probabilidades efectivas y permanece entre cero y uno aunque un
+esquema futuro añada canales. Un hijo situado detrás de un padre cerrado no se cobra
+como si su información aún llegase a la predicción. La jerarquía solo cambia la penalización: no
+crea ramas dependientes de cada dato ni salta capas dinámicamente. `gate_lambda=0` es el control sin
+presión de sparsity. Valores mayores exigen más evidencia predictiva para conservar un camino.
+WISDOM busca un único `gate_lambda`, no una cantidad objetivo de gates, porque fijar esa cantidad
+supondría afirmar sin evidencia cuánta complejidad necesita cualquier tarea futura.
+
+Los gates usan la misma tasa de aprendizaje que la red, pero un grupo AdamW separado y sin weight
+decay. Hard Concrete ya aporta su presión estructural; aplicar además decaimiento a `log_alpha`
+introduciría otra preferencia más difícil de interpretar.
+
+**Qué se controla con gates.** La identidad del elemento permanece siempre activa: un modelo
+atómico sin elementos químicos perdería su significado básico. El resto de fuentes disponibles e
+independientes de la tarea tiene un nombre estable:
+
+| Familia | Gates y significado práctico |
+|---|---|
+| Entrada atómica | Tipo de residuo, carga formal, aromaticidad, capacidad donante/aceptora de puentes de hidrógeno, hibridación, papel del átomo, hidropatía y polaridad del residuo. Un gate controla un embedding categórico completo o un canal escalar, nunca una dimensión latente. |
+| Topología atómica | `atomic_graph.spatial` y `atomic_graph.covalent`; ambas dependen de `surface.atom_context`. Una pareja cercana y enlazada contribuye a ambas ramas. |
+| Enriquecimiento de aristas | En la rama espacial: distancia, mismo residuo, misma cadena y separación de residuos; en la covalente: distancia, orden de enlace y mismo residuo. El origen y la confianza del enlace son procedencia —registran de dónde salió una afirmación— y nunca son predictores. |
+| Transferencia átomo→superficie | Residuos de orientación y contenido atómico. La distancia es la base física obligatoria. |
+| Entrada superficial | Contexto atómico completo y cada canal de curvatura media, gaussiana, curvedness e índice de forma en cada escala física almacenada. |
+
+La jerarquía completa de padres es:
+
+```text
+surface.atom_context
+├── atom.residue_type, atom.formal_charge, atom.aromaticity
+├── atom.hbond_donor, atom.hbond_acceptor, atom.hybridization, atom.atom_role
+├── atom.residue_hydropathy, atom.residue_polarity
+├── atomic_graph.spatial
+│   ├── edge.spatial.distance, edge.spatial.same_residue
+│   └── edge.spatial.same_chain, edge.spatial.residue_separation
+├── atomic_graph.covalent
+│   ├── edge.covalent.distance, edge.covalent.bond_order
+│   └── edge.covalent.same_residue
+├── transfer.orientation
+└── transfer.atom_content
+
+surface.curvature.{mean,gaussian,curvedness,shape_index}.scale_i
+```
+
+Aquí `scale_i` es la posición, empezando en cero, de una escala física en el NPZ; cada pareja
+descriptor/escala es un gate raíz independiente. La identidad elemental no aparece porque siempre
+está activa. La procedencia y confianza del enlace tampoco aparecen: describen el preprocesado, no
+la física molecular, y podrían crear atajos específicos del dataset.
+
+El encoder atómico conserva proximidad espacial y enlace covalente como dos ramas físicas, no como
+identificadores mutuamente excluyentes. En la capa `l`, una versión simplificada de la actualización
+es
+
+```math
+h_i^{l+1}=h_i^l+z_{spatial}\,\Delta h_{i,spatial}^l
+                 +z_{covalent}\,\Delta h_{i,covalent}^l.
+```
+
+Cada rama conserva un mensaje válido sin atributos. Sus descriptores de arista entran mediante un
+pequeño condicionador residual con gates; apagar todos los descriptores no desactiva la rama. Los
+mensajes se acumulan con índices sparse y nunca se construye una matriz densa de distancias
+`N x N`. El collator mantiene una lista unión de aristas y dos máscaras booleanas, y conserva
+alineados los atributos al filtrar por el presupuesto vecinal `K`, duplicar direcciones y desplazar
+los índices de proteínas en un batch disjunto.
+
+Para un punto superficial `p` y un átomo cercano `a`, `d_pa` es su distancia, `z_pa` el
+desplazamiento firmado sobre la normal saliente, `rho_pa` la distancia tangencial y `h_a` el
+embedding del átomo. La puntuación escalar de transferencia es
+
+```math
+q_{pa}=q_{distance}(d_{pa})
+ +z_{orientation}\,q_{orientation}(d_{pa},z_{pa},\rho_{pa})
+ +z_{content}\,q_{content}(d_{pa},h_a).
+```
+
+Un softmax con máscara sobre un máximo de `J` átomos válidos convierte esas puntuaciones en pesos;
+su suma ponderada crea el contexto atómico de `p`. Toda la geometría usa distancias y componentes
+normal/tangencial, así que trasladar o rotar la proteína completa no la cambia. Esto no es atención
+Transformer: es un pequeño puntuador local sobre una vecindad física acotada. Sus pesos eligen qué
+átomo cercano aporta a un punto; un gate semántico decide si una fuente completa está disponible en
+todo el modelo.
+
+La superficie recibe también cuatro descripciones de forma en cada escala guardada. La curvatura
+media mide flexión promedio; la gaussiana distingue regiones tipo cúpula y tipo silla; curvedness
+mide la magnitud de la flexión; y el índice de forma lleva el tipo local a un intervalo acotado. Con
+curvatura media `H` y gaussiana `K`, WISDOM calcula
+
+```math
+S_I=\frac{2}{\pi}\operatorname{atan2}\!\left(
+2H,2\sqrt{\max(H^2-K,0)}\right).
+```
+
+La curvatura media, gaussiana y curvedness se transforman como `tanh(H)`, `tanh(K)` y `tanh(C)`
+antes de aplicar sus gates; el índice de forma, que ya está acotado, no se transforma. Los canales
+de ancho fijo se concatenan con el contexto atómico. Cerrar un gate escribe ceros; la forma del tensor no depende de
+una muestra aleatoria. Posiciones, normales, masas de área, autovalores/autovectores laplacianos,
+operadores de gradiente e índices vecinos describen el dominio sobre el que opera la red; no son
+afirmaciones opcionales sobre características y no llevan gate.
+
+Tras DiffusionNet, una capa lineal compartida produce un logit local `l_p` para cada punto
+superficial `p`. Un logit es una puntuación sin acotar antes de convertirla en probabilidad:
+`sigmoid(l_p)` pertenece a `[0,1]`. Para la proteína `b`, cuyo conjunto de puntos es `P_b`, V1 usa
+la regla existencial MIL fija
+
+```math
+L_b=\max_{p\in P_b}l_p.
+```
+
+Por tanto, una región muy positiva puede hacer positiva la predicción de la proteína. Solo el logit
+de proteína `L_b` se compara con la etiqueta binaria; los logits locales nunca reciben las etiquetas
+de contacto con ADN durante el entrenamiento. No se afirma que MAX sea universalmente óptimo: se
+fija para estudiar el backbone en V1 y la sección 5.3 prueba alternativas en V2.
+
+**Qué sigue siendo HPO.** HPO decide capacidad y resolución numérica: anchos latentes y de
+embedding, profundidades positivas atómica/de proyección/superficial, presupuestos de vecinos,
+número de modos espectrales, radio de transferencia, dropout, tasa de aprendizaje, weight decay y
+`gate_lambda`. Ya no enumera presets de características, modos de relación o transferencia,
+interruptores de curvatura ni arquitecturas con cero capas. Esos controles, si se necesitan, son
+ablaciones separadas.
+
+**Paso entre versiones.** Las tres versiones responden una pregunta cada vez:
+
+| Versión | Contrato científico fijo | Variable estudiada |
+|---|---|---|
+| V1 | Superset de entrada con gates, dos ramas atómicas, transferencia acotada, DiffusionNet y pooling MAX | Capacidad, presupuestos físicos, optimizador y `gate_lambda` |
+| V2 | Valores exactos del V1 ganador; los gates vuelven a empezar cerca de 0,95 y se reaprenden | Pooling de proteína: MAX, media, atención, media top-k, media-local/MAX o log-sum-exp |
+| V3 | Backbone V1 ganador y pooling V2 seleccionado explícitamente; los gates se reaprenden | Encoder superficial: DiffusionNet, estilo dMaSIF, DeltaConv, PTv3 o PointMamba |
+
+V3 no presupone silenciosamente MAX. Su YAML debe contener de forma explícita el pooling elegido en
+V2. Reaprender gates importa porque la información útil puede depender de cómo se agregue o propague
+la evidencia puntual.
+
+Solo los logits de proteína reciben entropía cruzada binaria. Las etiquetas superficiales siguen
+siendo diagnósticas: no entran en gradientes, aprendizaje de gates, selección de checkpoint, HPO ni
+pruning. Cada época registra pérdida de tarea, regularización de gates, su total, fracción activa
+esperada y fracción activa determinista. La pérdida de validación contiene solo la tarea, para no
+mezclar calidad predictiva y prior de entrenamiento.
+
+El mejor checkpoint guarda pesos normales, todos los `log_alpha`, nombres y padres estables, las
+constantes Hard Concrete, `gate_lambda`, pooling, encoder superficial y parámetros del modelo.
+`gate_summary.json` informa para cada gate de su padre, `log_alpha`, probabilidad activa, valor
+determinista y probabilidad efectiva de camino, además de medias por familia. Entre varias seeds,
+probabilidades estables y efectos coherentes de ablación forzada son evidencia más fuerte que el
+valor de una sola ejecución; la variabilidad es un diagnóstico, no un objetivo HPO. LambdaForge
+registra además el número total de parámetros, el número de parámetros de gates y la cantidad de
+gates semánticos; los dos últimos deberían ser diminutos frente al predictor.
+
 ### 5.3. Pooling y diagnósticos de localización de WISDOMv2
 
 **Pooling** es la operación que combina todos los valores puntuales de una proteína en un único
 valor para esa proteína. WISDOMv2 pregunta si una regla distinta de MAX conserva la clasificación y
-depende menos de un extremo accidental. Features atómicas, R-GCN, transferencia aprendida,
+depende menos de un extremo accidental. Features atómicas, encoder de grafo con dos ramas,
+transferencia aprendida,
 proyección, DiffusionNet y la capa de salida local quedan fijos; solo cambia el pooling.
+
+V2 fija todos los valores ganadores de V1: capacidad, presupuestos físicos, optimizador y
+`gate_lambda`. Crea gates nuevos para cada candidato, de modo que la selección semántica pueda
+adaptarse a la regla de agregación, y solo cambia `pooling_type`. `local_mean_max` difunde primero
+los logits locales escalares y después aplica MAX; es una hipótesis de pooling, no otro encoder
+superficial aprendido.
 
 MAX y attention usan poolings dispersos de LambdaForge; la media ponderada por área usa su reducción
 `Scatter`. Top-k y log-sum-exp compactan solo logits escalares en `X[B,N_max,1]`; una máscara excluye
@@ -2486,9 +2795,11 @@ posterior nunca modifica la función de pérdida ni el objetivo HPO.
 
 ### 5.4. Comparación de encoders superficiales WISDOMv3
 
-WISDOMv3 mantiene fijos el encoder atómico, la transferencia acotada, la capa de salida local, MAX,
-la función de pérdida y las particiones. Solo cambia el encoder superficial mediante `surface_encoder_type`, por lo que las
-diferencias se pueden atribuir a esa hipótesis.
+WISDOMv3 mantiene fijos el encoder atómico con gates, la transferencia acotada, la salida local, el
+**pooling de V2 seleccionado explícitamente**, la pérdida y las particiones. Solo cambia
+`surface_encoder_type`, por lo que las diferencias se atribuyen a la propagación superficial y no a
+cambios simultáneos de supervisión o agregación. El valor de pooling del YAML es un campo de paso:
+debe sustituirse por el ganador validado de V2 antes de ejecutar V3; nunca se infiere en silencio.
 
 | Valor | Idea implementada | Entrada geométrica |
 |---|---|---|
@@ -2543,9 +2854,9 @@ compatibilidad ocultaría un cambio científico.
 
 | Configuración | Responsabilidad |
 |---|---|
-| `wisdom_v1.yaml` | Único HPO de V1: busca conjuntamente entradas genéricas, relaciones, capacidad, transferencia, curvaturas, optimizador y bypass pequeños; MAX permanece fijo. |
-| `wisdom_v2.yaml` | Seis poolings fijos; la carrera adaptativa de semillas cambia el esfuerzo de repetición, pero ninguna otra propiedad del modelo. |
-| `wisdom_v3.yaml` | Cinco encoders superficiales fijos; la carrera adaptativa cambia la repetición mientras transferencia y MAX permanecen fijos. |
+| `wisdom_v1.yaml` | Único HPO de V1: busca capacidad, presupuestos físicos, optimizador y un `gate_lambda`; la presencia de información semántica se aprende dentro de cada candidato. |
+| `wisdom_v2.yaml` | Fija el V1 ganador y compara seis poolings mientras reaprende los gates. |
+| `wisdom_v3.yaml` | Fija V1 y el pooling V2 explícito, y compara cinco encoders mientras reaprende gates. |
 | `wisdom_sparse_concepts.yaml` | Interpreta una sola vez un checkpoint ganador de V1 indicado explícitamente después del HPO. |
 
 Los tres estudios usan el presupuesto ordenado de semillas `[4,7,32,54,65,94,109,124,142,167]`.
@@ -2809,7 +3120,9 @@ evaluation.json
 ```
 
 `best-model.pt` contiene los pesos de mejor validación y los parámetros exactos del modelo.
-`evaluation.json` contiene tamaños de split, épocas completadas y elegida, motivo de parada, AUPRC
+`evaluation.json` también registra los tres modos de V1, longitudes de difusión, anchuras de entrada
+y oculta de evidencia, parámetros totales, parámetros de la cabeza y cuántos añade frente a la
+cabeza lineal. Contiene tamaños de split, épocas completadas y elegida, motivo de parada, AUPRC
 de validación, métricas de proteína de test y métricas superficiales de test solo evaluativas. Sus
 campos de test solo son `null` para un candidato podado por el HPO adaptativo. `BinaryMetricSuite` y
 `SurfaceMetricSuite` conservan métricas matemáticamente indefinidas como `null`; nunca las
@@ -2831,16 +3144,18 @@ La fase sparse plantea una pregunta distinta al entrenamiento: dado el mejor pre
 cambiar mucho sus decisiones? Solo se ejecuta tras acabar el HPO. No forma parte de sus epochs ni
 de sus candidatos y su optimizador no puede modificar WISDOM.
 
-El punto extraído es `h_p∈R^H`, el tensor que devuelve `WisdomV1.encode_surface` justo después de
-DiffusionNet y antes de `local_head`. `p` identifica un punto superficial y `H` es la anchura oculta
-del modelo ganador. El `forward` ordinario no cambia:
+El punto extraído es exactamente la fila que recibe `local_head`. En modo puntual es el embedding
+de DiffusionNet `h_p∈R^D`; en modo multiescala es la fila concatenada `e_p∈R^{3D}` definida en 5.2.
+`p` identifica un punto superficial y `D` es la anchura oculta del modelo ganador. El `forward`
+ordinario no cambia. Así el modelo sparse conserva la representación relevante para la decisión con
+cualquiera de las dos cabezas ganadoras de V1:
 
 ```mermaid
 flowchart LR
     A["HPO V1 terminado"] --> B["best-model.pt ganador revisado"]
     B --> C["WisdomV1 congelado"]
-    C --> D["Embeddings de train/validation"]
-    D --> E["Modelos probe: K probe = H"]
+    C --> D["Entradas de local_head de train/validation"]
+    D --> E["Modelos probe: K probe = anchura de entrada"]
     E --> F["Codo sparsity/fidelity"]
     F --> G["K final estable, vivo y no redundante"]
     G --> H["Nuevo modelo sparse final"]
@@ -2871,7 +3186,8 @@ c_p=\operatorname{ReLU}(W_e\widetilde h_p+b_e),
 \widehat h_p=W_dc_p+b_d.
 ```
 
-`c_p∈R^K` es no negativo. Solo se entrenan `W_e` y `W_d`; la cabeza V1 está congelada. Tras cada
+`c_p∈R^K` es no negativo. Solo se entrenan `W_e` y `W_d`; la cabeza V1 está congelada, ya sea la
+lineal o el MLP multiescala. Tras cada
 actualización, cada columna del decoder se proyecta a norma euclídea uno,
 `||W_{d,:,k}||_2=1`. Sin esta restricción, el decoder podría aumentar su escala mientras el encoder
 reduce las activaciones, aparentando mayor sparsity sin cambiar la reconstrucción.
@@ -2969,7 +3285,8 @@ lf run experiments/wisdom_sparse_concepts.yaml --on citius-ctgpgpu12
 ```
 
 El checkpoint conserva los parámetros del modelo y del collator, por lo que la extracción reproduce
-relaciones, prefijo de curvaturas, `K`, `J` y modos espectrales del ganador. Los tests automatizados
+la definición de gates semánticos, el vocabulario completo de curvaturas, `K`, `J` y modos
+espectrales del ganador. Los tests automatizados
 cubren el recorrido pequeño de integración; no se mantiene otro YAML de V1 que pueda quedar
 desincronizado del experimento real.
 
@@ -3076,6 +3393,9 @@ desincronizado del experimento real.
 37. Kuhn, H. W. (1955). “The Hungarian method for the assignment problem.” *Naval Research
     Logistics Quarterly*, 2(1–2), 83–97.
     [doi:10.1002/nav.3800020109](https://doi.org/10.1002/nav.3800020109).
+38. Louizos, C., Welling, M. & Kingma, D. P. (2018). “Learning Sparse Neural Networks through
+    L0 Regularization.” *ICLR 2018*.
+    [Artículo en OpenReview](https://openreview.net/forum?id=H1Y8hhg0b).
 
 Las implementaciones superficiales de WISDOM se escribieron de forma independiente. Los encoders v3
 prueban versiones compactas de mecanismos motivados por dMaSIF, DeltaConv, PTv3 y PointMamba;

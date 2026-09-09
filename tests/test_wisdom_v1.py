@@ -25,8 +25,22 @@ from wisdom.Training import _create_model, _evaluate, _mcc_objective, _validatio
 MODEL_INPUT_NAMES = (
     "atomic_numbers",
     "residue_type_ids",
+    "atom_role_ids",
+    "atom_hybridization_ids",
+    "formal_charges",
+    "atom_aromaticity",
+    "atom_hbond_donor",
+    "atom_hbond_acceptor",
+    "residue_hydropathy",
+    "residue_polarity",
     "atom_edge_index",
-    "atom_edge_types",
+    "atom_edge_is_spatial",
+    "atom_edge_is_covalent",
+    "atom_edge_distance",
+    "atom_edge_bond_order",
+    "atom_edge_same_residue",
+    "atom_edge_same_chain",
+    "atom_edge_residue_separation",
     "surface_curvatures",
     "surface_atom_neighbors",
     "surface_atom_distances",
@@ -56,6 +70,7 @@ def _sample(atom_count: int, surface_count: int, target: float) -> dict[str, Ten
     ).long()
     atom_edge_is_covalent = torch.arange(atom_count - 1).remainder(2) == 0
     atom_edge_spatial_rank = torch.arange(1, atom_count).remainder(2).add(1).long()
+    atom_edge_distance     = torch.arange(1, atom_count).float()
 
     table_width = 16
     neighbors   = torch.full((surface_count, table_width), -1, dtype=torch.long)
@@ -101,6 +116,11 @@ def _sample(atom_count: int, surface_count: int, target: float) -> dict[str, Ten
         "atom_edge_index": atom_edge_index,
         "atom_edge_is_covalent": atom_edge_is_covalent,
         "atom_edge_spatial_rank": atom_edge_spatial_rank,
+        "atom_edge_distance": atom_edge_distance,
+        "atom_edge_bond_order": atom_edge_is_covalent.float(),
+        "atom_edge_same_residue": torch.ones(atom_count - 1, dtype=torch.bool),
+        "atom_edge_same_chain": torch.ones(atom_count - 1, dtype=torch.bool),
+        "atom_edge_residue_separation": torch.arange(atom_count - 1).float(),
         "surface_curvatures": curvatures,
         "surface_atom_neighbors": neighbors,
         "surface_atom_distances": distances,
@@ -153,110 +173,14 @@ def _model() -> WisdomV1:
     )
 
 
-def test_legacy_defaults_equal_the_explicit_previous_feature_contract() -> None:
-    """The default element-plus-residue path matches the same switches written explicitly."""
-    parameters = {
-        "hidden_dim": 8,
-        "embedding_dim": 4,
-        "atomic_layers": 2,
-        "projection_depth": 1,
-        "surface_layers": 2,
-        "dropout": 0.0,
-        "curvature_features": 6,
-        "atom_spatial_k": 2,
-        "surface_atom_k": 16,
-        "diffusion_spectral_modes": 8,
-    }
-    torch.manual_seed(108)
-    legacy = WisdomV1(**parameters)
-    torch.manual_seed(108)
-    explicit = WisdomV1(
-        **parameters,
-        atom_feature_preset="custom",
-        use_element=True,
-        use_residue_type=True,
-    )
-    batch = dict(WisdomCollator(atom_spatial_k=2)((_sample(3, 2, 1.0),)))
+def test_semantic_gate_superset_has_stable_names_and_fixed_width() -> None:
+    """V1 always constructs the complete physical superset and stable gate registry."""
+    model = _model()
 
-    legacy_output   = legacy(**_model_inputs(batch))
-    explicit_output = explicit(**_model_inputs(batch))
-
-    assert legacy.state_dict().keys() == explicit.state_dict().keys()
-    assert all(
-        torch.equal(legacy.state_dict()[name], explicit.state_dict()[name])
-        for name in legacy.state_dict()
-    )
-    assert torch.equal(legacy_output["logits"], explicit_output["logits"])
-    assert torch.equal(legacy_output["surface_logits"], explicit_output["surface_logits"])
-
-
-@pytest.mark.parametrize(
-    ("preset", "expected_width"),
-    (
-        ("identity", 8),
-        ("identity_residue", 20),
-        ("identity_chemistry", 16),
-        ("identity_structural", 16),
-        ("full_generic", 38),
-        ("constant", 8),
-    ),
-)
-def test_atom_feature_presets_resolve_input_width(
-    preset        : str,
-    expected_width: int,
-) -> None:
-    """Coherent feature families calculate RGCN input width without hard-coded YAML dimensions."""
-    model = WisdomV1(
-        hidden_dim=8,
-        embedding_dim=8,
-        residue_embedding_dim=12,
-        atom_feature_preset=preset,
-        curvature_features=6,
-        surface_layers=0,
-    )
-
-    assert model.atomic_input_width == expected_width
-
-
-@pytest.mark.parametrize(
-    ("mode", "edge_count", "relation_types"),
-    (
-        ("full_relational", 4, {0, 2}),
-        ("unified_relation", 4, {0}),
-        ("spatial_only", 4, {0}),
-        ("covalent_only", 2, {0}),
-    ),
-)
-def test_atomic_relation_modes_preserve_both_edge_semantics(
-    mode          : str,
-    edge_count    : int,
-    relation_types: set[int],
-) -> None:
-    """The covalent-and-spatial edge is retained once before bidirectional expansion."""
-    batch = WisdomCollator(relation_mode=mode)((_sample(3, 2, 1.0),))
-
-    assert batch["atom_edge_index"].shape[1] == edge_count
-    assert set(batch["atom_edge_types"].tolist()) == relation_types
-
-
-def test_structural_bypasses_and_shape_index_are_trainable() -> None:
-    """Zero message depths and derived shape index retain the public forward contract."""
-    batch = dict(WisdomCollator(curvature_scale_count=1)((_sample(3, 2, 1.0),)))
-    model = WisdomV1(
-        hidden_dim=8,
-        embedding_dim=4,
-        atom_feature_preset="constant",
-        atomic_layers=0,
-        projection_depth=1,
-        surface_layers=0,
-        curvature_features=4,
-        use_shape_index=True,
-    )
-
-    output = model(**_model_inputs(batch))
-
-    assert output["logits"].shape == (1,)
-    assert output["surface_logits"].shape == (2,)
+    assert model.atomic_input_width == 4 + 4 + 8 + 4 + 6
+    assert "surface.atom_context" in model.semantic_gates.names
+    assert "atom.residue_type" in model.semantic_gates.names
+    assert "surface.curvature.shape_index.scale_1" in model.semantic_gates.names
 
 
 def _write_npz(path: Path, sample: dict[str, Tensor]) -> None:
@@ -270,8 +194,13 @@ def _write_npz(path: Path, sample: dict[str, Tensor]) -> None:
         "atomic_numbers",
         "residue_type_ids",
         "atom_edge_index",
+        "atom_edge_distance",
         "atom_edge_is_covalent",
         "atom_edge_spatial_rank",
+        "atom_edge_bond_order",
+        "atom_edge_same_residue",
+        "atom_edge_same_chain",
+        "atom_edge_residue_separation",
         "surface_curvatures",
         "surface_area_weights",
         "surface_atom_neighbors",
@@ -305,7 +234,6 @@ def test_training_resolves_model_generations_by_convention() -> None:
     parameters = {
         "hidden_dim":                    16,
         "embedding_dim":                 4,
-        "use_residue_type":              True,
         "atomic_layers":                 1,
         "projection_depth":              1,
         "surface_layers":                1,
@@ -329,7 +257,7 @@ def test_training_resolves_model_generations_by_convention() -> None:
 
     assert isinstance(v1, WisdomV1)
     assert not isinstance(v1, WisdomV2)
-    assert v1.ARCHITECTURE_NAME == "bounded-atomic-diffusionnet"
+    assert v1.ARCHITECTURE_NAME == "semantic-gated-diffusionnet"
     assert v1.STRUCTURAL_SCHEMA_VERSION == WisdomDataset.STRUCTURAL_SCHEMA_VERSION
     assert isinstance(v1.surface_encoder, DiffusionSurfaceEncoder)
     assert "pooling_type" not in v1_parameters
@@ -389,6 +317,32 @@ def test_dataset_accepts_extensionless_managed_npz_assets(tmp_path: Path) -> Non
 
     assert len(dataset) == 1
     assert sample["identifier"] == "10AC_A"
+
+
+@pytest.mark.parametrize("invalid", (-1.0, float("nan")))
+def test_dataset_rejects_nonphysical_atom_edge_distances(
+    tmp_path: Path,
+    invalid : float,
+) -> None:
+    """Dataset ingestion rejects negative or non-finite atomic edge distances once."""
+    sample = _sample(3, 2, 0.0)
+    sample["atom_edge_distance"][0] = invalid
+    _write_npz(tmp_path / "invalid.npz", sample)
+
+    DatasetIndex.write(
+        tmp_path / "index.jsonl",
+        (
+            DatasetMember(
+                member_id="INVALID_A",
+                partitions={"split": "train", "tier": "core"},
+                targets={"dna_binding": 0},
+                assets={"universal_npz": DatasetAsset(path="invalid.npz")},
+            ),
+        ),
+    )
+
+    with pytest.raises(ValueError, match="finite, non-negative"):
+        WisdomDataset(tmp_path, "train")[0]
     assert sample["target"].item() == 0.0
 
 
@@ -573,8 +527,9 @@ def test_collator_activates_nested_topology_and_offsets_atom_tables() -> None:
     batch  = WisdomCollator(atom_spatial_k=1)((first, second))
 
     assert batch["atom_edge_index"].shape == (2, 4)
-    assert torch.equal(batch["atom_edge_types"], torch.ones(4, dtype=torch.long))
-    assert set(batch["atom_edge_types"].tolist()) <= {0, 1, 2}
+    assert torch.equal(batch["atom_edge_is_covalent"], torch.ones(4, dtype=torch.bool))
+    assert torch.equal(batch["atom_edge_distance"], torch.tensor([1.0, 1.0, 1.0, 1.0]))
+    assert not batch["atom_edge_is_spatial"][:2].any()
     assert torch.equal(batch["atom_batch"], torch.tensor([0, 0, 0, 1, 1]))
     assert torch.equal(batch["surface_batch"], torch.tensor([0, 0, 1, 1, 1]))
     assert torch.equal(batch["surface_ptr"], torch.tensor([0, 2, 5]))

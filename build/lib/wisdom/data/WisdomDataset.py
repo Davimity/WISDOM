@@ -290,8 +290,13 @@ class WisdomDataset(Dataset[Mapping[str, Tensor | str]]):
             "atomic_numbers",
             "residue_type_ids",
             "atom_edge_index",
+            "atom_edge_distance",
             "atom_edge_is_covalent",
             "atom_edge_spatial_rank",
+            "atom_edge_bond_order",
+            "atom_edge_same_residue",
+            "atom_edge_same_chain",
+            "atom_edge_residue_separation",
             "surface_curvatures",
             "surface_area_weights",
             "surface_atom_neighbors",
@@ -330,13 +335,11 @@ class WisdomDataset(Dataset[Mapping[str, Tensor | str]]):
             # field and therefore support the complete physicochemical feature study.
 
             atom_count = len(values["atomic_numbers"])
-            edge_count = values["atom_edge_index"].shape[1]
             optional_defaults = {
                 "atom_role_ids":       np.zeros(atom_count, dtype=np.int8),
                 "formal_charges":      np.zeros(atom_count, dtype=np.int8),
                 "atom_names":          np.full(atom_count, "", dtype="U4"),
                 "residue_names":       np.full(atom_count, "UNK", dtype="U4"),
-                "atom_edge_bond_order": np.zeros(edge_count, dtype=np.float32),
             }
             for name, default in optional_defaults.items():
                 values[name] = archive[name] if name in archive.files else default
@@ -385,6 +388,7 @@ class WisdomDataset(Dataset[Mapping[str, Tensor | str]]):
         # Bounded atomic candidates remain inactive until the collator applies the requested K.
 
         atom_edges    = values["atom_edge_index"]
+        edge_distance = values["atom_edge_distance"]
         is_covalent   = values["atom_edge_is_covalent"]
         spatial_rank  = values["atom_edge_spatial_rank"]
         if atom_edges.ndim != 2 or atom_edges.shape[0] != 2 or atom_edges.dtype.kind not in "iu":
@@ -393,6 +397,43 @@ class WisdomDataset(Dataset[Mapping[str, Tensor | str]]):
             raise ValueError("atom_edge_is_covalent must be Boolean with shape [E]")
         if spatial_rank.shape != (atom_edges.shape[1],) or spatial_rank.dtype.kind not in "iu":
             raise ValueError("atom_edge_spatial_rank must be integer with shape [E]")
+        if (
+            edge_distance.shape != (atom_edges.shape[1],)
+            or not np.isfinite(edge_distance).all()
+            or np.any(edge_distance < 0.0)
+        ):
+            raise ValueError("atom_edge_distance must be finite, non-negative, and have shape [E]")
+
+        edge_count = atom_edges.shape[1]
+        bond_order = values["atom_edge_bond_order"]
+        if (
+            bond_order.shape != (edge_count,)
+            or not np.isfinite(bond_order).all()
+            or np.any(bond_order < 0.0)
+        ):
+            raise ValueError(
+                "atom_edge_bond_order must be finite, non-negative, and have shape [E]"
+            )
+
+        for name in ("atom_edge_same_residue", "atom_edge_same_chain"):
+            flags = values[name]
+            if (
+                flags.shape != (edge_count,)
+                or flags.dtype.kind not in "bui"
+                or np.any((flags != 0) & (flags != 1))
+            ):
+                raise ValueError(f"{name} must contain binary values with shape [E]")
+
+        residue_separation = values["atom_edge_residue_separation"]
+        if (
+            residue_separation.shape != (edge_count,)
+            or not np.isfinite(residue_separation).all()
+            or np.any(residue_separation < 0.0)
+        ):
+            raise ValueError(
+                "atom_edge_residue_separation must be finite, non-negative, and have shape [E]"
+            )
+
         neighbor_shape = values["surface_atom_neighbors"].shape
         if len(neighbor_shape) != 2 or neighbor_shape[0] != surface_count:
             raise ValueError("surface_atom_neighbors must have shape [M,Jmax]")
@@ -461,8 +502,23 @@ class WisdomDataset(Dataset[Mapping[str, Tensor | str]]):
             "residue_hydropathy": torch.from_numpy(descriptors["residue_hydropathy"]),
             "residue_polarity": torch.from_numpy(descriptors["residue_polarity"]),
             "atom_edge_index": torch.from_numpy(atom_edges.astype(np.int64, copy=False)),
+            "atom_edge_distance": torch.from_numpy(
+                edge_distance.astype(np.float32, copy=False)
+            ),
             "atom_edge_is_covalent": torch.from_numpy(is_covalent.astype(np.bool_, copy=False)),
             "atom_edge_spatial_rank": torch.from_numpy(spatial_rank.astype(np.int64, copy=False)),
+            "atom_edge_bond_order": torch.from_numpy(
+                values["atom_edge_bond_order"].astype(np.float32, copy=False)
+            ),
+            "atom_edge_same_residue": torch.from_numpy(
+                values["atom_edge_same_residue"].astype(np.bool_, copy=False)
+            ),
+            "atom_edge_same_chain": torch.from_numpy(
+                values["atom_edge_same_chain"].astype(np.bool_, copy=False)
+            ),
+            "atom_edge_residue_separation": torch.from_numpy(
+                values["atom_edge_residue_separation"].astype(np.float32, copy=False)
+            ),
             "surface_curvatures": torch.from_numpy(curvatures.astype(np.float32, copy=False)),
             "surface_atom_neighbors": torch.from_numpy(atom_neighbors.astype(np.int64, copy=False)),
             "surface_atom_distances": torch.from_numpy(

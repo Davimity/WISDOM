@@ -7,13 +7,11 @@ with:                                                # Fixed scientific and oper
     dataset: wisdom-dna-reduced@6                    # Reduced schema-3 operators used by v1 and v2.
   model_version: 3                                  # Select the controlled surface-encoder generation.
   subset: full                                      # Use every train member already retained in this release.
-  pooling_type: max                                 # Hold weak protein aggregation constant.
+  pooling_type: max                                 # Explicit selected V2 pooling; replace with the V2 winner.
 
   hidden_dim: 128                                   # Fixed scalar atom/surface latent width.
   embedding_dim: 32                                 # Fixed element/residue embedding width.
-  residue_embedding_dim: 32                         # Independent residue width, fixed to legacy value.
-  atom_feature_preset: legacy                       # Preserve pre-expansion element/residue inputs.
-  use_residue_type: true                            # Fixed reviewed atomic feature set.
+  residue_embedding_dim: 32                         # Fixed winning V1 residue embedding width.
   atomic_layers: 2                                  # Fixed relation-aware atomic depth.
   projection_depth: 1                              # Fixed atom/curvature fusion depth.
   surface_layers: 2                                 # Equal block depth for every surface backend.
@@ -21,18 +19,12 @@ with:                                                # Fixed scientific and oper
   atom_spatial_k: 16                                # Equal bounded atomic spatial topology.
   surface_atom_k: 16                                # Equal bounded atom-to-surface transfer.
   diffusion_spectral_modes: 128                     # Equal operator budget; used directly by controls.
-  relation_mode: full_relational                    # Preserve spatial/covalent/both relation IDs.
-  transfer_geometry: full                           # Preserve distance/normal/tangent transfer.
-  surface_feature_mode: chemistry_geometry          # Preserve chemistry plus multiscale geometry.
-  curvature_scale_count: 0                          # Use every persisted curvature scale.
-  use_mean_curvature: true                          # Include mean curvature.
-  use_gaussian_curvature: true                      # Include Gaussian curvature.
-  use_curvedness: true                              # Include curvedness.
-  use_shape_index: false                            # Preserve the former descriptor set.
+  atomic_edge_distance_scale: 6.0                   # Fixed winning V1 edge-distance scale in Å.
   surface_atom_radius: 6.0                          # Transfer geometry normalization cutoff in Å.
   surface_chunk_size: 8192                          # Bounded atom-transfer activation chunk.
   atomic_message_chunk_size: 65536                  # Bounded LambdaForge RGCN message chunk.
   surface_patch_size: 64                            # Maximum compact PTv3 attention window.
+  gate_lambda: 0.001                                # Fixed V1 L0 pressure; gates relearn for each encoder.
 
   batch_size: 2                                     # Variable-size proteins per optimization step.
   epochs: 500                                       # Safety ceiling; validation patience stops plateaus.
@@ -45,10 +37,11 @@ with:                                                # Fixed scientific and oper
   data_workers: 4                                   # Overlap NPZ decoding with accelerator execution.
 
 # Training.run option reference:
-# model_version=1, subset="full", hidden_dim=128, embedding_dim=32, use_residue_type=true,
+# model_version=1, subset="full", hidden_dim=128, embedding_dim=32,
 # atomic_layers=2, projection_depth=1, surface_layers=2, dropout=.2, atom_spatial_k=16,
 # surface_atom_k=16, diffusion_spectral_modes=128, surface_atom_radius=6.0,
-# surface_chunk_size=8192, atomic_message_chunk_size=65536, surface_encoder_type="diffusion",
+# surface_chunk_size=8192, atomic_message_chunk_size=65536,
+# atomic_edge_distance_scale=6.0, gate_lambda=0.001, surface_encoder_type="diffusion",
 # surface_patch_size=64, pooling_type="max", batch_size=2, epochs=100, patience=30,
 # minimum_delta=.001, precision="auto", surface_metrics=true, surface_metrics_interval=0,
 # evaluate_test=true, and

@@ -17,8 +17,6 @@ class WisdomCollator:
         atom_spatial_k          : int = 16,
         surface_atom_k          : int = 16,
         diffusion_spectral_modes: int = 128,
-        relation_mode           : str = "full_relational",
-        curvature_scale_count   : int = 0,
     ) -> None:
         """Set runtime topology budgets without changing persisted scientific geometry.
 
@@ -26,30 +24,14 @@ class WisdomCollator:
             atom_spatial_k: Active per-atom spatial rank ``K``; covalent edges always remain.
             surface_atom_k: Prefix width ``J`` selected from every compact atom-neighbor row.
             diffusion_spectral_modes: Maximum low-frequency modes selected per protein.
-            relation_mode: ``full_relational``, ``unified_relation``, ``spatial_only``, or
-                ``covalent_only``; this changes edge information, not message computation.
-            curvature_scale_count: Number of smallest persisted scales to retain. Zero keeps all.
-
         Raises:
             ValueError: If any runtime budget is not positive.
         """
         if atom_spatial_k < 1 or surface_atom_k < 1 or diffusion_spectral_modes < 1:
             raise ValueError("collator K, J, and spectral-mode budgets must be positive")
-        if relation_mode not in {
-            "full_relational",
-            "unified_relation",
-            "spatial_only",
-            "covalent_only",
-        }:
-            raise ValueError("unsupported atomic relation mode")
-        if curvature_scale_count < 0:
-            raise ValueError("curvature_scale_count cannot be negative")
-
         self.atom_spatial_k           = atom_spatial_k
         self.surface_atom_k           = surface_atom_k
         self.diffusion_spectral_modes = diffusion_spectral_modes
-        self.relation_mode            = relation_mode
-        self.curvature_scale_count    = curvature_scale_count
 
     def __call__(
         self,
@@ -91,7 +73,13 @@ class WisdomCollator:
                 "residue_hydropathy",
                 "residue_polarity",
                 "atom_edge_index",
-                "atom_edge_types",
+                "atom_edge_is_spatial",
+                "atom_edge_is_covalent",
+                "atom_edge_distance",
+                "atom_edge_bond_order",
+                "atom_edge_same_residue",
+                "atom_edge_same_chain",
+                "atom_edge_residue_separation",
                 "atom_batch",
                 "surface_curvatures",
                 "surface_atom_neighbors",
@@ -164,35 +152,33 @@ class WisdomCollator:
                 torch.full((atom_count,), batch_index, dtype=torch.long)
             )
 
-            # Select one nested atomic topology and derive the closed relation IDs at runtime.
+            # Activate the nested spatial budget while retaining every covalent pair. The two
+            # membership masks remain separate so one physical pair may feed both model branches.
 
             stored_edges = self._tensor(sample, "atom_edge_index")
+            distances    = self._tensor(sample, "atom_edge_distance")
             covalent     = self._tensor(sample, "atom_edge_is_covalent").bool()
             ranks        = self._tensor(sample, "atom_edge_spatial_rank")
             spatial     = (ranks > 0) & (ranks <= self.atom_spatial_k)
-
-            if self.relation_mode == "spatial_only":
-                active = spatial
-            elif self.relation_mode == "covalent_only":
-                active = covalent
-            else:
-                active = covalent | spatial
+            active      = covalent | spatial
 
             active_edges = stored_edges[:, active] + atom_offset
-            if self.relation_mode == "full_relational":
-                active_types = torch.where(
-                    covalent[active] & spatial[active],
-                    torch.full_like(ranks[active], 2),
-                    torch.where(
-                        covalent[active],
-                        torch.ones_like(ranks[active]),
-                        ranks[active] * 0,
-                    ),
-                ).long()
-            else:
-                active_types = torch.zeros_like(ranks[active], dtype=torch.long)
             values["atom_edge_index"].extend((active_edges, active_edges.flip(0)))
-            values["atom_edge_types"].extend((active_types, active_types))
+            for name, feature in (
+                ("atom_edge_is_spatial", spatial),
+                ("atom_edge_is_covalent", covalent),
+                ("atom_edge_bond_order", self._tensor(sample, "atom_edge_bond_order")),
+                ("atom_edge_same_residue", self._tensor(sample, "atom_edge_same_residue")),
+                ("atom_edge_same_chain", self._tensor(sample, "atom_edge_same_chain")),
+                (
+                    "atom_edge_residue_separation",
+                    self._tensor(sample, "atom_edge_residue_separation"),
+                ),
+            ):
+                selected = feature[active]
+                values[name].extend((selected, selected))
+            active_distances = distances[active].to(torch.float32)
+            values["atom_edge_distance"].extend((active_distances, active_distances))
 
             # Slice the compact transfer table; invalid sentinels remain -1 after offsetting.
 
@@ -207,12 +193,6 @@ class WisdomCollator:
             neighbors[atom_mask] += atom_offset
 
             curvatures = self._tensor(sample, "surface_curvatures")
-            if self.curvature_scale_count:
-                if self.curvature_scale_count > curvatures.shape[1]:
-                    raise ValueError(
-                        "curvature_scale_count exceeds the persisted curvature-scale count"
-                    )
-                curvatures = curvatures[:, : self.curvature_scale_count]
             values["surface_curvatures"].append(curvatures)
             values["surface_atom_neighbors"].append(neighbors)
             values["surface_atom_distances"].append(
@@ -301,7 +281,15 @@ class WisdomCollator:
         batch.update(
             {
                 "atom_edge_index": torch.cat(values["atom_edge_index"], dim=1),
-                "atom_edge_types": torch.cat(values["atom_edge_types"]),
+                "atom_edge_is_spatial": torch.cat(values["atom_edge_is_spatial"]).bool(),
+                "atom_edge_is_covalent": torch.cat(values["atom_edge_is_covalent"]).bool(),
+                "atom_edge_distance": torch.cat(values["atom_edge_distance"]),
+                "atom_edge_bond_order": torch.cat(values["atom_edge_bond_order"]).float(),
+                "atom_edge_same_residue": torch.cat(values["atom_edge_same_residue"]).bool(),
+                "atom_edge_same_chain": torch.cat(values["atom_edge_same_chain"]).bool(),
+                "atom_edge_residue_separation": torch.cat(
+                    values["atom_edge_residue_separation"]
+                ).float(),
                 "surface_ptr": torch.tensor(surface_ptr, dtype=torch.long),
                 "surface_operators": operators,
                 "target": torch.stack(values["target"]),

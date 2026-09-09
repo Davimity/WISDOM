@@ -37,7 +37,13 @@ _MODEL_INPUT_NAMES = (
     "residue_hydropathy",
     "residue_polarity",
     "atom_edge_index",
-    "atom_edge_types",
+    "atom_edge_is_spatial",
+    "atom_edge_is_covalent",
+    "atom_edge_distance",
+    "atom_edge_bond_order",
+    "atom_edge_same_residue",
+    "atom_edge_same_chain",
+    "atom_edge_residue_separation",
     "surface_curvatures",
     "surface_atom_neighbors",
     "surface_atom_distances",
@@ -69,17 +75,6 @@ class Training(lf.Work):
         hidden_dim           : int = 128,
         embedding_dim        : int = 32,
         residue_embedding_dim: int | None = None,
-        use_residue_type     : bool = True,
-        atom_feature_preset  : str = "legacy",
-        use_element          : bool = True,
-        use_formal_charge    : bool = False,
-        use_aromaticity      : bool = False,
-        use_hbond_donor      : bool = False,
-        use_hbond_acceptor   : bool = False,
-        use_hybridization    : bool = False,
-        use_atom_role        : bool = False,
-        use_residue_hydropathy: bool = False,
-        use_residue_polarity : bool = False,
         atomic_layers        : int = 2,
         projection_depth     : int = 1,
         surface_layers       : int = 2,
@@ -89,14 +84,7 @@ class Training(lf.Work):
         surface_atom_radius  : float = 6.0,
         surface_chunk_size   : int = 8192,
         atomic_message_chunk_size: int = 65536,
-        relation_mode        : str = "full_relational",
-        transfer_geometry    : str = "full",
-        surface_feature_mode : str = "chemistry_geometry",
-        curvature_scale_count: int = 0,
-        use_mean_curvature   : bool = True,
-        use_gaussian_curvature: bool = True,
-        use_curvedness       : bool = True,
-        use_shape_index      : bool = False,
+        atomic_edge_distance_scale: float = 6.0,
         dropout              : float = 0.2,
         surface_encoder_type : str = "diffusion",
         surface_patch_size   : int = 64,
@@ -107,6 +95,7 @@ class Training(lf.Work):
         log_sum_exp_beta     : float = 5.0,
         learning_rate        : float = 3.0e-4,
         weight_decay         : float = 1.0e-4,
+        gate_lambda          : float = 1.0e-3,
         batch_size           : int = 2,
         epochs               : int = 100,
         patience             : int = 30,
@@ -131,17 +120,6 @@ class Training(lf.Work):
             embedding_dim: Element and optional residue embedding width.
             residue_embedding_dim: Independent residue embedding width; ``None`` reuses
                 ``embedding_dim`` for backward compatibility.
-            use_residue_type: Include learned residue category features when true.
-            atom_feature_preset: Named generic atom-feature bundle or ``custom``.
-            use_element: Include element identity for a custom/legacy feature configuration.
-            use_formal_charge: Include source formal charge in elementary-charge units.
-            use_aromaticity: Include conservative aromaticity.
-            use_hbond_donor: Include conservative hydrogen-bond donor identity.
-            use_hbond_acceptor: Include conservative hydrogen-bond acceptor identity.
-            use_hybridization: Include graph-derived hybridization category.
-            use_atom_role: Include structural atom role.
-            use_residue_hydropathy: Include normalized residue hydropathy.
-            use_residue_polarity: Include coarse residue polarity.
             atomic_layers: Relation-aware atomic graph layer count.
             projection_depth: Atom-context/curvature projection MLP depth.
             surface_layers: Surface-encoder block count.
@@ -151,14 +129,7 @@ class Training(lf.Work):
             surface_atom_radius: Physical transfer cutoff used for feature normalization.
             surface_chunk_size: Maximum surface points in one atom-transfer chunk.
             atomic_message_chunk_size: Maximum atomic messages materialized per RGCN chunk.
-            relation_mode: Full, unified, spatial-only, or covalent-only graph information.
-            transfer_geometry: Distance-only or full invariant atom-to-surface geometry.
-            surface_feature_mode: Chemistry-only, geometry-only, or combined surface input.
-            curvature_scale_count: Number of smallest persisted scales; zero retains all.
-            use_mean_curvature: Include mean curvature.
-            use_gaussian_curvature: Include Gaussian curvature.
-            use_curvedness: Include curvedness.
-            use_shape_index: Include derived shape index.
+            atomic_edge_distance_scale: Atomic distance normalization scale in ångströms.
             dropout: Dropout probability in ``[0,1)``.
             surface_encoder_type: V3 surface-propagation hypothesis; v1 requires ``diffusion``.
             surface_patch_size: V3 serialized-attention patch bound.
@@ -169,6 +140,7 @@ class Training(lf.Work):
             log_sum_exp_beta: V2 normalized log-sum-exp inverse temperature.
             learning_rate: Positive AdamW learning rate.
             weight_decay: Non-negative AdamW decoupled weight decay.
+            gate_lambda: Non-negative multiplier for normalized expected L0 gate cost.
             batch_size: Positive number of disjoint protein graphs per optimizer step.
             epochs: Positive maximum training epoch count.
             patience: Validation epochs without a meaningful composite-utility improvement before
@@ -203,17 +175,6 @@ class Training(lf.Work):
             hidden_dim=hidden_dim,
             embedding_dim=embedding_dim,
             residue_embedding_dim=residue_embedding_dim,
-            use_residue_type=use_residue_type,
-            atom_feature_preset=atom_feature_preset,
-            use_element=use_element,
-            use_formal_charge=use_formal_charge,
-            use_aromaticity=use_aromaticity,
-            use_hbond_donor=use_hbond_donor,
-            use_hbond_acceptor=use_hbond_acceptor,
-            use_hybridization=use_hybridization,
-            use_atom_role=use_atom_role,
-            use_residue_hydropathy=use_residue_hydropathy,
-            use_residue_polarity=use_residue_polarity,
             atomic_layers=atomic_layers,
             projection_depth=projection_depth,
             surface_layers=surface_layers,
@@ -223,14 +184,7 @@ class Training(lf.Work):
             surface_atom_radius=surface_atom_radius,
             surface_chunk_size=surface_chunk_size,
             atomic_message_chunk_size=atomic_message_chunk_size,
-            relation_mode=relation_mode,
-            transfer_geometry=transfer_geometry,
-            surface_feature_mode=surface_feature_mode,
-            curvature_scale_count=curvature_scale_count,
-            use_mean_curvature=use_mean_curvature,
-            use_gaussian_curvature=use_gaussian_curvature,
-            use_curvedness=use_curvedness,
-            use_shape_index=use_shape_index,
+            atomic_edge_distance_scale=atomic_edge_distance_scale,
             dropout=dropout,
             surface_encoder_type=surface_encoder_type,
             surface_patch_size=surface_patch_size,
@@ -241,6 +195,7 @@ class Training(lf.Work):
             log_sum_exp_beta=log_sum_exp_beta,
             learning_rate=learning_rate,
             weight_decay=weight_decay,
+            gate_lambda=gate_lambda,
             batch_size=batch_size,
             epochs=epochs,
             patience=patience,
@@ -262,17 +217,6 @@ def _train_wisdom(
     hidden_dim           : int = 128,
     embedding_dim        : int = 32,
     residue_embedding_dim: int | None = None,
-    use_residue_type     : bool = True,
-    atom_feature_preset  : str = "legacy",
-    use_element          : bool = True,
-    use_formal_charge    : bool = False,
-    use_aromaticity      : bool = False,
-    use_hbond_donor      : bool = False,
-    use_hbond_acceptor   : bool = False,
-    use_hybridization    : bool = False,
-    use_atom_role        : bool = False,
-    use_residue_hydropathy: bool = False,
-    use_residue_polarity : bool = False,
     atomic_layers        : int = 2,
     projection_depth     : int = 1,
     surface_layers       : int = 2,
@@ -282,14 +226,7 @@ def _train_wisdom(
     surface_atom_radius  : float = 6.0,
     surface_chunk_size   : int = 8192,
     atomic_message_chunk_size: int = 65536,
-    relation_mode        : str = "full_relational",
-    transfer_geometry    : str = "full",
-    surface_feature_mode : str = "chemistry_geometry",
-    curvature_scale_count: int = 0,
-    use_mean_curvature   : bool = True,
-    use_gaussian_curvature: bool = True,
-    use_curvedness       : bool = True,
-    use_shape_index      : bool = False,
+    atomic_edge_distance_scale: float = 6.0,
     dropout              : float = 0.2,
     surface_encoder_type : str = "diffusion",
     surface_patch_size   : int = 64,
@@ -300,6 +237,7 @@ def _train_wisdom(
     log_sum_exp_beta     : float = 5.0,
     learning_rate        : float = 3.0e-4,
     weight_decay         : float = 1.0e-4,
+    gate_lambda          : float = 1.0e-3,
     batch_size           : int = 2,
     epochs               : int = 100,
     patience             : int = 30,
@@ -325,17 +263,6 @@ def _train_wisdom(
         embedding_dim: Element and optional residue embedding width.
         residue_embedding_dim: Independent residue embedding width or ``None`` for the legacy
             shared width.
-        use_residue_type: Include learned residue category features when true.
-        atom_feature_preset: Named atom-feature bundle or ``custom``.
-        use_element: Include element identity in a custom configuration.
-        use_formal_charge: Include source formal charge in elementary-charge units.
-        use_aromaticity: Include aromaticity.
-        use_hbond_donor: Include donor identity.
-        use_hbond_acceptor: Include acceptor identity.
-        use_hybridization: Include hybridization identity.
-        use_atom_role: Include structural atom role.
-        use_residue_hydropathy: Include normalized residue hydropathy.
-        use_residue_polarity: Include coarse residue polarity.
         atomic_layers: Relation-aware atomic graph layer count.
         projection_depth: Atom-context/curvature projection MLP depth.
         surface_layers: Surface-encoder block count.
@@ -345,14 +272,7 @@ def _train_wisdom(
         surface_atom_radius: Transfer geometry normalization radius in Å.
         surface_chunk_size: Maximum transfer points per activation chunk.
         atomic_message_chunk_size: Maximum RGCN messages per chunk.
-        relation_mode: Atomic relation information retained by the collator.
-        transfer_geometry: Geometry received by atom-to-surface attention.
-        surface_feature_mode: Chemistry/geometry surface input choice.
-        curvature_scale_count: Number of smallest persisted curvature scales; zero means all.
-        use_mean_curvature: Include mean curvature.
-        use_gaussian_curvature: Include Gaussian curvature.
-        use_curvedness: Include curvedness.
-        use_shape_index: Include shape index.
+        atomic_edge_distance_scale: Atomic distance normalization scale in ångströms.
         dropout: Dropout probability in ``[0,1)``.
         surface_encoder_type: V3 controlled surface encoder name.
         surface_patch_size: V3 serialized-attention patch bound.
@@ -363,6 +283,7 @@ def _train_wisdom(
         log_sum_exp_beta: V2 normalized log-sum-exp inverse temperature.
         learning_rate: Positive AdamW learning rate.
         weight_decay: Non-negative AdamW decoupled weight decay.
+        gate_lambda: Non-negative multiplier for the normalized expected L0 gate cost.
         batch_size: Positive number of disjoint protein graphs per optimizer step.
         epochs: Positive maximum training epoch count.
         patience: Validation epochs without a meaningful composite-utility improvement before
@@ -396,8 +317,8 @@ def _train_wisdom(
         raise ValueError("WISDOM v1 fixes pooling_type='max'")
     if model_version == 1 and surface_encoder_type != "diffusion":
         raise ValueError("WISDOM v1 fixes surface_encoder_type='diffusion'")
-    if learning_rate <= 0.0 or weight_decay < 0.0:
-        raise ValueError("optimizer learning rate must be positive and weight decay non-negative")
+    if learning_rate <= 0.0 or weight_decay < 0.0 or gate_lambda < 0.0:
+        raise ValueError("optimizer rate, weight decay, or gate regularization is invalid")
     if batch_size < 1 or epochs < 1 or data_workers < 0:
         raise ValueError("batch size/epochs must be positive and data workers non-negative")
     if (
@@ -483,8 +404,6 @@ def _train_wisdom(
         atom_spatial_k=atom_spatial_k,
         surface_atom_k=surface_atom_k,
         diffusion_spectral_modes=diffusion_spectral_modes,
-        relation_mode=relation_mode,
-        curvature_scale_count=curvature_scale_count,
     )
     loaders: dict[str, DataLoader[Any]] = {}
     evaluation_workers = max(1, data_workers // 2) if data_workers else 0
@@ -532,20 +451,7 @@ def _train_wisdom(
                 f"{tuple(curvature.shape)}"
             )
 
-        selected_scale_count = (
-            curvature.shape[1]
-            if curvature_scale_count == 0
-            else min(curvature_scale_count, curvature.shape[1])
-        )
-        descriptor_count = sum(
-            (
-                use_mean_curvature,
-                use_gaussian_curvature,
-                use_curvedness,
-                use_shape_index,
-            )
-        )
-        curvature_widths[split] = int(selected_scale_count * descriptor_count)
+        curvature_widths[split] = int(curvature.shape[1] * 3)
 
     if len(set(curvature_widths.values())) != 1:
         raise ValueError(f"dataset splits disagree on curvature feature width: {curvature_widths}")
@@ -556,17 +462,6 @@ def _train_wisdom(
         "hidden_dim":           hidden_dim,
         "embedding_dim":        embedding_dim,
         "residue_embedding_dim": residue_embedding_dim,
-        "use_residue_type":     use_residue_type,
-        "atom_feature_preset":  atom_feature_preset,
-        "use_element":          use_element,
-        "use_formal_charge":    use_formal_charge,
-        "use_aromaticity":      use_aromaticity,
-        "use_hbond_donor":      use_hbond_donor,
-        "use_hbond_acceptor":   use_hbond_acceptor,
-        "use_hybridization":    use_hybridization,
-        "use_atom_role":        use_atom_role,
-        "use_residue_hydropathy": use_residue_hydropathy,
-        "use_residue_polarity": use_residue_polarity,
         "atomic_layers":        atomic_layers,
         "projection_depth":     projection_depth,
         "surface_layers":       surface_layers,
@@ -576,12 +471,7 @@ def _train_wisdom(
         "surface_atom_radius":  surface_atom_radius,
         "surface_chunk_size":   surface_chunk_size,
         "atomic_message_chunk_size": atomic_message_chunk_size,
-        "transfer_geometry":    transfer_geometry,
-        "surface_feature_mode": surface_feature_mode,
-        "use_mean_curvature":   use_mean_curvature,
-        "use_gaussian_curvature": use_gaussian_curvature,
-        "use_curvedness":       use_curvedness,
-        "use_shape_index":      use_shape_index,
+        "atomic_edge_distance_scale": atomic_edge_distance_scale,
         "dropout":              dropout,
         "surface_encoder_type": surface_encoder_type,
         "surface_patch_size":   surface_patch_size,
@@ -595,10 +485,17 @@ def _train_wisdom(
     model, model_parameters = _create_model(model_version, available_parameters)
     architecture_name       = str(getattr(model, "ARCHITECTURE_NAME", type(model).__name__))
     model.to(device)
+    gate_parameters = tuple(model.semantic_gates.parameters())
+    gate_ids        = {id(parameter) for parameter in gate_parameters}
+    model_parameters_without_gates = tuple(
+        parameter for parameter in model.parameters() if id(parameter) not in gate_ids
+    )
     optimizer = torch.optim.AdamW(
-        model.parameters(),
+        (
+            {"params": model_parameters_without_gates, "weight_decay": weight_decay},
+            {"params": gate_parameters, "weight_decay": 0.0},
+        ),
         lr=learning_rate,
-        weight_decay=weight_decay,
     )
 
     split_sizes = {split: len(split_dataset) for split, split_dataset in datasets.items()}
@@ -609,13 +506,27 @@ def _train_wisdom(
     preprocessing_bytes = sum(values["total"] for values in split_storage.values())
 
     parameter_count = sum(parameter.numel() for parameter in model.parameters())
+    gate_parameter_count = sum(parameter.numel() for parameter in gate_parameters)
     parameter_bytes = sum(
         parameter.numel() * parameter.element_size()
         for parameter in model.parameters()
     )
     parameter_mib   = parameter_bytes / 2**20
 
+    evidence_parameter_count = int(
+        getattr(model, "evidence_head_parameter_count", 0)
+    )
+    evidence_added_parameters = int(
+        getattr(model, "evidence_head_added_parameter_count", 0)
+    )
+    evidence_input_width = int(getattr(model, "evidence_input_width", hidden_dim))
+
     work.metrics.log("parameter_count", float(parameter_count))
+    work.metrics.log("gate_parameter_count", float(gate_parameter_count))
+    work.metrics.log("semantic_gate_count", float(len(model.semantic_gates.names)))
+    work.metrics.log("evidence_head_parameter_count", float(evidence_parameter_count))
+    work.metrics.log("evidence_head_added_parameter_count", float(evidence_added_parameters))
+    work.metrics.log("evidence_input_width", float(evidence_input_width))
     work.metrics.log("preprocessing_bytes", float(preprocessing_bytes))
 
     if not surface_metrics:
@@ -628,8 +539,11 @@ def _train_wisdom(
     work.log(
         f"[Training {run_label}] starting on {device.type}; splits={split_sizes}; "
         f"architecture={architecture_name}; curvature_features={curvature_features}; "
-        f"atom_features={getattr(model, 'atom_features', {})}; relation_mode={relation_mode}; "
-        f"surface_features={surface_feature_mode}; transfer_geometry={transfer_geometry}; "
+        f"atomic_edge_distance_scale={atomic_edge_distance_scale:g}A; "
+        f"semantic_gates={len(model.semantic_gates.names)}; gate_lambda={gate_lambda:g}; "
+        f"evidence_input_width={evidence_input_width}; "
+        f"evidence_head_parameters={evidence_parameter_count:,} "
+        f"(added={evidence_added_parameters:,}); "
         f"batch_size={batch_size}; "
         f"data_workers=train:{data_workers}/eval:{evaluation_workers}; "
         f"precision={effective_precision}; "
@@ -672,7 +586,9 @@ def _train_wisdom(
             torch.cuda.reset_peak_memory_stats(device)
 
         model.train()
-        loss_sum               = torch.zeros((), device=device)
+        task_loss_sum          = torch.zeros((), device=device)
+        gate_regularization_sum = torch.zeros((), device=device)
+        total_loss_sum         = torch.zeros((), device=device)
         examples               = 0
         data_wait_seconds      = 0.0
         previous_batch_finished = time.perf_counter()
@@ -709,24 +625,28 @@ def _train_wisdom(
             ):
                 output = model(**_model_inputs(tensors))
                 target = _tensor(tensors, "target")
-                loss   = F.binary_cross_entropy_with_logits(output["logits"], target)
+                task_loss           = F.binary_cross_entropy_with_logits(output["logits"], target)
+                gate_regularization = model.gate_regularization()
+                total_loss          = task_loss + gate_lambda * gate_regularization
 
             if scaler.is_enabled():
-                scaler.scale(loss).backward()  # type: ignore[no-untyped-call]
+                scaler.scale(total_loss).backward()  # type: ignore[no-untyped-call]
                 scaler.step(optimizer)
                 scaler.update()
             else:
-                loss.backward()  # type: ignore[no-untyped-call]
+                total_loss.backward()  # type: ignore[no-untyped-call]
                 optimizer.step()
 
-            count     = len(target)
-            loss_sum += loss.detach() * count
+            count                    = len(target)
+            task_loss_sum           += task_loss.detach() * count
+            gate_regularization_sum += gate_regularization.detach() * count
+            total_loss_sum          += total_loss.detach() * count
             examples += count
 
             # The model returns point-level diagnostics in addition to protein logits. Explicitly
             # release the completed batch so it cannot overlap the next batch or validation pass.
 
-            del tensors, output, target, loss
+            del tensors, output, target, task_loss, gate_regularization, total_loss
             previous_batch_finished = time.perf_counter()
 
         optimizer.zero_grad(set_to_none=True)
@@ -736,7 +656,9 @@ def _train_wisdom(
 
         training_seconds = time.perf_counter() - epoch_started
         train_throughput = examples / max(training_seconds, 1.0e-9)
-        train_loss       = float(loss_sum) / max(1, examples)
+        train_task_loss = float(task_loss_sum) / max(1, examples)
+        train_gate_regularization = float(gate_regularization_sum) / max(1, examples)
+        train_total_loss = float(total_loss_sum) / max(1, examples)
 
         # Global validation is required every epoch for checkpoint selection, patience, and HPO.
         # Local diagnostics use the sidecar-enabled view only on explicitly scheduled epochs.
@@ -761,7 +683,23 @@ def _train_wisdom(
         )
         validation_seconds = time.perf_counter() - validation_started
 
-        work.metrics.log("loss", train_loss, step=epoch, split="train")
+        work.metrics.log("loss", train_total_loss, step=epoch, split="train")
+        work.metrics.log("task_loss", train_task_loss, step=epoch, split="train")
+        work.metrics.log(
+            "gate_regularization", train_gate_regularization, step=epoch, split="train"
+        )
+        work.metrics.log("total_loss", train_total_loss, step=epoch, split="train")
+        gate_expected = float(model.gate_regularization().detach().cpu())
+        gate_deterministic = sum(
+            float(model.semantic_gates.deterministic_value(name).detach().cpu()) > 0.0
+            for name in model.semantic_gates.names
+        ) / len(model.semantic_gates.names)
+        work.metrics.log(
+            "gate_expected_active_fraction", gate_expected, step=epoch, split="train"
+        )
+        work.metrics.log(
+            "gate_deterministic_active_fraction", gate_deterministic, step=epoch, split="train"
+        )
 
         if epoch == 1:
             static_metrics = {
@@ -819,6 +757,16 @@ def _train_wisdom(
             if optional_metric is not None:
                 work.metrics.log(name, optional_metric, step=epoch, split="val")
 
+        # MCC itself remains unavailable when a thresholded predictor emits only one class. The
+        # HPO component is deliberately distinct: it maps a defined MCC from [-1,1] to [0,1] and
+        # assigns the worst utility, zero, to an undefined degenerate decision rule. This lets HPO
+        # reject the candidate without publishing a fabricated MCC or failing the entire Run.
+
+        mcc_defined   = validation["mcc"] is not None
+        mcc_objective = _mcc_objective(validation["mcc"])
+        work.metrics.log("mcc_defined", float(mcc_defined), step=epoch, split="val")
+        work.metrics.log("mcc_objective", mcc_objective, step=epoch, split="val")
+
         objective         = validation["auprc"]
         selection_utility = _validation_utility(validation)
         validation_loss   = validation["loss"]
@@ -847,12 +795,17 @@ def _train_wisdom(
                     "model_version":    model_version,
                     "model_parameters": model_parameters,
                     "pooling_type":     pooling_type,
+                    "surface_encoder_type": surface_encoder_type,
+                    "gate_lambda":      gate_lambda,
+                    "semantic_gate_definition": tuple(
+                        (name, model.semantic_gates.parents[name])
+                        for name in model.semantic_gates.names
+                    ),
+                    "hard_concrete": model.gate_summary()["hard_concrete"],
                     "data_parameters": {
-                        "relation_mode":            relation_mode,
                         "atom_spatial_k":           atom_spatial_k,
                         "surface_atom_k":           surface_atom_k,
                         "diffusion_spectral_modes": diffusion_spectral_modes,
-                        "curvature_scale_count":    curvature_scale_count,
                     },
                     "state_dict":       model.state_dict(),
                     "seed":             seed,
@@ -913,7 +866,7 @@ def _train_wisdom(
         )
 
         progress_message = (
-            f"{run_label}; train_loss={train_loss:.5f}; val_loss={val_loss_text}; "
+            f"{run_label}; train_loss={train_total_loss:.5f}; val_loss={val_loss_text}; "
             f"val_auprc={auprc_text}; utility={utility_text}; "
             f"surface_macro_auprc={surface_macro_text}; "
             f"patience={epochs_without_improvement}/{patience}; best={best_text}"
@@ -950,7 +903,9 @@ def _train_wisdom(
 
         work.progress.update(completed=epoch, total=epochs, message=progress_message)
         work.log(
-            f"[Training {run_label}] epoch={epoch}/{epochs} train_loss={train_loss:.5f} "
+            f"[Training {run_label}] epoch={epoch}/{epochs} "
+            f"train_task={train_task_loss:.5f} gate_L0={train_gate_regularization:.5f} "
+            f"train_total={train_total_loss:.5f} "
             f"protein_val[loss={val_loss_text},auprc={auprc_text},auroc={auroc_text},"
             f"balanced_accuracy={balanced_text},mcc={mcc_text},utility={utility_text},"
             f"best_utility={best_utility_text},best_auprc={best_text}] "
@@ -988,8 +943,8 @@ def _train_wisdom(
 
     if best_epoch == 0:
         raise RuntimeError(
-            "composite validation utility remained undefined; all four metrics and both classes "
-            "are required"
+            "composite validation utility remained undefined; validation AUPRC, AUROC, and "
+            "balanced accuracy require both target classes"
         )
 
     # Candidate ranking must use the best validation checkpoint rather than the final plateau
@@ -999,6 +954,16 @@ def _train_wisdom(
         value = best_validation_metrics.get(name)
         if value is not None:
             work.metrics.log(name, value, split="val")
+    work.metrics.log(
+        "mcc_defined",
+        float(best_validation_metrics.get("mcc") is not None),
+        split="val",
+    )
+    work.metrics.log(
+        "mcc_objective",
+        _mcc_objective(best_validation_metrics.get("mcc")),
+        split="val",
+    )
 
     best_surface_metrics: dict[str, float | None] | None = None
     test_metrics        : dict[str, float | None] | None = None
@@ -1046,6 +1011,9 @@ def _train_wisdom(
         "model_version":               model_version,
         "architecture":                architecture_name,
         "pooling_type":                pooling_type,
+        "surface_encoder_type":        surface_encoder_type,
+        "gate_lambda":                 gate_lambda,
+        "model_parameters":            model_parameters,
         "subset":                      subset,
         "seed":                        seed,
         "epochs_completed":            epochs_completed,
@@ -1065,6 +1033,11 @@ def _train_wisdom(
         "test_surface":                test_surface_metrics,
         "curvature_features":          curvature_features,
         "parameter_count":             parameter_count,
+        "gate_parameter_count":        gate_parameter_count,
+        "semantic_gate_count":         len(model.semantic_gates.names),
+        "evidence_head_parameter_count": evidence_parameter_count,
+        "evidence_head_added_parameter_count": evidence_added_parameters,
+        "evidence_input_width":        evidence_input_width,
         "preprocessing_bytes":         preprocessing_bytes,
         "atom_spatial_k":              atom_spatial_k,
         "surface_atom_k":              surface_atom_k,
@@ -1075,8 +1048,19 @@ def _train_wisdom(
         "split_storage_bytes":         split_storage,
     }
     report_path = work.run_dir / "evaluation.json"
+    gate_summary_path = work.run_dir / "gate_summary.json"
     report_path.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    gate_summary_path.write_text(
+        json.dumps(model.gate_summary(), indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
     work.outputs.artifact("best-model", checkpoint, role="checkpoint")
+    work.outputs.artifact(
+        "gate-summary",
+        gate_summary_path,
+        role="report",
+        media_type="application/json",
+    )
     work.outputs.artifact(
         "evaluation",
         report_path,
@@ -1167,18 +1151,20 @@ def _validation_utility(metrics: Mapping[str, float | None]) -> float | None:
     """Reproduce WISDOM's declared four-component checkpoint utility.
 
     LambdaForge owns HPO ranking and computes the same geometric utility from the four metrics
-    logged at one real epoch. Training needs the identical local rule only to make ``best-model.pt``
-    represent that selected epoch rather than an AUPRC-only epoch. The fixed normalized weights are
-    0.35 AUPRC, 0.20 AUROC, 0.25 balanced accuracy, and 0.20 MCC; MCC is mapped from ``[-1,1]`` to
-    ``[0,1]`` before aggregation.
+    logged at one real epoch. Training needs the identical local rule only to make
+    ``best-model.pt`` represent that selected epoch rather than an AUPRC-only epoch. The fixed
+    normalized weights are 0.35 AUPRC, 0.20 AUROC, 0.25 balanced accuracy, and 0.20 MCC objective.
+    A defined MCC is mapped from ``[-1,1]`` to ``[0,1]``. An undefined MCC caused by a one-class
+    prediction maps to zero utility while the reported scientific MCC remains ``None``.
 
     Args:
         metrics: Protein-level validation metrics from one epoch.
 
     Returns:
-        Weighted geometric utility in ``[0,1]``, or ``None`` when any component is undefined.
+        Weighted geometric utility in ``[0,1]``. ``None`` is returned only when a ranking metric
+        is undefined because the validation targets do not contain both classes.
     """
-    names   = ("auprc", "auroc", "balanced_accuracy", "mcc")
+    names   = ("auprc", "auroc", "balanced_accuracy")
     weights = (0.35, 0.20, 0.25, 0.20)
     values  = [metrics.get(name) for name in names]
     if any(value is None for value in values):
@@ -1189,7 +1175,7 @@ def _validation_utility(metrics: Mapping[str, float | None]) -> float | None:
         numeric[0],
         numeric[1],
         numeric[2],
-        (numeric[3] + 1.0) / 2.0,
+        _mcc_objective(metrics.get("mcc")),
     ]
     if any(value <= 0.0 for value in normalized):
         return 0.0
@@ -1197,6 +1183,27 @@ def _validation_utility(metrics: Mapping[str, float | None]) -> float | None:
         sum(weight * math.log(value) for weight, value in zip(weights, normalized, strict=True))
     )
     return min(1.0, max(0.0, utility))
+
+
+def _mcc_objective(mcc: float | None) -> float:
+    """Convert optional MCC evidence into a total HPO utility component.
+
+    A constant thresholded prediction makes the conventional MCC denominator zero, so
+    ``BinaryMetricSuite`` correctly reports MCC as unavailable. HPO nevertheless needs one finite
+    value from every candidate. This separate component assigns zero—the worst normalized
+    utility—to that degenerate rule. It does not claim that the undefined scientific MCC equals
+    ``-1`` or ``0``.
+
+    Args:
+        mcc: Defined Matthews correlation coefficient in ``[-1,1]``, or ``None`` when its
+            denominator vanishes.
+
+    Returns:
+        MCC mapped linearly to ``[0,1]``, or zero for an undefined one-class prediction.
+    """
+    if mcc is None:
+        return 0.0
+    return min(1.0, max(0.0, (float(mcc) + 1.0) / 2.0))
 
 
 def _metric_text(metrics: Mapping[str, float | None], name: str) -> str:
@@ -1216,7 +1223,7 @@ def _metric_text(metrics: Mapping[str, float | None], name: str) -> str:
 def _create_model(
     model_version       : int,
     available_parameters: Mapping[str, Any],
-) -> tuple[torch.nn.Module, dict[str, Any]]:
+) -> tuple[WisdomV1, dict[str, Any]]:
     """Instantiate a WISDOM generation through a stable module/class naming convention.
 
     A trainable generation lives in ``wisdom.models.WisdomV{N}`` and exposes a class with the
@@ -1249,13 +1256,20 @@ def _create_model(
     if not isinstance(model_class, type) or not issubclass(model_class, torch.nn.Module):
         raise ValueError(f"{module_name} must expose a torch module class named {class_name}")
 
-    accepted = inspect.signature(model_class.__init__).parameters
+    accepted       = inspect.signature(model_class.__init__).parameters
+    accepts_kwargs = any(
+        parameter.kind is inspect.Parameter.VAR_KEYWORD
+        for parameter in accepted.values()
+    )
     parameters = {
         name: value
         for name, value in available_parameters.items()
-        if name in accepted
+        if accepts_kwargs or name in accepted
     }
-    model = model_class(**parameters)
+    if model_version == 2:
+        parameters.pop("surface_encoder_type", None)
+        parameters.pop("surface_patch_size", None)
+    model = cast(WisdomV1, model_class(**parameters))
 
     # V1 is a fixed scientific hypothesis, not a name that may silently resolve to the retired
     # dense surface-graph implementation. Keep this check at construction time so an accidental
@@ -1268,14 +1282,14 @@ def _create_model(
     )
     if model_version == 1 and (
         type(model) is not WisdomV1
-        or getattr(model, "ARCHITECTURE_NAME", None) != "bounded-atomic-diffusionnet"
+        or getattr(model, "ARCHITECTURE_NAME", None) != "semantic-gated-diffusionnet"
         or getattr(model, "STRUCTURAL_SCHEMA_VERSION", None)
         != WisdomDataset.STRUCTURAL_SCHEMA_VERSION
         or not expected_surface_encoder
     ):
         raise RuntimeError(
-            "WISDOM v1 must use schema-3 bounded topology and DiffusionNet, except for the "
-            "explicit surface_layers=0 message-passing ablation"
+            "WISDOM v1 must use schema-3 bounded topology and the semantic-gated DiffusionNet "
+            "backbone"
         )
 
     return model, parameters

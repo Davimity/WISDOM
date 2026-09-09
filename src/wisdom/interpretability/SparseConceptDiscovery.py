@@ -123,7 +123,7 @@ class SparseConceptDiscovery(lf.Work):
         predictor, predictor_state, data_parameters = self._load_predictor(checkpoint, device)
         predictor_digest = self._parameter_digest(predictor)
 
-        self.log("Extracting frozen pre-local-head embeddings from train and validation only")
+        self.log("Extracting frozen local-head inputs from train and validation only")
         train = self._extract(
             predictor,
             dataset,
@@ -488,7 +488,8 @@ class SparseConceptDiscovery(lf.Work):
             device: Predictor inference device.
 
         Returns:
-            CPU embeddings, local logits, coordinates, point indices, identifiers, and bag pointer.
+            CPU local-head inputs, local logits, coordinates, point indices, identifiers, and bag
+            pointer. Their width is ``H`` for the pointwise head and ``3H`` for multiscale evidence.
         """
         if split not in {"train", "val"}:
             raise ValueError("concept extraction is restricted to train and validation")
@@ -497,8 +498,6 @@ class SparseConceptDiscovery(lf.Work):
             atom_spatial_k=int(data_parameters.get("atom_spatial_k", 16)),
             surface_atom_k=int(data_parameters.get("surface_atom_k", 16)),
             diffusion_spectral_modes=int(data_parameters.get("diffusion_spectral_modes", 128)),
-            relation_mode=str(data_parameters.get("relation_mode", "full_relational")),
-            curvature_scale_count=int(data_parameters.get("curvature_scale_count", 0)),
         )
         generator = torch.Generator().manual_seed(seed)
         embeddings: list[Tensor] = []
@@ -520,7 +519,8 @@ class SparseConceptDiscovery(lf.Work):
                     if name in signature
                 }
                 surface, local = predictor.encode_surface(**arguments)
-                count = len(surface)
+                evidence = surface
+                count = len(evidence)
                 if maximum_points_per_protein and count > maximum_points_per_protein:
                     selected = torch.randperm(count, generator=generator)[
                         :maximum_points_per_protein
@@ -529,7 +529,7 @@ class SparseConceptDiscovery(lf.Work):
                 else:
                     selected = torch.arange(count)
                 device_selected = selected.to(device)
-                embeddings.append(surface[device_selected].float().cpu())
+                embeddings.append(evidence[device_selected].float().cpu())
                 logits.append(local[device_selected].float().cpu())
                 positions.append(host["surface_positions"][selected].float())
                 point_ids.append(selected)
@@ -551,7 +551,7 @@ class SparseConceptDiscovery(lf.Work):
         validation             : Tensor,
         training_metadata      : Mapping[str, Any],
         validation_metadata    : Mapping[str, Any],
-        local_head             : torch.nn.Linear,
+        local_head             : torch.nn.Module,
         scaler                 : EmbeddingScaler,
         concept_count          : int,
         sparse_lambda          : float,
@@ -650,7 +650,7 @@ class SparseConceptDiscovery(lf.Work):
         model      : SparseConceptModel,
         standardized: Tensor,
         metadata   : Mapping[str, Any],
-        local_head : torch.nn.Linear,
+        local_head : torch.nn.Module,
         scaler     : EmbeddingScaler,
     ) -> dict[str, Any]:
         """Measure reconstruction, prediction fidelity, sparsity, and redundancy.
@@ -853,7 +853,7 @@ class SparseConceptDiscovery(lf.Work):
         val_standard                  : Tensor,
         train_metadata                : Mapping[str, Any],
         validation_metadata           : Mapping[str, Any],
-        local_head                    : torch.nn.Linear,
+        local_head                    : torch.nn.Module,
         scaler                        : EmbeddingScaler,
         near_dead_threshold           : float,
         dominant_threshold            : float,
@@ -893,12 +893,8 @@ class SparseConceptDiscovery(lf.Work):
         similarities.fill_diagonal_(0.0)
         maximum_similarity = similarities.max(dim=1).values
 
-        # Local knockout effects have a closed form because decoder and frozen local head are
-        # linear. Protein effects still recompute MAX within each validation bag.
+        # Exact head reevaluation supports both the linear control and the multiscale evidence MLP.
 
-        head_weight = local_head.weight.detach().float().cpu().squeeze(0)
-        physical_decoder = scaler.scale[:, None] * decoder
-        local_slopes = head_weight @ physical_decoder
         baseline_local = (
             local_head(scaler.inverse(val_reconstruction).to(device))
             .squeeze(-1)
@@ -918,9 +914,20 @@ class SparseConceptDiscovery(lf.Work):
             val_values   = val_codes[:, concept]
             train_rate   = float((train_values > 0.0).float().mean())
             val_rate     = float((val_values > 0.0).float().mean())
-            local_delta  = val_values * local_slopes[concept]
+            knocked_reconstruction = (
+                val_reconstruction
+                - val_codes[:, concept].to(device)[:, None]
+                * decoder[:, concept].to(device)[None, :]
+            )
+            knocked_local = (
+                local_head(scaler.inverse(knocked_reconstruction))
+                .squeeze(-1)
+                .detach()
+                .cpu()
+            )
+            local_delta  = baseline_local - knocked_local
             knocked_bags = self._bag_max(
-                baseline_local - local_delta,
+                knocked_local,
                 validation_metadata["ptr"],
             )
             nonzero = train_values[train_values > 0.0]
