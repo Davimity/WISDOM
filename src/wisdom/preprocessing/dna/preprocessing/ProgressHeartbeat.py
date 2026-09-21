@@ -56,5 +56,5 @@ class ProgressHeartbeat:
             elapsed_minutes = (time.monotonic() - self.started) / 60.0
             self.work.log(
                 f"{self.phase} remains active after {elapsed_minutes:.1f} min; "
-                "lf top contains the exact completed/total count"
+                "lf overview and the Research Console contain the exact completed/total count"
             )

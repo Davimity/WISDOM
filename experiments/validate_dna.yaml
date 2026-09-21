@@ -3,7 +3,7 @@ run: wisdom.preprocessing.dna.DNAValidation.DNAValidation # Direct LambdaForge 0
 
 with:                                             # Keyword arguments passed to DNAValidation.run(...).
   dataset:                                        # Resolve and fingerprint the immutable placement.
-    dataset: wisdom-dna@5                         # Validate schema-3 release 5, never an implicit latest.
+    dataset: wisdom-dna-reduced@6                 # Validate the schema-3 release consumed by V1-V10.
   fail_on_error: true                             # Preserve reports, then fail when a hard check fails.
 
 # DNAValidation.run option reference:

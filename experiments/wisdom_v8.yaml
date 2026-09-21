@@ -1,0 +1,66 @@
+# V8: test architecture spikes independently after stability, loss, and head decisions.
+name: wisdom-v8-architecture-spikes                 # Eighth campaign stage: one structural spike varies.
+run: wisdom.Training.Training                       # Shared training Work.
+
+with:                                               # Replace provisional values with earlier winners before execution.
+  dataset: {dataset: wisdom-dna-reduced@6}          # Immutable reduced benchmark.
+  model_version: 2                                  # Allows controlled pre-freeze spike profiles.
+  subset: full                                      # Complete reduced training population.
+  pooling_type: max                                 # Fixed provisional faithful pooling.
+  head_type: single                                 # Fixed head relationship.
+  hidden_dim: 128                                   # Fixed latent width.
+  embedding_dim: 32                                 # Fixed element embedding width.
+  residue_embedding_dim: 32                         # Fixed residue embedding width.
+  atomic_layers: 2                                  # Fixed atomic depth.
+  projection_depth: 1                               # Fixed projection depth.
+  surface_layers: 2                                 # Fixed surface depth per interaction round.
+  weak_loss_profile: negative_030                   # Fixed provisional weak loss.
+  stability_profile: baseline                       # Fixed provisional initialization.
+  batch_size: 16                                    # Proteins per update.
+  epochs: 500                                       # Safety ceiling.
+  patience: 30                                      # Global-only validation patience.
+  minimum_delta: 0.001                              # Required G improvement.
+  precision: auto                                   # Hardware-safe mixed precision.
+  surface_metrics: true                             # Evaluation-only localization quality.
+  surface_metrics_interval: 1                       # Track G/S/regret every epoch.
+  surface_visualization: viewer                     # Final HTML/PLY only.
+  faithfulness_audit: true                          # Test whether each candidate uses its claimed hotspot.
+  evaluate_test: false                              # Keep test sealed.
+  data_workers: 2                                   # Bound loader processes across nine packed Runs.
+
+# faithfulness_audit=false by default and never changes optimization. architecture_spike="custom"
+# by default and preserves detailed surface_geometry_transfer,
+# interaction_round, and vector_atomic_channels arguments. Every named profile first resets those
+# three controls to the scalar one-pass baseline. point_geometry is spike A. depth_control repeats
+# transfer/projection/DiffusionNet without feedback. bidirectional is spike B with one S->A->S round.
+# vector_8 and vector_16 are spike C. They are isolated here; do not add combination profiles until
+# individual evidence justifies them.
+
+seeds: [4, 7, 32, 48, 92]                           # Five-seed screen for expensive structural changes.
+
+search:                                              # Compare the baseline and isolated A/B/C hypotheses.
+  strategy: adaptive                                # Allocate confirmation seeds by validation W.
+  trials: 6                                         # Exact finite profile count.
+  proposal_pool_size: 6                             # Enumerate every profile once.
+  runs_per_gpu: 3                                    # Pack at most three measured Runs per accelerator.
+  max_parallel: 9                                    # Bound a three-GPU study to nine concurrent Runs.
+  min_seeds: 1                                      # One seed before adaptive promotion.
+  architecture_spike:                               # Mutually exclusive hypothesis selector.
+    values: [baseline, point_geometry, depth_control, bidirectional, vector_8, vector_16] # A, B control, B, C8, C16.
+
+# The depth control is essential: bidirectional wins only if it exceeds added depth without
+# feedback. Vector states require atom coordinates already present in schema-3 NPZ archives; no
+# model-specific preprocessing is introduced.
+
+objective:                                           # Joint architecture-development utility.
+  metric: val_wisdom_hpo_score                      # Frozen G/S@G/coupling combination.
+  mode: max                                         # Larger is better.
+
+resources:                                           # Complete study reservation.
+  gpu: 3                                             # Expose the three configured accelerators.
+  gpu_memory: 30GiB                                  # Safe per-run admission threshold.
+  cpu: 36                                            # Two loaders plus trainer headroom for each active Run.
+  memory: 96GiB                                      # Shared host-memory ceiling.
+  time: 168h                                         # Seven-day study ceiling.
+
+# LambdaForge owns run expansion, placement, metrics, and outputs; WISDOM changes no scheduler state.

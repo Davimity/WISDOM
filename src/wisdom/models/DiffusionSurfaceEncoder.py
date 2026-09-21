@@ -18,6 +18,8 @@ class DiffusionSurfaceEncoder(nn.Module):
         hidden_dim: int,
         layers    : int = 2,
         dropout   : float = 0.0,
+        initial_times: Sequence[float] | None = None,
+        residual_initial_scale: float | None = None,
     ) -> None:
         """Build a compact DiffusionNet with physical multiscale time initialization.
 
@@ -30,6 +32,9 @@ class DiffusionSurfaceEncoder(nn.Module):
             hidden_dim: Surface feature width ``H``.
             layers: Number of residual DiffusionNet blocks.
             dropout: Pointwise block-MLP dropout in ``[0,1)``.
+            initial_times: Optional positive time in Å² for every block. ``None`` uses the
+                historical geometric schedule ``2**layer``.
+            residual_initial_scale: Optional learnable residual scale passed to every block.
 
         Raises:
             ValueError: If width/layer count is non-positive or dropout is invalid.
@@ -37,12 +42,18 @@ class DiffusionSurfaceEncoder(nn.Module):
         super().__init__()
         if hidden_dim < 1 or layers < 1 or not 0.0 <= dropout < 1.0:
             raise ValueError("DiffusionSurfaceEncoder dimensions or dropout are invalid")
+        times = tuple(float(2**index) for index in range(layers)) if initial_times is None else (
+            tuple(float(value) for value in initial_times)
+        )
+        if len(times) != layers or any(value <= 0.0 for value in times):
+            raise ValueError("diffusion initial times must provide one positive value per layer")
 
         self.blocks = nn.ModuleList(
             DiffusionBlock(
                 hidden_dim,
                 dropout=dropout,
-                initial_time=float(2**index),
+                initial_time=times[index],
+                residual_initial_scale=residual_initial_scale,
             )
             for index in range(layers)
         )
@@ -79,16 +90,22 @@ class DiffusionSurfaceEncoder(nn.Module):
             start = int(surface_ptr[protein_index])
             stop  = int(surface_ptr[protein_index + 1])
             local = features[start:stop]
-            gradient_x, gradient_y = self.sparse_gradients(operator, stop - start)
+            gradient = self.stacked_gradient(operator, stop - start)
+
+            # Intrinsic operators are fixed input data shared by every learned block. Canonicalize
+            # them once per protein rather than asking every block to repeat dtype dispatch.
+
+            mass         = operator["mass"].float()
+            eigenvalues  = operator["eigenvalues"].float()
+            eigenvectors = operator["eigenvectors"].float()
 
             for block in self.blocks:
                 local = block(
                     local,
-                    operator["mass"],
-                    operator["eigenvalues"],
-                    operator["eigenvectors"],
-                    gradient_x,
-                    gradient_y,
+                    mass,
+                    eigenvalues,
+                    eigenvectors,
+                    gradient,
                 )
             outputs.append(local)
         return torch.cat(outputs, dim=0)
@@ -208,3 +225,34 @@ class DiffusionSurfaceEncoder(nn.Module):
             check_invariants=False,
         ).coalesce()
         return gradient_x, gradient_y
+
+    @staticmethod
+    def stacked_gradient(
+        operator  : Mapping[str, Tensor],
+        point_count: int,
+    ) -> Tensor:
+        """Materialize ``[Gx; Gy]`` once for all DiffusionNet blocks of one protein.
+
+        Both derivatives use the same compact COO index pattern. Adding ``M`` to every ``Gy`` row
+        places that operator directly below ``Gx`` in a sparse matrix with shape ``[2M,M]``:
+        ``[Gx; Gy] X = [Gx X; Gy X]``. Coalescing occurs once before the block loop, reducing two
+        sparse launches to one per block without changing either derivative or its autograd path.
+
+        Args:
+            operator: Mapping containing shared ``gradient_index`` and x/y derivative values.
+            point_count: Local surface size ``M`` defining both operator dimensions.
+
+        Returns:
+            Coalesced stacked tangent derivative matrix with shape ``[2M,M]``.
+        """
+        index         = operator["gradient_index"]
+        entry_count   = index.shape[1]
+        stacked_index = index.repeat(1, 2)
+        stacked_index[0, entry_count:].add_(point_count)
+        stacked_value = torch.cat((operator["gradient_x"], operator["gradient_y"]))
+        return torch.sparse_coo_tensor(
+            stacked_index,
+            stacked_value,
+            (2 * point_count, point_count),
+            check_invariants=False,
+        ).coalesce()

@@ -1,103 +1,70 @@
-# Keep the v1 backbone fixed and compare only WISDOM v2 protein-level pooling hypotheses.
-name: wisdom-v2                                      # Stable LambdaForge experiment name.
-run: wisdom.Training.Training                       # Same LambdaForge 0.14 Work class as v1.
+# V2: factor seed variance into parameter initialization and post-initialization stochasticity.
+name: wisdom-v2-seed-diagnostics                     # Second campaign stage: isolate both RNG sources.
 
-with:                                                # Replace these fixed backbone values with the V1 winner.
-  dataset:                                           # Resolve one immutable managed placement.
-    dataset: wisdom-dna-reduced@6                    # Exact reduced schema-3 release used by v1.
-  model_version: 2                                  # Enable only the v2 pooling extension.
-  subset: full                                      # Use every train member already retained in this release.
-  hidden_dim: 128                                   # Fixed reviewed v1 latent width.
-  embedding_dim: 32                                 # Fixed reviewed v1 embedding width.
-  residue_embedding_dim: 32                         # Fixed winning v1 residue embedding width.
-  atomic_layers: 2                                  # Fixed reviewed v1 atomic depth.
-  projection_depth: 1                              # Fixed reviewed v1 projection depth.
-  surface_layers: 2                                 # Fixed reviewed v1 surface depth.
-  atom_spatial_k: 16                                # Fixed reviewed v1 atomic-neighbor budget.
-  surface_atom_k: 16                                # Fixed reviewed v1 transfer-neighbor budget.
-  diffusion_spectral_modes: 128                     # Fixed reviewed v1 intrinsic frequency budget.
-  atomic_edge_distance_scale: 6.0                   # Fixed winning v1 edge-distance scale in Å.
-  surface_atom_radius: 6.0                          # Fixed transfer geometry normalization in Å.
-  surface_chunk_size: 8192                          # Bound atom-transfer gathered activations.
-  atomic_message_chunk_size: 65536                  # Bound LambdaForge RGCN edge activations.
-  dropout: 0.2                                      # Fixed reviewed v1 dropout.
-  learning_rate: 0.0003                             # Fixed reviewed v1 AdamW rate.
-  weight_decay: 0.0001                              # Fixed reviewed v1 AdamW decay.
-  gate_lambda: 0.001                                # Fixed winning v1 L0 pressure; gates relearn per pooling.
-  topk_fraction: 0.05                               # Retained fraction for top-k mean.
-  attention_hidden_dim: 32                          # Attention scoring-network width.
-  regional_diffusion_scale: 2.5                     # Physical smoothing length in Å before MAX.
-  log_sum_exp_beta: 5.0                             # Log-sum-exp inverse temperature.
-  batch_size: 2                                     # Variable-size proteins per step.
-  epochs: 100                                       # Maximum epochs per pooling/seed run.
-  patience: 30                                      # Stop a plateau without changing model selection.
-  minimum_delta: 0.001                              # Meaningful composite validation-utility improvement.
-  precision: auto                                   # BF16 dense CUDA layers with FP32 sparse derivatives.
-  surface_metrics: true                             # Compare local maps without supervising them.
-  surface_metrics_interval: 0                       # Evaluate surfaces only on the best checkpoint.
-  evaluate_test: false                              # Keep test unopened during pooling comparison.
-  data_workers: 2                                   # Overlap NPZ decoding without consuming all four CPUs.
+steps:                                               # Run both complementary controls independently.
+  - name: fixed-initialization                       # Experiment A: same weights, varying training randomness.
+    run: wisdom.Training.Training                    # Shared training Work.
+    with:                                            # Fixed baseline and fixed epoch-zero parameter seed.
+      dataset: {dataset: wisdom-dna-reduced@6}       # Immutable reduced benchmark.
+      model_version: 1                               # Scalar DiffusionNet/MAX baseline.
+      subset: full                                   # Complete reduced training population.
+      pooling_type: max                              # Fixed faithful pooling.
+      stability_profile: baseline                    # Historical parameter policy.
+      weak_loss_profile: baseline                    # Global BCE only.
+      architecture_spike: baseline                   # Scalar one-pass baseline.
+      initialization_seed: 2026                      # Identical epoch-zero weights in every expanded run.
+      training_seed: null                            # Null uses each LambdaForge seed for shuffle/dropout/gates.
+      save_initial_checkpoint: true                  # Publish proof that epoch-zero states are identical.
+      optimization_diagnostics: true                 # Record gradients, activations, logits, and gate saturation.
+      batch_size: 16                                 # Proteins per update.
+      epochs: 500                                    # Safety ceiling.
+      patience: 30                                   # Global-only validation patience.
+      precision: auto                                # Hardware-safe mixed precision.
+      surface_metrics: true                          # Evaluation-only local metrics.
+      surface_metrics_interval: 1                    # Track G/S/coupling over time.
+      surface_visualization: none                    # Seed diagnosis needs metrics, not repeated galleries.
+      evaluate_test: false                           # Keep test sealed.
+      data_workers: 4                                # Persistent graph decoders.
+    seeds: [4, 7, 32, 54, 65, 94, 109, 124, 142, 167] # Ten stochastic training replications.
+    objective: {metric: val_wisdom_hpo_score, mode: max} # Index results without pruning them.
+    resources: {gpu: 1, cpu: 8, memory: 24GiB, time: 168h} # Per-replication allocation.
 
-# Fixed Training.run option reference:
-# Values shown above equal public defaults except model_version=2,
-# residue_embedding_dim=32, gate_lambda=0.001, evaluate_test=false, and data_workers=2.
-# Semantic gates are reinitialized and learned for every pooling candidate; their definitions and
-# Hard-Concrete constants are fixed, so pooling_type remains the only architectural comparison.
-# subset="full" selects every train member retained by this reduced release; validation/test are
-# never filtered by a training view. Widths and depths/K/J/mode budgets are positive; dropout is in [0,1);
-# topk_fraction is in (0,1];
-# attention_hidden_dim and regional_diffusion_scale are positive; log_sum_exp_beta and learning_rate are positive; weight_decay and
-# data_workers=4 by default; this 4-CPU experiment selects two so the trainer retains CPU capacity.
-# data_workers and minimum_delta are non-negative; batch_size, epochs, and patience are positive;
-# precision accepts "auto", "bfloat16", "float16", or "float32";
-# surface_metrics=true and surface_metrics_interval=0 by default. False disables sidecar
-# diagnostics; interval zero evaluates the restored best checkpoint only, while positive N also
-# evaluates every N validation epochs.
+    # initialization_seed/training_seed default to null and independently fall back to LambdaForge's
+    # run seed. save_initial_checkpoint=false by default. This step fixes only initialization;
+    # every declared seed must complete because there is no search section.
 
-seeds: [4, 7, 32, 54, 65, 94, 109, 124, 142, 167]    # Shared ordered seed budget for paired comparisons.
-search:                                              # Adaptive one-factor pooling comparison.
-  strategy: adaptive                                # Race poolings using validation evidence.
-  trials: 6                                         # Exactly six authored pooling candidates exist.
-  runs_per_gpu: 4                                   # Allow four independent Runs per H100.
-  max_parallel: 8                                   # Bound two H100s to eight concurrent Runs.
-  min_seeds: 1                                      # Give every pooling at least one search seed.
+  - name: fixed-training-randomness                  # Experiment B: varying weights, same later randomness.
+    run: wisdom.Training.Training                    # Shared training Work.
+    with:                                            # Same baseline, now fixing stochastic training instead.
+      dataset: {dataset: wisdom-dna-reduced@6}       # Exact dataset used by Experiment A.
+      model_version: 1                               # Exact same architecture.
+      subset: full                                   # Exact same training population.
+      pooling_type: max                              # Exact same pooling.
+      stability_profile: baseline                    # Exact same initialization policy, not seed.
+      weak_loss_profile: baseline                    # Exact same loss.
+      architecture_spike: baseline                   # Exact same architecture controls.
+      initialization_seed: null                      # Null uses each LambdaForge seed for different weights.
+      training_seed: 2026                            # Identical shuffle/dropout/gate RNG after construction.
+      save_initial_checkpoint: true                  # Publish each distinct epoch-zero state.
+      optimization_diagnostics: true                 # Same stability measurements as Experiment A.
+      batch_size: 16                                 # Proteins per update.
+      epochs: 500                                    # Safety ceiling.
+      patience: 30                                   # Global-only validation patience.
+      precision: auto                                # Hardware-safe mixed precision.
+      surface_metrics: true                          # Evaluation-only local metrics.
+      surface_metrics_interval: 1                    # Track G/S/coupling over time.
+      surface_visualization: none                    # Avoid duplicate heavy viewer artifacts.
+      evaluate_test: false                           # Keep test sealed.
+      data_workers: 4                                # Persistent graph decoders.
+    seeds: [4, 7, 32, 54, 65, 94, 109, 124, 142, 167] # Ten initialization replications.
+    objective: {metric: val_wisdom_hpo_score, mode: max} # Index results without HPO selection.
+    resources: {gpu: 1, cpu: 8, memory: 24GiB, time: 168h} # Per-replication allocation.
 
-  seed_racing:                                      # Allocate seeds while a pooling remains plausible.
-    probability_threshold: 0.05                     # Continue above 5% practical-equivalence probability.
-    equivalence_margin: 0.015                        # Treat utility differences <=0.015 as equivalent.
+    # The fixed training seed resets torch RNG after model construction and local-head calibration.
+    # DataLoader order, dropout, and Hard-Concrete samples therefore match as closely as deterministic
+    # CUDA kernels allow. Compare variance with fixed-initialization to identify the dominant source.
 
-  early_stopping:                                   # Prune weak learning curves conservatively.
-    enabled: true                                   # Enable cooperative Work stopping.
-    min_step: 40                                    # Wait for forty validation epochs.
-    confirmations: 3                                # Require three distinct confirmations.
-    probability_threshold: 0.02                     # Stop below 2% competitive probability.
-    equivalence_margin: 0.015                        # Preserve curves within 0.015 utility.
-
-  pooling_type:                                     # Only this model property may vary in v2.
-    values: [max, mean, attention, topk, local_mean_max, log_sum_exp] # Closed PoolingType set.
-
-# strategy defaults to adaptive when an objective exists. trials=6 covers the complete finite
-# pooling set; adaptive seed racing changes replication effort, never the fixed backbone or data.
-# pooling_type defaults to max and accepts MAX, arithmetic mean, learned sparse attention, top-k
-# mean, fixed spectral diffusion/global MAX, and normalized log-sum-exp. Search-policy values match
-# v1 so pooling comparisons use the same statistical decision thresholds.
-
-objective:                                           # Same global composite utility as v1.
-  metrics:                                          # All components are emitted at each validation epoch.
-    val_auprc: {mode: max, weight: 0.35, range: [0.0, 1.0]} # Imbalance-aware ranking.
-    val_auroc: {mode: max, weight: 0.20, range: [0.0, 1.0]} # Two-class ranking.
-    val_balanced_accuracy: {mode: max, weight: 0.25, range: [0.0, 1.0]} # Thresholded balance.
-    val_mcc_objective: {mode: max, weight: 0.20, range: [0.0, 1.0]} # Total MCC utility; zero penalizes one-class predictions.
-  aggregation: geometric                            # Reward candidates strong across every component.
-
-resources:                                           # Fixed outer allocation for the complete study.
-  gpu: 2                                             # Expose both H100s.
-  gpu_memory: 20GiB                                  # Per-Run free-VRAM admission threshold.
-  cpu: 36                                            # Total CPU shared by active Runs.
-  memory: 96GiB                                      # Total host RAM shared by active Runs.
-  time: 168h                                         # Seven-day study ceiling.
-
-# LambdaForge adaptive defaults include probabilistic racing, fresh confirmation seeds, convergence
-# detection, and failure recovery. WISDOM overrides the thresholds shown above to match v1.
-# Composite ranges are fixed and weights are normalized by LambdaForge. Resource options are cpu,
-# gpu, memory, gpu_memory, time, storage, and processes; output paths remain framework-owned.
+# V2 varies initialization or training randomness through the seed lists; the architecture is fixed
+# intentionally so variance can be attributed to one RNG source. Step fields accept run, with,
+# seeds, objective, and resources. Both steps deliberately omit search:
+# adaptive pruning would bias the ten-seed variance estimate and collapse-rate diagnosis.

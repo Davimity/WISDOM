@@ -1,11 +1,11 @@
-# Discover sparse candidate concepts once an explicit winning V1 checkpoint exists.
-name: wisdom-v1-sparse-concepts                        # Separate post-HPO experiment identity.
+# V10: discover sparse concepts after an explicit winning predictor checkpoint exists.
+name: wisdom-v10-sparse-concepts                       # Tenth campaign stage: post-training interpretation.
 run: wisdom.interpretability.SparseConceptDiscovery.SparseConceptDiscovery # Frozen analysis Work.
 
 with:                                                  # Arguments passed to SparseConceptDiscovery.run(...).
   checkpoint: {file: ../best-model.pt}                 # Copy the official winning artifact here explicitly.
-  dataset: {dataset: wisdom-dna@5}                    # Use the same immutable predictor dataset.
-  subset: replicate-00/train-25                       # Fit concepts on the predictor's exact train view.
+  dataset: {dataset: wisdom-dna-reduced@6}            # Use the same immutable predictor dataset as V1-V9.
+  subset: full                                        # This release already contains the reduced train view.
   lambda_values: []                                   # Empty activates the seven-value automatic grid.
   selected_lambda: null                               # Null chooses a deterministic Pareto knee.
   calibration_seeds: [17, 29, 43]                     # Small seed set for concept stability.

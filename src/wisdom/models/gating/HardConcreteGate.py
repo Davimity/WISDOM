@@ -21,11 +21,22 @@ class HardConcreteGate(nn.Module):
     INITIAL_ACTIVE   = 0.95
     SAMPLING_EPSILON = 1.0e-6
 
-    def __init__(self) -> None:
-        """Initialize ``log_alpha`` so the analytic probability of being nonzero is 0.95."""
-        super().__init__()
+    def __init__(self, initial_active: float = INITIAL_ACTIVE) -> None:
+        """Initialize the analytic probability that this semantic path is nonzero.
 
-        logit_probability = math.log(self.INITIAL_ACTIVE / (1.0 - self.INITIAL_ACTIVE))
+        Args:
+            initial_active: Initial ``P(z>0)`` strictly between zero and one. The plan compares
+                0.50, the historical 0.95, and an almost-open 0.99 without changing the gate
+                distribution or its learned parameterization.
+
+        Raises:
+            ValueError: If ``initial_active`` is not strictly between zero and one.
+        """
+        super().__init__()
+        if not 0.0 < initial_active < 1.0:
+            raise ValueError("initial gate activity must lie strictly between zero and one")
+
+        logit_probability = math.log(initial_active / (1.0 - initial_active))
         stretch_offset    = self.BETA * math.log(-self.GAMMA / self.ZETA)
 
         self.log_alpha = nn.Parameter(torch.tensor(logit_probability + stretch_offset))

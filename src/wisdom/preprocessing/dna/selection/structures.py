@@ -65,7 +65,7 @@ def analyse_structures(
 
     work.log(
         f"Analysing {len(rows)} proteins from {len(jobs)} unique PDB entries with "
-        f"{workers} workers; lf top shows exact aggregate progress"
+        f"{workers} workers; lf overview and the Research Console show exact aggregate progress"
     )
     rate_limit = work.cache.rate_limit(
         "rcsb-dna-selection",

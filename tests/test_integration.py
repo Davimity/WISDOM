@@ -6,10 +6,13 @@ import shutil
 from concurrent.futures import ThreadPoolExecutor
 from functools import partial
 from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
+import torch
 
+from wisdom.evaluation.SurfacePredictionReport import SurfacePredictionReport
 from wisdom.preprocessing.structure.DatasetValidator import DatasetValidator
 from wisdom.preprocessing.structure.PreprocessConfig import PreprocessConfig
 from wisdom.preprocessing.structure.ProteinArchive import ProteinArchive
@@ -159,6 +162,100 @@ def test_txt_to_valid_pickle_free_npz_roundtrip(tmp_path: Path, pdb_path: Path) 
     annotated_html = (tmp_path / "tiny-annotated.html").read_text(encoding="utf-8")
     assert "dna_target_hard" in annotated_html
     assert "dna_distance" in annotated_html
+
+    # A trained map extends the same trusted viewer instead of maintaining a second report UI.
+    # Its hard channel is recomputed in the browser, so threshold exploration preserves the
+    # continuous probabilities from the validation-selected checkpoint.
+
+    probabilities = np.linspace(0.0, 1.0, surface_count, dtype=np.float32)
+    model_channels = {
+        "model_prediction_probability": probabilities,
+        "model_prediction_hard":        (probabilities >= 0.7).astype(np.uint8),
+    }
+    visualizer.visualize(
+        npz_path,
+        tmp_path / "tiny-prediction.html",
+        "tiny",
+        annotation           = sidecar,
+        protein_label        = 1,
+        partitions           = {"split": "validation"},
+        plotly_script        = "../plotly.min.js",
+        additional_channels  = model_channels,
+        prediction_threshold = 0.7,
+    )
+    prediction_html = (tmp_path / "tiny-prediction.html").read_text(encoding="utf-8")
+    assert "model_prediction_probability" in prediction_html
+    assert "model_prediction_hard" in prediction_html
+    assert 'id="prediction-threshold"' in prediction_html
+    assert "thresholdValues" in prediction_html
+
+    dataset = SimpleNamespace(
+        records=((npz_path, sidecar, 1, "tiny", "core"),),
+    )
+    prediction_report = SurfacePredictionReport(
+        dataset,
+        tmp_path / "surface-predictions",
+        "validation",
+        prediction_threshold   = 0.7,
+        maximum_visualizations = 1,
+        save_predictions       = True,
+    )
+    prediction_report.collect(
+        {
+            "identifier":  ["tiny"],
+            "surface_ptr": torch.tensor((0, surface_count)),
+        },
+        {"surface_logits": torch.linspace(-3.0, 3.0, surface_count)},
+    )
+    summary = prediction_report.publish(
+        {"surface_positive_macro_auprc": 0.75},
+        best_epoch=8,
+    )
+    SurfacePredictionReport.publish_index(
+        tmp_path / "surface-predictions",
+        [summary],
+    )
+
+    prediction_npz = tmp_path / "surface-predictions/validation/predictions/tiny.npz"
+    with np.load(prediction_npz, allow_pickle=False) as prediction:
+        assert prediction["surface_prediction_probability"].shape == (surface_count,)
+        assert prediction["surface_prediction_hard"].dtype == np.bool_
+        assert float(prediction["prediction_threshold"]) == pytest.approx(0.7)
+        assert int(prediction["best_epoch"]) == 8
+    assert (tmp_path / "surface-predictions/validation/proteins/tiny.html").is_file()
+    assert (tmp_path / "surface-predictions/index.html").is_file()
+    report_index = (tmp_path / "surface-predictions/validation/index.html").read_text(
+        encoding="utf-8"
+    )
+    assert "href='proteins/tiny.html'" in report_index
+    assert "href='predictions/tiny.npz'" in report_index
+
+    # Viewer-only mode remains numerically inspectable in HTML/PLY but avoids one redundant NPZ
+    # for every member in a large HPO campaign.
+
+    viewer_report = SurfacePredictionReport(
+        dataset,
+        tmp_path / "surface-viewers",
+        "validation",
+        prediction_threshold   = 0.7,
+        maximum_visualizations = 1,
+        save_predictions       = False,
+    )
+    viewer_report.collect(
+        {
+            "identifier":  ["tiny"],
+            "surface_ptr": torch.tensor((0, surface_count)),
+        },
+        {"surface_logits": torch.linspace(-3.0, 3.0, surface_count)},
+    )
+    viewer_summary = viewer_report.publish(
+        {"surface_positive_macro_auprc": 0.75},
+        best_epoch=8,
+    )
+    assert viewer_summary["predicted_proteins"] == 1
+    assert not (tmp_path / "surface-viewers/validation/predictions/tiny.npz").exists()
+    assert (tmp_path / "surface-viewers/validation/proteins/tiny.html").is_file()
+    assert (tmp_path / "surface-viewers/validation/proteins/tiny.ply").is_file()
 
 
 def test_visual_mesh_and_van_der_waals_geometry_are_precomputed() -> None:

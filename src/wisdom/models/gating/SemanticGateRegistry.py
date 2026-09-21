@@ -15,12 +15,14 @@ class SemanticGateRegistry(nn.Module):
 
     def __init__(
         self,
-        definitions: Sequence[tuple[str, str | None]],
+        definitions   : Sequence[tuple[str, str | None]],
+        initial_active: float = HardConcreteGate.INITIAL_ACTIVE,
     ) -> None:
         """Create gates in a stable declared order.
 
         Args:
             definitions: Ordered ``(name, parent)`` pairs. A parent must precede its child.
+            initial_active: Initial analytic activity probability shared by every gate.
 
         Raises:
             ValueError: If names repeat or a parent is missing.
@@ -37,12 +39,15 @@ class SemanticGateRegistry(nn.Module):
                 raise ValueError(f"gate parent {parent!r} must precede child {name!r}")
             known.add(name)
 
-        self.gates       = nn.ModuleList(HardConcreteGate() for _ in definitions)
+        self.gates       = nn.ModuleList(
+            HardConcreteGate(initial_active=initial_active) for _ in definitions
+        )
         self.names       = tuple(names)
         self.parents     = {name: parent for name, parent in definitions}
         self._indices    = {name: index for index, name in enumerate(self.names)}
         self._override   = "learned"
         self._forced     : dict[str, float] = {}
+        self._last_sample: dict[str, Tensor] = {}
 
     def sample(self, training: bool) -> dict[str, Tensor]:
         """Sample each semantic gate exactly once for one model forward.
@@ -62,7 +67,20 @@ class SemanticGateRegistry(nn.Module):
                 values[name] = gate.log_alpha.new_ones((), dtype=torch.float32)
             else:
                 values[name] = gate(training=training)
+        self._last_sample = {name: value.detach() for name, value in values.items()}
         return values
+
+    def sampled_boundary_fractions(self) -> tuple[float, float]:
+        """Return fractions of the latest sampled gates clamped exactly to zero and one.
+
+        Returns:
+            ``(zero_fraction, one_fraction)`` across semantic gates. Before the first forward both
+            values are zero because no stochastic state exists yet.
+        """
+        if not self._last_sample:
+            return 0.0, 0.0
+        values = torch.stack(tuple(self._last_sample.values())).float()
+        return float((values == 0.0).float().mean()), float((values == 1.0).float().mean())
 
     def set_override(self, mode: str = "learned") -> None:
         """Select learned values or force every gate on for post-hoc evaluation.

@@ -1,0 +1,68 @@
+# V6: screen weak surface constraints in the prescribed non-factorial order.
+name: wisdom-v6-weak-losses                         # Sixth campaign stage: one weak prior varies.
+run: wisdom.Training.Training                       # Shared training Work.
+
+with:                                               # Freeze the selected pre-loss architecture here.
+  dataset: {dataset: wisdom-dna-reduced@6}          # Immutable reduced benchmark.
+  model_version: 2                                  # Expose the reusable pooling boundary.
+  subset: full                                      # Complete reduced training population.
+  pooling_type: max                                 # Replace only after the pooling sanity decision.
+  hidden_dim: 128                                   # Fixed latent width.
+  embedding_dim: 32                                 # Fixed element embedding width.
+  residue_embedding_dim: 32                         # Fixed residue embedding width.
+  atomic_layers: 2                                  # Fixed atomic depth.
+  projection_depth: 1                               # Fixed projection depth.
+  surface_layers: 2                                 # Fixed DiffusionNet depth.
+  architecture_spike: baseline                      # No architecture change.
+  stability_profile: baseline                       # No initialization change.
+  regional_loss_length: 2.5                         # Fixed intrinsic regional length in ångströms.
+  regional_ranking_margin: 0.5                      # Fixed positive-versus-negative regional margin.
+  batch_size: 16                                    # Proteins per update.
+  epochs: 500                                       # Safety ceiling.
+  patience: 30                                      # Global-only checkpoint patience.
+  minimum_delta: 0.001                              # Required G improvement.
+  precision: auto                                   # Hardware-safe mixed precision.
+  surface_metrics: true                             # Local GT is evaluation-only.
+  surface_metrics_interval: 1                       # Required G/S/regret curves.
+  surface_visualization: viewer                     # Final HTML/PLY only.
+  faithfulness_audit: true                          # Report whether high-score regions drive prediction.
+  evaluate_test: false                              # Keep test sealed.
+  data_workers: 4                                   # Persistent graph decoders.
+
+# faithfulness_audit=false by default and affects only final evaluation metrics. It never enters the
+# loss, checkpoint selection, or HPO objective. weak_loss_profile="custom" by default and then the
+# explicit lambda arguments are authoritative.
+# Named profiles reset every weak term before applying one planned candidate, preventing accidental
+# factorial combinations. L1 negative profiles use lambda .1/.3/1. L3 adds regional existence at
+# .1/.3 to L1=.3. L3b adds ranking at .1/.3. Cardinality profiles use a .1 penalty and lower area
+# .005/.01/.02. TV uses .01/.05; Dirichlet uses .001/.01. TV and Dirichlet are mutually exclusive.
+
+seeds: [4, 7, 32]                                   # Three seeds screen each independently interpretable candidate.
+
+search:                                              # Start with L0/L1; extend values only after its decision gate passes.
+  strategy: adaptive                                # Probability-race candidates on validation W.
+  trials: 4                                         # Baseline plus the three prescribed L1 weights.
+  proposal_pool_size: 4                             # Enumerate this finite first-stage screen.
+  runs_per_gpu: 2                                   # Two runs per H100.
+  max_parallel: 4                                   # Four concurrent runs over two H100s.
+  min_seeds: 1                                      # Every loss receives one initial seed.
+  weak_loss_profile:                                # First mandatory sequence step: L0 versus L1.
+    values: [baseline, negative_010, negative_030, negative_100] # Promote a winner before testing L3/L4/L5.
+
+# Follow-up accepted profile values are positive_exist_010/030/100 (only when the selected pooling
+# does not already enforce existence), negative_region_010/030, negative_rank_010/030,
+# cardinality_005/010/020, tv_001/005, and dirichlet_0001/001. Add only the next scientifically
+# justified family; never place all of them in one campaign merely because it is implemented.
+
+objective:                                           # Architecture-development objective only.
+  metric: val_wisdom_hpo_score                      # W combines G, S@G, and checkpoint coupling.
+  mode: max                                         # Larger is better.
+
+resources:                                           # Complete study reservation.
+  gpu: 2                                             # Two H100 accelerators.
+  gpu_memory: 30GiB                                  # Per-run free-memory admission threshold.
+  cpu: 24                                            # Host decoding budget.
+  memory: 96GiB                                      # Shared host-memory ceiling.
+  time: 168h                                         # Seven-day study ceiling.
+
+# Resource semantics follow the other screening YAMLs; LambdaForge owns outputs and scheduling.

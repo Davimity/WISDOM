@@ -1,0 +1,63 @@
+# V4: diagnose optimizer stabilizers after choosing one initialization profile.
+name: wisdom-v4-optimization                        # Fourth campaign stage: optimizer stability varies.
+run: wisdom.Training.Training                       # Shared train/validate Work implementation.
+
+with:                                               # Replace baseline with the winning initialization if justified.
+  dataset: {dataset: wisdom-dna-reduced@6}          # Immutable schema-3 reduced benchmark.
+  model_version: 1                                  # Fixed scalar DiffusionNet/MAX architecture.
+  subset: full                                      # Complete reduced training population.
+  pooling_type: max                                 # Pooling remains fixed.
+  hidden_dim: 128                                   # Fixed latent width.
+  embedding_dim: 32                                 # Fixed element embedding width.
+  residue_embedding_dim: 32                         # Fixed residue embedding width.
+  atomic_layers: 2                                  # Fixed atomic depth.
+  projection_depth: 1                               # Fixed transfer-projection depth.
+  surface_layers: 2                                 # Fixed surface depth.
+  weak_loss_profile: baseline                       # No weak local regularizer in this study.
+  architecture_spike: baseline                      # No architecture spike in this study.
+  optimization_diagnostics: true                    # Establish whether clipping/warm-up is actually warranted.
+  batch_size: 16                                    # Proteins per update.
+  epochs: 500                                       # Safety ceiling.
+  patience: 30                                      # Stop global validation plateaus.
+  minimum_delta: 0.001                              # Meaningful G improvement.
+  precision: auto                                   # Hardware-safe mixed precision.
+  surface_metrics: true                             # Evaluation-only surface curves.
+  surface_metrics_interval: 1                       # Compute regret and coupling over epochs.
+  surface_visualization: viewer                     # Final HTML/PLY only.
+  evaluate_test: false                              # Keep held-out test sealed.
+  data_workers: 4                                   # Persistent training decoders.
+
+# Defaults are documented completely in wisdom_v3.yaml and Training.run. The selected
+# values fix all scientific factors. optimization_diagnostics=false by default; enabling it adds
+# measurements only and never changes gradients. Apply clipping only when baseline diagnostics show
+# spikes, and interpret EMA/SWA as evaluation/checkpoint policies rather than repaired training.
+
+seeds: [4, 7, 32]                                   # Three-seed screening budget.
+
+search:                                              # One optimizer-stability factor per candidate.
+  strategy: adaptive                                # Race on validation W after every candidate starts.
+  trials: 8                                         # Exact finite profile count.
+  proposal_pool_size: 8                             # Enumerate all profiles exactly once.
+  runs_per_gpu: 2                                   # Two runs per H100.
+  max_parallel: 4                                   # Four concurrent runs over two H100s.
+  min_seeds: 1                                      # Minimum evidence per candidate.
+  stability_profile:                                # Baseline plus O1/O2/O3/O4 candidates.
+    values: [baseline, lr_warmup_05, lr_warmup_10, clip_1, clip_5, ema_099, ema_0999, swa] # One-factor optimization screen.
+
+# LR warm-up profiles use 5% or 10% of the epoch ceiling. Clip profiles cap global gradient norm at
+# 1 or 5. EMA evaluates/checkpoints moving averages with decay .99 or .999. SWA averages optimizer
+# states from the final 20%. The smooth-to-sharp LogSumExp curriculum is intentionally excluded
+# because it changes pooling and belongs after the pooling sanity result.
+
+objective:                                           # Preserve the same frozen utility across studies.
+  metric: val_wisdom_hpo_score                      # Coupled global/local validation score.
+  mode: max                                         # Larger is better.
+
+resources:                                           # Complete study reservation.
+  gpu: 2                                             # Two H100 accelerators.
+  gpu_memory: 30GiB                                  # Per-run admission budget.
+  cpu: 24                                            # Host decoding and orchestration.
+  memory: 96GiB                                      # Shared host-memory ceiling.
+  time: 168h                                         # Seven-day wall-time ceiling.
+
+# Resource semantics are identical to wisdom_v3.yaml; LambdaForge owns scheduling.

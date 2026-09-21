@@ -1,0 +1,68 @@
+# V7: compare faithful single-head prediction with D1, D2, and zero-start D2b heads.
+name: wisdom-v7-heads                               # Seventh campaign stage: head relationship varies.
+run: wisdom.Training.Training                       # Shared training Work.
+
+with:                                               # Fix the pre-head winner before running this screen.
+  dataset: {dataset: wisdom-dna-reduced@6}          # Immutable reduced benchmark.
+  model_version: 2                                  # Head/pooling-capable implementation.
+  subset: full                                      # Complete reduced training population.
+  pooling_type: max                                 # Replace only with the prior pooling winner.
+  hidden_dim: 128                                   # Fixed shared latent width.
+  embedding_dim: 32                                 # Fixed element embedding width.
+  residue_embedding_dim: 32                         # Fixed residue embedding width.
+  atomic_layers: 2                                  # Fixed atomic depth.
+  projection_depth: 1                               # Fixed atom/surface projection depth.
+  surface_layers: 2                                 # Fixed DiffusionNet depth.
+  weak_loss_profile: negative_030                   # Fixed provisional L1; replace with the loss winner.
+  architecture_spike: baseline                      # No architecture spike.
+  stability_profile: baseline                       # Replace only with the initialization winner.
+  global_context_dim: 16                            # Fixed D2/D2b bottleneck width.
+  detach_global_context: true                       # Prevent local loss gradients entering global context.
+  direct_head_weight: 1.0                          # D1/D2/D2b direct protein BCE coefficient.
+  surface_head_weight: 1.0                         # Surface-derived protein BCE coefficient.
+  batch_size: 16                                    # Proteins per update.
+  epochs: 500                                       # Safety ceiling.
+  patience: 30                                      # Global-only validation patience.
+  minimum_delta: 0.001                              # Required G improvement.
+  precision: auto                                   # Hardware-safe mixed precision.
+  surface_metrics: true                             # Measure but never backpropagate local GT.
+  surface_metrics_interval: 1                       # Track G/S/regret every validation epoch.
+  surface_visualization: viewer                     # Final HTML/PLY only.
+  faithfulness_audit: true                          # Compare top/random/bottom surface perturbations.
+  evaluate_test: false                              # Keep test sealed.
+  data_workers: 4                                   # Persistent graph decoders.
+
+# faithfulness_audit=false by default and only adds final best-checkpoint diagnostics.
+# head_type="single" by default. "dual" is D1: independent direct and surface-derived heads.
+# "global_context" is D2: a detached 16-wide projected global context is concatenated into the
+# localizer. "film" is D2b: zero-initialized gamma/beta modulation starts exactly at the unconditioned
+# surface backbone. Context width must be positive; head weights are non-negative and cannot both be
+# zero for a non-single head. The direct head supplies Training.logits while the surface-derived head
+# is separately scored and their probability disagreement is recorded.
+
+seeds: [4, 7, 32]                                   # Three-seed screen; promote a credible winner.
+
+search:                                              # Only the relationship between global and local heads varies.
+  strategy: adaptive                                # Race on the frozen validation utility.
+  trials: 4                                         # D0, D1, D2, and D2b.
+  proposal_pool_size: 4                             # Enumerate all four exactly once.
+  runs_per_gpu: 2                                   # Two runs per H100.
+  max_parallel: 4                                   # Four concurrent runs over two H100s.
+  min_seeds: 1                                      # Minimum initial replication.
+  head_type: {values: [single, dual, global_context, film]} # Closed HeadType candidates.
+
+# D3 frozen-teacher and D4 calibrated cascade remain decision-gated follow-ups: they require D1/D2
+# evidence and global probability calibration before any surface may be declared empty.
+
+objective:                                           # Preserve WISDOM's joint scientific purpose.
+  metric: val_wisdom_hpo_score                      # W=0.35G+0.45S@G+0.20C.
+  mode: max                                         # Larger is better.
+
+resources:                                           # Complete study reservation.
+  gpu: 2                                             # Two H100 accelerators.
+  gpu_memory: 30GiB                                  # Safe per-run admission threshold.
+  cpu: 24                                            # Host decoding budget.
+  memory: 96GiB                                      # Shared host-memory ceiling.
+  time: 168h                                         # Seven-day study ceiling.
+
+# LambdaForge owns adaptive scheduling, checkpoints, metrics, and result indexing.

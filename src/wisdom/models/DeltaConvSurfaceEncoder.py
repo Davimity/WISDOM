@@ -69,12 +69,10 @@ class DeltaConvSurfaceEncoder(nn.Module):
             stop   = int(surface_ptr[protein_index + 1])
             values = features[start:stop].float()
             mass   = operator["mass"].float()
-            gradient_x, gradient_y = DiffusionSurfaceEncoder.sparse_gradients(
+            gradient = DiffusionSurfaceEncoder.stacked_gradient(
                 operator,
                 stop - start,
-            )
-            gradient_x = gradient_x.float()
-            gradient_y = gradient_y.float()
+            ).float()
 
             vector_x = torch.zeros_like(values)
             vector_y = torch.zeros_like(values)
@@ -83,17 +81,24 @@ class DeltaConvSurfaceEncoder(nn.Module):
                 self.scalar_updates,
                 strict=True,
             ):
-                vector_x = vector_x + mixing(DiffusionBlock.sparse_multiply(gradient_x, values))
-                vector_y = vector_y + mixing(DiffusionBlock.sparse_multiply(gradient_y, values))
-                divergence = (
-                    DiffusionBlock.sparse_multiply(
-                        gradient_x.transpose(0, 1),
-                        mass[:, None] * vector_x,
-                    )
-                    + DiffusionBlock.sparse_multiply(
-                        gradient_y.transpose(0, 1),
-                        mass[:, None] * vector_y,
-                    )
+                # [Gx; Gy] evaluates both vector components together. Because `mixing` is the same
+                # bias-free row-wise map for both axes, one dense call is also exact. Conversely,
+                # [Gx; Gy]^T [M vx; M vy] = Gx^T M vx + Gy^T M vy computes the former divergence.
+
+                gradients       = DiffusionBlock.sparse_multiply(gradient, values)
+                mixed_gradients = mixing(gradients)
+                mixed_x         = mixed_gradients[: len(values)]
+                mixed_y         = mixed_gradients[len(values) :]
+                vector_x = vector_x + mixed_x
+                vector_y = vector_y + mixed_y
+
+                weighted_vectors = torch.cat(
+                    (mass[:, None] * vector_x, mass[:, None] * vector_y),
+                    dim=0,
+                )
+                divergence = DiffusionBlock.sparse_multiply(
+                    gradient.transpose(0, 1),
+                    weighted_vectors,
                 ) / mass[:, None]
                 vector_norm = torch.sqrt(vector_x.square() + vector_y.square() + 1.0e-8)
                 values = values + update(torch.cat((values, divergence, vector_norm), dim=1))

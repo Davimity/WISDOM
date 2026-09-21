@@ -39,8 +39,10 @@ class WisdomCollator:
     ) -> Mapping[str, Any]:
         """Build one disconnected atomic batch and one ordered operator pack.
 
-        Stored undirected atomic pairs are filtered by ``covalent OR spatial_rank<=K`` and expanded
-        to both message directions. Compact surface-atom tables are sliced to their first ``J``
+        Stored undirected atomic pairs are filtered by ``covalent OR spatial_rank<=K`` and remain
+        compact. The atomic encoder evaluates both message directions directly, so duplicating
+        indices and attributes here would consume twice the host/device transfer memory without
+        changing a single message. Compact surface-atom tables are sliced to their first ``J``
         columns and valid atom IDs receive the protein atom offset. Spectral and sparse gradient
         operators stay in a list aligned with ``surface_ptr``; concatenating them would create a
         large artificial block matrix with no scientific meaning.
@@ -94,6 +96,7 @@ class WisdomCollator:
                 "surface_neighbors",
                 "surface_neighbor_distances",
                 "surface_neighbor_mask",
+                "atom_positions",
                 "target",
             )
         }
@@ -107,9 +110,12 @@ class WisdomCollator:
         )
         annotations: dict[str, list[Tensor]] = {name: [] for name in annotation_names}
         operators: list[dict[str, Tensor]] = []
-        identifiers: list[str] = []
-        tiers: list[str]       = []
-        surface_ptr            = [0]
+        identifiers         : list[str] = []
+        tiers               : list[str] = []
+        leakage_groups      : list[str] = []
+        global_phenotypes   : list[str] = []
+        interface_phenotypes: list[str] = []
+        surface_ptr                     = [0]
 
         has_surface_targets = all(
             "surface_target_hard" in sample and "surface_valid_mask" in sample
@@ -119,6 +125,7 @@ class WisdomCollator:
             all(name in sample for name in annotation_names[2:]) for sample in samples
         )
         has_geometry = all("surface_positions" in sample for sample in samples)
+        has_atom_geometry = all("atom_positions" in sample for sample in samples)
         has_identity = all("identifier" in sample for sample in samples)
 
         atom_offset    = 0
@@ -151,6 +158,8 @@ class WisdomCollator:
             values["atom_batch"].append(
                 torch.full((atom_count,), batch_index, dtype=torch.long)
             )
+            if has_atom_geometry:
+                values["atom_positions"].append(self._tensor(sample, "atom_positions"))
 
             # Activate the nested spatial budget while retaining every covalent pair. The two
             # membership masks remain separate so one physical pair may feed both model branches.
@@ -163,7 +172,7 @@ class WisdomCollator:
             active      = covalent | spatial
 
             active_edges = stored_edges[:, active] + atom_offset
-            values["atom_edge_index"].extend((active_edges, active_edges.flip(0)))
+            values["atom_edge_index"].append(active_edges)
             for name, feature in (
                 ("atom_edge_is_spatial", spatial),
                 ("atom_edge_is_covalent", covalent),
@@ -175,10 +184,9 @@ class WisdomCollator:
                     self._tensor(sample, "atom_edge_residue_separation"),
                 ),
             ):
-                selected = feature[active]
-                values[name].extend((selected, selected))
+                values[name].append(feature[active])
             active_distances = distances[active].to(torch.float32)
-            values["atom_edge_distance"].extend((active_distances, active_distances))
+            values["atom_edge_distance"].append(active_distances)
 
             # Slice the compact transfer table; invalid sentinels remain -1 after offsetting.
 
@@ -246,6 +254,9 @@ class WisdomCollator:
             if has_identity:
                 identifiers.append(str(sample["identifier"]))
                 tiers.append(str(sample["tier"]))
+                leakage_groups.append(str(sample["leakage_group"]))
+                global_phenotypes.append(str(sample["global_phenotype"]))
+                interface_phenotypes.append(str(sample["interface_phenotype"]))
             if has_surface_targets:
                 for name in annotation_names[:2]:
                     annotations[name].append(self._tensor(sample, name))
@@ -306,9 +317,14 @@ class WisdomCollator:
                 "surface_neighbor_mask",
             ):
                 batch[name] = torch.cat(values[name])
+        if has_atom_geometry:
+            batch["atom_positions"] = torch.cat(values["atom_positions"])
         if has_identity:
-            batch["identifier"] = identifiers
-            batch["tier"]       = tiers
+            batch["identifier"]          = identifiers
+            batch["tier"]                = tiers
+            batch["leakage_group"]       = leakage_groups
+            batch["global_phenotype"]    = global_phenotypes
+            batch["interface_phenotype"] = interface_phenotypes
         if has_surface_targets:
             for name in annotation_names[:2]:
                 batch[name] = torch.cat(annotations[name])

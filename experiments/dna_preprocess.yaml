@@ -182,7 +182,7 @@ steps:                                                          # LambdaForge ru
       dataset: {from: preprocess.dataset}                        # DatasetVersion published by the preceding step.
 
       # Visualization-only recipe; use it together with preprocess.skip=true:
-      # dataset: {dataset: wisdom-dna@5}                         # Resolve a version published by an earlier run.
+      # dataset: {dataset: wisdom-dna-reduced@6}                 # Resolve this published screening release.
       output_directory: ../data/dna/visualizations               # Atomically publish the browsable gallery here.
       overwrite_output: true                                     # Replace a different prior gallery after success.
 

@@ -35,6 +35,7 @@ class WisdomDataset(Dataset[Mapping[str, Tensor | str]]):
         include_surface_targets: bool = False,
         include_diagnostics    : bool = False,
         include_surface_geometry: bool = False,
+        include_atom_geometry  : bool = False,
     ) -> None:
         """Read and validate a compact ``file,label,split`` CSV manifest.
 
@@ -56,6 +57,8 @@ class WisdomDataset(Dataset[Mapping[str, Tensor | str]]):
                 false to avoid hashing, decoding, collating, and transferring unused arrays.
             include_surface_geometry: Load coordinates, normals, and bounded local surface
                 neighborhoods required by WISDOM v3 encoders. V1/V2 leave these arrays unopened.
+            include_atom_geometry: Load centered atom positions required only by the optional
+                scalar-plus-vector atomic spike.
 
         Raises:
             ValueError: If the split, header, label, row split, path, or selected subset is invalid.
@@ -69,6 +72,7 @@ class WisdomDataset(Dataset[Mapping[str, Tensor | str]]):
         self.include_surface_targets = include_surface_targets
         self.include_diagnostics     = include_diagnostics
         self.include_surface_geometry = include_surface_geometry
+        self.include_atom_geometry    = include_atom_geometry
 
         manifest_path = Path(manifest).resolve()
         if manifest_path.is_dir():
@@ -78,7 +82,7 @@ class WisdomDataset(Dataset[Mapping[str, Tensor | str]]):
             self.records  = tuple(managed_records)
             return
 
-        records: list[tuple[Path, Path | None, int, str, str]] = []
+        records: list[tuple[Path, Path | None, int, str, str, str, str, str]] = []
         with manifest_path.open("r", encoding="utf-8", newline="") as handle:
             reader = csv.DictReader(handle)
             columns = tuple(reader.fieldnames or ())
@@ -127,7 +131,18 @@ class WisdomDataset(Dataset[Mapping[str, Tensor | str]]):
                     if not identifier:
                         raise ValueError(f"manifest line {line_number} identifier cannot be empty")
                 if row_split == split:
-                    records.append((path, annotation_path, label, identifier, tier))
+                    records.append(
+                        (
+                            path,
+                            annotation_path,
+                            label,
+                            identifier,
+                            tier,
+                            "unspecified",
+                            "unspecified",
+                            "unspecified",
+                        )
+                    )
 
         if not records:
             raise ValueError(f"manifest contains no records for split {split!r}")
@@ -141,7 +156,7 @@ class WisdomDataset(Dataset[Mapping[str, Tensor | str]]):
         root  : Path,
         split : str,
         subset: str,
-    ) -> list[tuple[Path, Path | None, int, str, str]]:
+    ) -> list[tuple[Path, Path | None, int, str, str, str, str, str]]:
         """Read explicit labels, partitions, views, and assets from DatasetArtifact v2.
 
         Args:
@@ -161,7 +176,7 @@ class WisdomDataset(Dataset[Mapping[str, Tensor | str]]):
         if not index_path.is_file():
             raise ValueError("managed WISDOM dataset root must contain index.jsonl")
 
-        records: list[tuple[Path, Path | None, int, str, str]] = []
+        records: list[tuple[Path, Path | None, int, str, str, str, str, str]] = []
         managed_split = "validation" if split == "val" else split
         for member in DatasetIndex(index_path):
             if str(member.partitions.get("split", "")) != managed_split:
@@ -220,6 +235,9 @@ class WisdomDataset(Dataset[Mapping[str, Tensor | str]]):
                     label,
                     member.member_id,
                     str(member.partitions.get("tier", "unspecified")),
+                    str(member.partitions.get("leakage_group", "unspecified")),
+                    str(member.partitions.get("global_phenotype", "unspecified")),
+                    str(member.partitions.get("interface_phenotype", "unspecified")),
                 )
             )
         if not records:
@@ -284,7 +302,16 @@ class WisdomDataset(Dataset[Mapping[str, Tensor | str]]):
                 inconsistent with the current WISDOM NPZ contract.
             OSError: If the NPZ cannot be opened.
         """
-        path, annotation_path, label, identifier, tier = self.records[index]
+        (
+            path,
+            annotation_path,
+            label,
+            identifier,
+            tier,
+            leakage_group,
+            global_phenotype,
+            interface_phenotype,
+        ) = self.records[index]
         required = {
             "metadata_json",
             "atomic_numbers",
@@ -329,6 +356,10 @@ class WisdomDataset(Dataset[Mapping[str, Tensor | str]]):
             if missing:
                 raise ValueError(f"{path.name} is missing schema-3 arrays: {sorted(missing)}")
             values = {name: archive[name] for name in required if name != "metadata_json"}
+            if self.include_atom_geometry:
+                if "atom_positions" not in archive.files:
+                    raise ValueError(f"{path.name} is missing atom_positions")
+                values["atom_positions"] = archive["atom_positions"]
 
             # Early schema-3 archives predate the optional generic chemistry fields. Neutral
             # fallbacks preserve their original V1 behaviour; current archives provide every
@@ -376,6 +407,8 @@ class WisdomDataset(Dataset[Mapping[str, Tensor | str]]):
 
         if values["atomic_numbers"].shape != (atom_count,) or atom_count == 0:
             raise ValueError("atomic_numbers must have non-empty shape [N]")
+        if "atom_positions" in values and values["atom_positions"].shape != (atom_count, 3):
+            raise ValueError("atom_positions must have shape [N,3]")
         if values["residue_type_ids"].shape != (atom_count,):
             raise ValueError("residue_type_ids must have shape [N]")
         curvatures = values["surface_curvatures"]
@@ -546,6 +579,10 @@ class WisdomDataset(Dataset[Mapping[str, Tensor | str]]):
             ),
             "target": torch.tensor(float(label), dtype=torch.float32),
         }
+        if "atom_positions" in values:
+            output["atom_positions"] = torch.from_numpy(
+                values["atom_positions"].astype(np.float32, copy=False)
+            )
         for name in (
             "surface_positions",
             "surface_normals",
@@ -627,4 +664,7 @@ class WisdomDataset(Dataset[Mapping[str, Tensor | str]]):
                     )
         output["identifier"] = identifier
         output["tier"]       = tier
+        output["leakage_group"]       = leakage_group
+        output["global_phenotype"]    = global_phenotype
+        output["interface_phenotype"] = interface_phenotype
         return output

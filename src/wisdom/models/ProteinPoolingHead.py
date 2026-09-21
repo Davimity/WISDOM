@@ -113,3 +113,19 @@ class ProteinPoolingHead(nn.Module):
             else self.log_sum_exp(dense, mask)
         )
         return {"logits": pooled[:, 0]}
+
+    def set_log_sum_exp_beta(self, beta: float) -> None:
+        """Update the LogSumExp inverse temperature for a smooth-to-sharp curriculum.
+
+        Args:
+            beta: Positive inverse temperature. Small values distribute gradient broadly, whereas
+                large values approach MAX pooling.
+
+        Raises:
+            ValueError: If beta is not positive or this head does not use LogSumExp pooling.
+        """
+        if beta <= 0.0:
+            raise ValueError("LogSumExp beta must be positive")
+        if self.pooling_type is not PoolingType.LOG_SUM_EXP:
+            raise ValueError("a beta curriculum requires LogSumExp pooling")
+        self.log_sum_exp.beta = float(beta)

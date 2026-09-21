@@ -16,11 +16,19 @@ from torch.utils.data import DataLoader
 from wisdom.data.WisdomCollator import WisdomCollator
 from wisdom.data.WisdomDataset import WisdomDataset
 from wisdom.models.DiffusionSurfaceEncoder import DiffusionSurfaceEncoder
+from wisdom.models.WeakSurfaceLoss import WeakSurfaceLoss
 from wisdom.models.WisdomV1 import WisdomV1
 from wisdom.models.WisdomV2 import WisdomV2
 from wisdom.preprocessing.structure.PreprocessConfig import PreprocessConfig
 from wisdom.preprocessing.structure.ProteinPreprocessor import ProteinPreprocessor
-from wisdom.Training import _create_model, _evaluate, _mcc_objective, _validation_utility
+from wisdom.Training import (
+    _create_model,
+    _diffusion_time_summary,
+    _evaluate,
+    _mcc_objective,
+    _surface_coupling,
+    _validation_utility,
+)
 
 MODEL_INPUT_NAMES = (
     "atomic_numbers",
@@ -271,21 +279,88 @@ def test_training_resolves_model_generations_by_convention() -> None:
 
 
 def test_validation_utility_matches_the_declared_hpo_objective() -> None:
-    """Local checkpoint selection reproduces LambdaForge's geometric HPO utility."""
+    """Global checkpoint selection uses only protein evidence available without local GT."""
     metrics = {
         "auprc":             0.81,
         "auroc":             0.64,
         "balanced_accuracy": 0.49,
         "mcc":               0.0,
     }
-    expected = 0.81**0.35 * 0.64**0.20 * 0.49**0.25 * 0.50**0.20
+    expected = 0.70 * 0.81 + 0.30 * 0.64
 
     assert _validation_utility(metrics) == pytest.approx(expected)
-    assert _validation_utility({**metrics, "mcc": None}) == 0.0
-    assert _validation_utility({**metrics, "mcc": -1.0}) == 0.0
+    assert _validation_utility({**metrics, "mcc": None}) == pytest.approx(expected)
+    assert _validation_utility({**metrics, "balanced_accuracy": None}) == pytest.approx(expected)
+    assert _validation_utility({**metrics, "auroc": None}) is None
+
+
+def test_surface_coupling_measures_global_selection_regret_and_wisdom_score() -> None:
+    """The frozen WISDOM utility rewards aligned global and surface checkpoint orderings."""
+    metrics = _surface_coupling(
+        (
+            {"epoch": 1.0, "global": 0.40, "surface": 0.30},
+            {"epoch": 2.0, "global": 0.60, "surface": 0.50},
+            {"epoch": 3.0, "global": 0.80, "surface": 0.70},
+            {"epoch": 4.0, "global": 0.70, "surface": 0.90},
+        )
+    )
+
+    assert metrics["surface_selection_regret"] == pytest.approx(0.20)
+    assert metrics["global_surface_spearman"] == pytest.approx(-1.0)
+    assert metrics["surface_regret_component"] == pytest.approx(0.0)
+    assert metrics["surface_coupling_score"] == pytest.approx(0.0)
+    assert metrics["wisdom_hpo_global"] == pytest.approx(0.8)
+    assert metrics["wisdom_hpo_surface"] == pytest.approx(0.7)
+    assert metrics["global_selected_epoch"] == pytest.approx(3.0)
+    assert metrics["surface_best_epoch"] == pytest.approx(4.0)
+    assert metrics["surface_best_score"] == pytest.approx(0.9)
+    assert metrics["wisdom_hpo_coupling"] == pytest.approx(0.0)
+    assert metrics["wisdom_hpo_score"] == pytest.approx(0.595)
     assert _mcc_objective(None) == 0.0
     assert _mcc_objective(0.0) == pytest.approx(0.5)
     assert _mcc_objective(1.0) == 1.0
+
+
+def test_diffusion_time_summary_preserves_block_and_global_distributions() -> None:
+    """Initialization audits retain physical time statistics for every DiffusionNet block."""
+    model = WisdomV1(
+        hidden_dim=4,
+        embedding_dim=4,
+        atomic_layers=1,
+        projection_depth=1,
+        surface_layers=2,
+        dropout=0.0,
+        curvature_features=6,
+        diffusion_time_initialization="current",
+    )
+
+    summary = _diffusion_time_summary(model)
+
+    assert len(summary["blocks"]) == 2
+    assert summary["minimum"] == pytest.approx(1.0)
+    assert summary["mean"] == pytest.approx(1.5)
+    assert summary["maximum"] == pytest.approx(2.0)
+
+
+def test_negative_surface_loss_uses_area_normalized_negative_bags_only() -> None:
+    """Weak negative supervision ignores positive bags and weights each negative by area."""
+    logits = torch.tensor([0.0, 1.0, -1.0, 8.0], requires_grad=True)
+    loss = WeakSurfaceLoss(negative_weight=1.0)(
+        logits,
+        torch.tensor([1.0, 3.0, 1.0, 1.0]),
+        torch.tensor([0, 0, 1, 1]),
+        torch.tensor([0.0, 1.0]),
+        (),
+        torch.tensor([0, 2, 4]),
+    )["total"]
+    expected = 0.25 * torch.nn.functional.softplus(logits[0]) + 0.75 * torch.nn.functional.softplus(
+        logits[1]
+    )
+
+    assert float(loss.detach()) == pytest.approx(float(expected.detach()))
+    loss.backward()
+    assert logits.grad is not None
+    assert logits.grad[2:].abs().sum() == 0.0
 
 
 def test_dataset_accepts_extensionless_managed_npz_assets(tmp_path: Path) -> None:
@@ -456,6 +531,10 @@ def test_evaluation_reports_surface_metrics_across_multiple_batches() -> None:
     assert protein_metrics["auprc"] is not None
     assert "mcc" in protein_metrics
     assert protein_metrics["loss"] is not None and protein_metrics["loss"] > 0.0
+    assert protein_metrics["forward_seconds"] is not None
+    assert protein_metrics["forward_seconds"] > 0.0
+    assert protein_metrics["forward_proteins_per_second"] > 0.0
+    assert protein_metrics["forward_milliseconds_per_protein"] > 0.0
     assert surface_metrics["surface_valid_points"] == 5.0
     assert surface_metrics["surface_positive_proteins"] == 1.0
     assert surface_metrics["surface_positive_macro_auprc"] is not None
@@ -526,10 +605,11 @@ def test_collator_activates_nested_topology_and_offsets_atom_tables() -> None:
     first["atom_edge_spatial_rank"] = torch.tensor([2, 2])
     batch  = WisdomCollator(atom_spatial_k=1)((first, second))
 
-    assert batch["atom_edge_index"].shape == (2, 4)
-    assert torch.equal(batch["atom_edge_is_covalent"], torch.ones(4, dtype=torch.bool))
-    assert torch.equal(batch["atom_edge_distance"], torch.tensor([1.0, 1.0, 1.0, 1.0]))
-    assert not batch["atom_edge_is_spatial"][:2].any()
+    assert batch["atom_edge_index"].shape == (2, 2)
+    assert torch.all(batch["atom_edge_index"][0] < batch["atom_edge_index"][1])
+    assert torch.equal(batch["atom_edge_is_covalent"], torch.ones(2, dtype=torch.bool))
+    assert torch.equal(batch["atom_edge_distance"], torch.tensor([1.0, 1.0]))
+    assert not batch["atom_edge_is_spatial"][:1].any()
     assert torch.equal(batch["atom_batch"], torch.tensor([0, 0, 0, 1, 1]))
     assert torch.equal(batch["surface_batch"], torch.tensor([0, 0, 1, 1, 1]))
     assert torch.equal(batch["surface_ptr"], torch.tensor([0, 2, 5]))
