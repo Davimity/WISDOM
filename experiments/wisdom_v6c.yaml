@@ -1,0 +1,137 @@
+# OBJECTIVE: test cardinality and smoothness only if V6a-V6b leave a diagnosed failure.
+# PREREQUISITES: a reviewed V6a/V6b winner and evidence that extra regularization is necessary.
+# VARIES: cardinality, total-variation, or Dirichlet strength in independent steps.
+# FIXED: every prior winner; TV and Dirichlet are never enabled together.
+# DECISION: retain at most one regularizer when its gain exceeds added bias and compute cost.
+name: wisdom-v6c                                    # Short campaign name for map regularization.
+
+steps:                                              # Three alternative regularizer families.
+  - name: cardinality                              # Constrain predicted positive surface fraction.
+    run: wisdom.Training.Training                   # Shared LambdaForge Work.
+    with: &loss_regularization_base                 # Common frozen parent configuration.
+      dataset: {dataset: wisdom-dna-reduced@6}      # Immutable reduced benchmark.
+      model_version: 2                              # Pooling-capable internal generation.
+      subset: full                                  # Complete reduced training population.
+      pooling_type: max                             # REPLACE with the V5 winner.
+      topk_fraction: 0.05                           # REPLACE if V5 selects top-k.
+      attention_hidden_dim: 32                      # REPLACE if V5 selects attention.
+      regional_diffusion_scale: 2.5                 # REPLACE if V5 selects local-mean-max.
+      log_sum_exp_beta: 5.0                         # REPLACE if V5 selects LogSumExp.
+      initialization_profile: baseline              # REPLACE with the V2 winner.
+      optimization_profile: baseline                # REPLACE with the V3 winner.
+      hidden_dim: 128                               # REPLACE with the V4 winner.
+      embedding_dim: 32                             # REPLACE with the V4 winner.
+      residue_embedding_dim: 32                     # REPLACE with the V4 winner.
+      atomic_layers: 2                              # REPLACE with the V4 winner.
+      projection_depth: 1                           # REPLACE with the V4 winner.
+      surface_layers: 2                             # REPLACE with the V4 winner.
+      atom_spatial_k: 16                            # REPLACE with the V4 winner.
+      surface_atom_k: 16                            # REPLACE with the V4 winner.
+      diffusion_spectral_modes: 128                 # REPLACE with the V4 winner.
+      surface_atom_radius: 6.0                      # REPLACE with the V4 winner.
+      dropout: 0.2                                  # REPLACE with the V4 winner.
+      learning_rate: 0.0003                         # REPLACE with the V4 winner.
+      weight_decay: 0.0001                          # REPLACE with the V4 winner.
+      gate_lambda: 0.001                            # REPLACE with the V4 winner.
+      negative_surface_lambda: 0.3                  # REPLACE with the V6a winner.
+      positive_existence_lambda: 0.0                # REPLACE if V6b selects existence.
+      regional_positive_lambda: 0.0                 # REPLACE if V6b selects regional existence.
+      regional_loss_length: 2.5                     # REPLACE with the selected regional scale.
+      regional_ranking_lambda: 0.0                  # REPLACE if V6b selects ranking.
+      regional_ranking_margin: 0.5                  # REPLACE with the selected ranking margin.
+      weak_loss_profile: custom                     # Preserve explicit composable coefficients.
+      architecture_spike: baseline                  # No architecture change.
+      head_type: single                             # Fixed head relationship.
+      cardinality_lambda: 0.1                       # Fixed cardinality penalty strength.
+      batch_size: 16                                # Proteins per optimizer update.
+      epochs: 500                                   # Safety ceiling.
+      patience: 30                                  # Global validation patience.
+      precision: auto                               # Hardware-safe mixed precision.
+      surface_metrics: true                         # Evaluation-only local metrics.
+      surface_metrics_interval: 1                   # Required G/S/regret curves.
+      surface_visualization: none                   # Avoid candidate galleries.
+      evaluate_test: false                          # Keep test sealed.
+      data_workers: 4                               # Persistent NPZ workers.
+    seeds: &loss_regularization_seeds               # Four complete paired seeds per setting.
+      - 4                                           # Replication seed 1.
+      - 7                                           # Replication seed 2.
+      - 32                                          # Replication seed 3.
+      - 54                                          # Replication seed 4.
+    search:                                         # Cardinality-only search.
+      strategy: adaptive                            # Retain concurrent child Runs without elimination.
+      trials: 3                                     # Three physically small fractions.
+      proposal_pool_size: 3                         # Enumerate the finite grid.
+      runs_per_gpu: 3                               # Three Runs per H100.
+      max_parallel: 9                               # Nine Runs over three H100s.
+      min_seeds: 4                                  # Force all four seeds for every fraction.
+      confirmation_seeds: []                        # Do not add unequal winner-only seeds.
+      early_stopping:                               # Disable probability-based curve pruning.
+        enabled: false                              # Every Run reaches WISDOM's own stopping rule.
+      minimum_positive_area:                        # Positive-bag probability-area floor.
+        values:                                     # Tested fractions.
+          - 0.005                                   # Half-percent surface floor.
+          - 0.010                                   # One-percent surface floor.
+          - 0.020                                   # Two-percent surface floor.
+    objective: &loss_regularization_objective       # Shared joint validation decision.
+      metric: val_wisdom_hpo_score                  # Global/surface/coupling utility.
+      mode: max                                     # Larger is better.
+    resources: &loss_regularization_resources       # Shared study allocation.
+      gpu: 3                                        # Three accelerators.
+      gpu_memory: 20GiB                             # Per-child admission threshold.
+      cpu: 36                                       # Shared host capacity.
+      memory: 96GiB                                 # Shared host-memory ceiling.
+      time: 168h                                    # Seven-day ceiling.
+
+  - name: total-variation                          # Penalize local probability jumps on the surface graph.
+    run: wisdom.Training.Training                   # Same LambdaForge Work.
+    with:                                           # Same parent, without cardinality.
+      <<: *loss_regularization_base                 # Reuse the frozen parent fields.
+      cardinality_lambda: 0.0                       # Disable cardinality in this alternative.
+    seeds: *loss_regularization_seeds               # Exact same paired seeds.
+    search:                                         # TV-only coefficient screen.
+      strategy: adaptive                            # Retain concurrent child Runs without elimination.
+      trials: 3                                     # Parent control plus two weights.
+      proposal_pool_size: 3                         # Enumerate the finite grid.
+      runs_per_gpu: 3                               # Three Runs per H100.
+      max_parallel: 9                               # Nine Runs over three H100s.
+      min_seeds: 4                                  # Force all four seeds for every coefficient.
+      confirmation_seeds: []                        # Do not add unequal winner-only seeds.
+      early_stopping:                               # Disable probability-based curve pruning.
+        enabled: false                              # Every Run reaches WISDOM's own stopping rule.
+      total_variation_lambda:                       # Neighbour probability-difference penalty.
+        values:                                     # One-dimensional screen.
+          - 0.0                                     # Unregularized parent control.
+          - 0.01                                    # Weak TV smoothing.
+          - 0.05                                    # Moderate TV smoothing.
+    objective: *loss_regularization_objective       # Same joint decision metric.
+    resources: *loss_regularization_resources       # Same allocation.
+
+  - name: dirichlet                                # Penalize intrinsic spectral energy instead of TV.
+    run: wisdom.Training.Training                   # Same LambdaForge Work.
+    with:                                           # Same parent, without cardinality or TV.
+      <<: *loss_regularization_base                 # Reuse the frozen parent fields.
+      cardinality_lambda: 0.0                       # Disable cardinality in this alternative.
+      total_variation_lambda: 0.0                   # Explicitly disable TV.
+    seeds: *loss_regularization_seeds               # Exact same paired seeds.
+    search:                                         # Dirichlet-only coefficient screen.
+      strategy: adaptive                            # Retain concurrent child Runs without elimination.
+      trials: 3                                     # Parent control plus two weights.
+      proposal_pool_size: 3                         # Enumerate the finite grid.
+      runs_per_gpu: 3                               # Three Runs per H100.
+      max_parallel: 9                               # Nine Runs over three H100s.
+      min_seeds: 4                                  # Force all four seeds for every coefficient.
+      confirmation_seeds: []                        # Do not add unequal winner-only seeds.
+      early_stopping:                               # Disable probability-based curve pruning.
+        enabled: false                              # Every Run reaches WISDOM's own stopping rule.
+      dirichlet_lambda:                             # Intrinsic spectral-energy penalty.
+        values:                                     # One-dimensional screen.
+          - 0.0                                     # Unregularized parent control.
+          - 0.001                                   # Weak Dirichlet smoothing.
+          - 0.01                                    # Moderate Dirichlet smoothing.
+    objective: *loss_regularization_objective       # Same joint decision metric.
+    resources: *loss_regularization_resources       # Same allocation.
+
+# This stage is optional by design. Running it without an identified failure mode would spend test
+# budget on regularizers that can improve smoothness while erasing a real compact binding site.
+# Every step uses all four seeds, disables curve pruning, and disables fresh confirmation so its
+# comparison is complete and paired rather than adaptively censored.

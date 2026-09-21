@@ -1,0 +1,41 @@
+# OBJECTIVE: discover sparse human-inspectable concepts in one already frozen V1 predictor.
+# PREREQUISITES: V10 must yield an official reviewed best-model.pt artifact.
+# VARIES: sparse regularization internally inside the analysis Work, not WISDOM architecture.
+# FIXED: predictor checkpoint, managed dataset, extracted representation, and calibration protocol.
+# DECISION: report concept stability/redundancy; this post-hoc analysis does not define WISDOM V10.
+name: wisdom-interpretability-sparse-concepts       # Post-hoc frozen-predictor analysis.
+run: wisdom.interpretability.SparseConceptDiscovery.SparseConceptDiscovery # Analysis Work.
+
+with:                                               # SparseConceptDiscovery.run(...) arguments.
+  checkpoint: {file: ../best-model.pt}              # Explicit official V10 winner artifact.
+  dataset: {dataset: wisdom-dna-reduced@6}          # Same immutable predictor dataset.
+  subset: full                                      # Complete reduced training view.
+  lambda_values: []                                 # Empty selects the built-in seven-value grid.
+  selected_lambda: null                             # Null selects a deterministic Pareto knee.
+  calibration_seeds:                               # Small stability sample for sparse concepts.
+    - 17                                            # Sparse calibration seed 1.
+    - 29                                            # Sparse calibration seed 2.
+    - 43                                            # Sparse calibration seed 3.
+  maximum_points_per_protein: 4096                  # Uniform per-protein cap against size bias.
+  epochs: 80                                        # Sparse optimization ceiling.
+  patience: 12                                      # Label-free validation patience.
+  batch_size: 4096                                  # Surface embeddings per sparse update.
+  learning_rate: 0.001                              # Sparse-model Adam rate.
+  near_dead_threshold: 0.001                        # At most 0.1% activation is near-dead.
+  dominant_threshold: 0.95                          # At least 95% activation is globally dominant.
+  redundancy_threshold: 0.95                       # Decoder-cosine redundancy warning.
+  stability_threshold: 0.80                        # Required cross-seed matched cosine.
+  top_activations_per_concept: 10                   # Visualization references per concept.
+  output_directory: ../data/dna/interpretability   # Durable human-facing report directory.
+  overwrite_output: false                          # Refuse to overwrite prior interpretation.
+
+# checkpoint and dataset have no defaults. lambda_values=() maps to
+# [0,1e-5,1e-4,1e-3,1e-2,1e-1,1]; selected_lambda=null chooses the Pareto knee.
+resources:                                          # One post-HPO analysis allocation.
+  gpu: 1                                            # Predictor extraction and sparse fitting.
+  cpu: 8                                            # NPZ decoding and orchestration.
+  memory: 48GiB                                     # Host embedding/report budget.
+  storage: 30GiB                                    # Sparse checkpoints and reports.
+  time: 24h                                         # Complete analysis ceiling.
+
+# This Work has no seeds, search, or objective because it analyzes exactly one frozen predictor.

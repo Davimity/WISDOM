@@ -3,7 +3,9 @@ import torch
 
 from wisdom.models.ArchitectureSpike import ArchitectureSpike
 from wisdom.models.GlobalSurfaceHeads import GlobalSurfaceHeads
+from wisdom.models.InitializationProfile import InitializationProfile
 from wisdom.models.ModelWeightAverage import ModelWeightAverage
+from wisdom.models.OptimizationProfile import OptimizationProfile
 from wisdom.models.SurfaceAtomFeedback import SurfaceAtomFeedback
 from wisdom.models.VectorAtomicState import VectorAtomicState
 from wisdom.models.WeakLossProfile import WeakLossProfile
@@ -32,6 +34,20 @@ def test_experimental_profiles_change_only_the_declared_hypothesis() -> None:
 def test_custom_experimental_profiles_preserve_explicit_parameters() -> None:
     assert ArchitectureSpike.CUSTOM.overrides() == {}
     assert WeakLossProfile.CUSTOM.overrides() == {}
+
+
+def test_initialization_and_optimizer_profiles_compose_without_overwriting() -> None:
+    """Keep independently selected initialization and optimizer policies active together."""
+    initialization = InitializationProfile.GATE_WARMUP.overrides()
+    optimization   = OptimizationProfile.EMA_0999.overrides()
+    combined       = initialization | optimization
+
+    assert combined == {
+        "gate_warmup_fraction": 0.10,
+        "gate_ramp_fraction":   0.20,
+        "weight_averaging":     "ema",
+        "ema_decay":            0.999,
+    }
 
 
 def test_initialization_controls_preserve_valid_model_contract() -> None:

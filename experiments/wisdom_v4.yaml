@@ -1,63 +1,120 @@
-# V4: diagnose optimizer stabilizers after choosing one initialization profile.
-name: wisdom-v4-optimization                        # Fourth campaign stage: optimizer stability varies.
-run: wisdom.Training.Training                       # Shared train/validate Work implementation.
+# OBJECTIVE: optimize the complete fixed-MAX V1 backbone after choosing stable training policies.
+# PREREQUISITES: V2-V3 must provide reviewed initialization and optimization winners.
+# VARIES: core widths, depths, neighbourhood budgets, regularization, and AdamW hyperparameters.
+# FIXED: model generation, MAX pooling, global BCE, architecture spike, dataset, and test policy.
+# DECISION: freeze a core backbone candidate for all later one-factor screens.
+name: wisdom-v4                                     # Short campaign name for the broad core HPO.
+run: wisdom.Training.Training                       # Shared LambdaForge training Work.
 
-with:                                               # Replace baseline with the winning initialization if justified.
-  dataset: {dataset: wisdom-dna-reduced@6}          # Immutable schema-3 reduced benchmark.
-  model_version: 1                                  # Fixed scalar DiffusionNet/MAX architecture.
+with:                                               # Fixed scientific choices around the core search.
+  dataset: {dataset: wisdom-dna-reduced@6}          # Immutable reduced benchmark.
+  model_version: 1                                  # Fixed bounded-graph DiffusionNet generation.
   subset: full                                      # Complete reduced training population.
-  pooling_type: max                                 # Pooling remains fixed.
-  hidden_dim: 128                                   # Fixed latent width.
-  embedding_dim: 32                                 # Fixed element embedding width.
-  residue_embedding_dim: 32                         # Fixed residue embedding width.
-  atomic_layers: 2                                  # Fixed atomic depth.
-  projection_depth: 1                               # Fixed transfer-projection depth.
-  surface_layers: 2                                 # Fixed surface depth.
-  weak_loss_profile: baseline                       # No weak local regularizer in this study.
-  architecture_spike: baseline                      # No architecture spike in this study.
-  optimization_diagnostics: true                    # Establish whether clipping/warm-up is actually warranted.
-  batch_size: 16                                    # Proteins per update.
+  pooling_type: max                                 # Fixed existential aggregation.
+  initialization_profile: baseline                  # REPLACE with the reviewed V2 winner.
+  optimization_profile: baseline                    # REPLACE with the reviewed V3 winner.
+  weak_loss_profile: baseline                       # Protein BCE only.
+  architecture_spike: baseline                      # Scalar one-pass architecture.
+  batch_size: 16                                    # Proteins per optimizer update.
   epochs: 500                                       # Safety ceiling.
-  patience: 30                                      # Stop global validation plateaus.
-  minimum_delta: 0.001                              # Meaningful G improvement.
+  patience: 30                                      # Global validation patience.
+  minimum_delta: 0.001                              # Required score improvement.
   precision: auto                                   # Hardware-safe mixed precision.
-  surface_metrics: true                             # Evaluation-only surface curves.
-  surface_metrics_interval: 1                       # Compute regret and coupling over epochs.
-  surface_visualization: viewer                     # Final HTML/PLY only.
-  evaluate_test: false                              # Keep held-out test sealed.
-  data_workers: 4                                   # Persistent training decoders.
+  surface_metrics: true                             # Evaluation-only local metrics.
+  surface_metrics_interval: 1                       # Required per-epoch G/S/regret curves.
+  surface_visualization: none                       # Avoid hundreds of candidate galleries.
+  evaluate_test: false                              # Keep test sealed throughout HPO.
+  data_workers: 4                                   # Persistent NPZ decoding workers.
 
-# Defaults are documented completely in wisdom_v3.yaml and Training.run. The selected
-# values fix all scientific factors. optimization_diagnostics=false by default; enabling it adds
-# measurements only and never changes gradients. Apply clipping only when baseline diagnostics show
-# spikes, and interpret EMA/SWA as evaluation/checkpoint policies rather than repaired training.
+seeds:                                              # Ordered adaptive confirmation budget.
+  - 4                                               # Initial candidate seed.
+  - 7                                               # Confirmation seed 2.
+  - 32                                              # Confirmation seed 3.
+  - 54                                              # Confirmation seed 4.
+  - 65                                              # Confirmation seed 5.
+  - 94                                              # Confirmation seed 6.
+  - 109                                             # Confirmation seed 7.
+  - 124                                             # Confirmation seed 8.
+  - 142                                             # Confirmation seed 9.
+  - 167                                             # Confirmation seed 10.
 
-seeds: [4, 7, 32]                                   # Three-seed screening budget.
+search:                                             # Restored broad V1 backbone search.
+  strategy: adaptive                                # Allocate epochs/seeds to plausible candidates.
+  trials: 500                                       # Maximum distinct proposals.
+  runs_per_gpu: 3                                   # Pack three measured Runs per H100.
+  max_parallel: 9                                   # Bound three H100s to nine concurrent Runs.
+  min_seeds: 1                                      # Every proposal receives one seed.
+  hidden_dim:                                       # Shared atom/surface latent width.
+    values:                                         # Discrete capacity choices.
+      - 32                                          # Very compact representation.
+      - 64                                          # Compact representation.
+      - 128                                         # Current baseline width.
+      - 256                                         # High-capacity control.
+  embedding_dim:                                    # Atomic-number embedding width.
+    values:                                         # Discrete element-embedding choices.
+      - 8                                           # Minimal embedding.
+      - 16                                          # Compact embedding.
+      - 32                                          # Current baseline embedding.
+      - 64                                          # Wide embedding.
+  residue_embedding_dim:                            # Residue-identity embedding width.
+    values:                                         # Independent residue capacity.
+      - 8                                           # Minimal residue embedding.
+      - 16                                          # Compact residue embedding.
+      - 32                                          # Current baseline residue embedding.
+      - 64                                          # Wide residue embedding.
+  atomic_layers:                                    # Relation-aware atomic depth.
+    values:                                         # Number of message-passing layers.
+      - 1                                           # Shallow atomic encoder.
+      - 2                                           # Current baseline depth.
+      - 3                                           # Medium atomic depth.
+      - 4                                           # Deep atomic control.
+  projection_depth:                                 # Atom/geometry projection MLP depth.
+    values:                                         # Number of projection layers.
+      - 1                                           # Linear-depth baseline.
+      - 2                                           # One additional nonlinear stage.
+      - 3                                           # Deeper projection control.
+  surface_layers:                                   # DiffusionNet propagation depth.
+    values:                                         # Number of intrinsic surface blocks.
+      - 1                                           # Shallow surface encoder.
+      - 2                                           # Current baseline depth.
+      - 3                                           # Medium surface depth.
+      - 4                                           # Deep surface control.
+  atom_spatial_k:                                   # Runtime atomic spatial-neighbour budget.
+    values:                                         # Nested nearest-neighbour prefixes.
+      - 8                                           # Sparse local atom topology.
+      - 16                                          # Baseline topology.
+      - 24                                          # Broader topology.
+      - 32                                          # Largest tested topology.
+  surface_atom_k:                                   # Atoms considered by each surface point.
+    values:                                         # Nested transfer-neighbour prefixes.
+      - 8                                           # Compact transfer context.
+      - 16                                          # Baseline transfer context.
+      - 32                                          # Broad transfer context.
+  diffusion_spectral_modes:                         # Low-frequency intrinsic mode budget.
+    values:                                         # Runtime spectral truncations.
+      - 32                                          # Fast coarse surface spectrum.
+      - 64                                          # Medium spectrum.
+      - 128                                         # Detailed baseline spectrum.
+  surface_atom_radius:                              # Physical atom-to-surface cutoff in ångströms.
+    values:                                         # Candidate transfer radii.
+      - 4.0                                         # Compact chemical neighbourhood.
+      - 5.0                                         # Intermediate neighbourhood.
+      - 6.0                                         # Full stored baseline neighbourhood.
+  dropout: {range: [0.0, 0.5]}                     # Continuous dropout probability.
+  learning_rate: {range: [0.00001, 0.003], scale: log} # Log-uniform AdamW rate.
+  weight_decay: {range: [0.000001, 0.01], scale: log} # Log-uniform AdamW decay.
+  gate_lambda: {range: [0.0001, 0.2], scale: log}   # Log-uniform expected-L0 pressure.
 
-search:                                              # One optimizer-stability factor per candidate.
-  strategy: adaptive                                # Race on validation W after every candidate starts.
-  trials: 8                                         # Exact finite profile count.
-  proposal_pool_size: 8                             # Enumerate all profiles exactly once.
-  runs_per_gpu: 2                                   # Two runs per H100.
-  max_parallel: 4                                   # Four concurrent runs over two H100s.
-  min_seeds: 1                                      # Minimum evidence per candidate.
-  stability_profile:                                # Baseline plus O1/O2/O3/O4 candidates.
-    values: [baseline, lr_warmup_05, lr_warmup_10, clip_1, clip_5, ema_099, ema_0999, swa] # One-factor optimization screen.
-
-# LR warm-up profiles use 5% or 10% of the epoch ceiling. Clip profiles cap global gradient norm at
-# 1 or 5. EMA evaluates/checkpoints moving averages with decay .99 or .999. SWA averages optimizer
-# states from the final 20%. The smooth-to-sharp LogSumExp curriculum is intentionally excluded
-# because it changes pooling and belongs after the pooling sanity result.
-
-objective:                                           # Preserve the same frozen utility across studies.
-  metric: val_wisdom_hpo_score                      # Coupled global/local validation score.
+objective:                                          # Use the already logged joint validation utility.
+  metric: val_wisdom_hpo_score                      # Frozen global/surface/coupling score.
   mode: max                                         # Larger is better.
 
-resources:                                           # Complete study reservation.
-  gpu: 2                                             # Two H100 accelerators.
-  gpu_memory: 30GiB                                  # Per-run admission budget.
-  cpu: 24                                            # Host decoding and orchestration.
-  memory: 96GiB                                      # Shared host-memory ceiling.
-  time: 168h                                         # Seven-day wall-time ceiling.
+resources:                                          # Complete adaptive-study allocation.
+  gpu: 3                                            # Three available accelerators.
+  gpu_memory: 20GiB                                 # Per-child free-memory admission threshold.
+  cpu: 36                                           # Shared host decoding capacity.
+  memory: 100GiB                                    # Shared host-memory ceiling.
+  time: 1000h                                       # Long safety ceiling for the broad HPO.
 
-# Resource semantics are identical to wisdom_v3.yaml; LambdaForge owns scheduling.
+# Training defaults remain available for omitted fields. LambdaForge owns proposal generation,
+# racing, pruning, placement, and result indexing; WISDOM logs val_wisdom_hpo_score.

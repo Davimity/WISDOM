@@ -1,70 +1,98 @@
-# V2: factor seed variance into parameter initialization and post-initialization stochasticity.
-name: wisdom-v2-seed-diagnostics                     # Second campaign stage: isolate both RNG sources.
+# OBJECTIVE: choose one initialization policy without changing architecture or optimization.
+# PREREQUISITES: V1a-V1b must establish the baseline variance and dominant RNG source.
+# VARIES: initialization_profile only; every candidate changes one initialization subsystem.
+# FIXED: the two-layer baseline backbone, optimizer, MAX pooling, global BCE, and data.
+# DECISION: select a stable policy from complete four-seed evidence, collapse rate, and diagnostics.
+name: wisdom-v2                                     # Short campaign name for initialization screening.
+run: wisdom.Training.Training                       # Shared LambdaForge training Work.
 
-steps:                                               # Run both complementary controls independently.
-  - name: fixed-initialization                       # Experiment A: same weights, varying training randomness.
-    run: wisdom.Training.Training                    # Shared training Work.
-    with:                                            # Fixed baseline and fixed epoch-zero parameter seed.
-      dataset: {dataset: wisdom-dna-reduced@6}       # Immutable reduced benchmark.
-      model_version: 1                               # Scalar DiffusionNet/MAX baseline.
-      subset: full                                   # Complete reduced training population.
-      pooling_type: max                              # Fixed faithful pooling.
-      stability_profile: baseline                    # Historical parameter policy.
-      weak_loss_profile: baseline                    # Global BCE only.
-      architecture_spike: baseline                   # Scalar one-pass baseline.
-      initialization_seed: 2026                      # Identical epoch-zero weights in every expanded run.
-      training_seed: null                            # Null uses each LambdaForge seed for shuffle/dropout/gates.
-      save_initial_checkpoint: true                  # Publish proof that epoch-zero states are identical.
-      optimization_diagnostics: true                 # Record gradients, activations, logits, and gate saturation.
-      batch_size: 16                                 # Proteins per update.
-      epochs: 500                                    # Safety ceiling.
-      patience: 30                                   # Global-only validation patience.
-      precision: auto                                # Hardware-safe mixed precision.
-      surface_metrics: true                          # Evaluation-only local metrics.
-      surface_metrics_interval: 1                    # Track G/S/coupling over time.
-      surface_visualization: none                    # Seed diagnosis needs metrics, not repeated galleries.
-      evaluate_test: false                           # Keep test sealed.
-      data_workers: 4                                # Persistent graph decoders.
-    seeds: [4, 7, 32, 54, 65, 94, 109, 124, 142, 167] # Ten stochastic training replications.
-    objective: {metric: val_wisdom_hpo_score, mode: max} # Index results without pruning them.
-    resources: {gpu: 1, cpu: 8, memory: 24GiB, time: 168h} # Per-replication allocation.
+with:                                               # Fixed baseline around the initialization selector.
+  dataset: {dataset: wisdom-dna-reduced@6}          # Immutable reduced benchmark.
+  model_version: 1                                  # Scalar DiffusionNet/MAX generation.
+  subset: full                                      # Complete reduced training population.
+  pooling_type: max                                 # Fixed existential aggregation.
+  hidden_dim: 128                                   # Fixed latent width.
+  embedding_dim: 32                                 # Fixed element embedding width.
+  residue_embedding_dim: 32                         # Fixed residue embedding width.
+  atomic_layers: 2                                  # Fixed atomic encoder depth.
+  projection_depth: 1                               # Fixed transfer projection depth.
+  surface_layers: 2                                 # Keep the backbone depth; do not force four layers.
+  atom_spatial_k: 16                                # Fixed atom-neighbour budget.
+  surface_atom_k: 16                                # Fixed transfer-neighbour budget.
+  diffusion_spectral_modes: 128                     # Fixed intrinsic spectral budget.
+  dropout: 0.2                                      # Fixed dropout.
+  learning_rate: 0.0003                             # Fixed AdamW learning rate.
+  weight_decay: 0.0001                              # Fixed AdamW decay.
+  gate_lambda: 0.001                                # Fixed expected-L0 pressure.
+  optimization_profile: baseline                    # Optimizer policy cannot vary here.
+  weak_loss_profile: baseline                       # Global BCE only.
+  architecture_spike: baseline                      # No architectural spike.
+  optimization_diagnostics: true                    # Compare stability, not only final utility.
+  batch_size: 16                                    # Proteins per optimizer step.
+  epochs: 500                                       # Safety ceiling.
+  patience: 30                                      # Global validation patience.
+  minimum_delta: 0.001                              # Required score improvement.
+  precision: auto                                   # Hardware-safe mixed precision.
+  surface_metrics: true                             # Evaluation-only local diagnostics.
+  surface_metrics_interval: 1                       # G/S/coupling every epoch.
+  surface_visualization: none                       # Avoid candidate galleries.
+  evaluate_test: false                              # Keep test sealed.
+  data_workers: 4                                   # Persistent NPZ workers.
 
-    # initialization_seed/training_seed default to null and independently fall back to LambdaForge's
-    # run seed. save_initial_checkpoint=false by default. This step fixes only initialization;
-    # every declared seed must complete because there is no search section.
+seeds:                                              # Four paired seeds completed for every profile.
+  - 4                                               # Replication seed 1.
+  - 7                                               # Replication seed 2.
+  - 32                                              # Replication seed 3.
+  - 54                                              # Replication seed 4.
+  - 65                                              # Replication seed 5.
+  - 94                                              # Replication seed 6.
+  - 109                                             # Replication seed 7.
+  - 124                                             # Replication seed 8.
 
-  - name: fixed-training-randomness                  # Experiment B: varying weights, same later randomness.
-    run: wisdom.Training.Training                    # Shared training Work.
-    with:                                            # Same baseline, now fixing stochastic training instead.
-      dataset: {dataset: wisdom-dna-reduced@6}       # Exact dataset used by Experiment A.
-      model_version: 1                               # Exact same architecture.
-      subset: full                                   # Exact same training population.
-      pooling_type: max                              # Exact same pooling.
-      stability_profile: baseline                    # Exact same initialization policy, not seed.
-      weak_loss_profile: baseline                    # Exact same loss.
-      architecture_spike: baseline                   # Exact same architecture controls.
-      initialization_seed: null                      # Null uses each LambdaForge seed for different weights.
-      training_seed: 2026                            # Identical shuffle/dropout/gate RNG after construction.
-      save_initial_checkpoint: true                  # Publish each distinct epoch-zero state.
-      optimization_diagnostics: true                 # Same stability measurements as Experiment A.
-      batch_size: 16                                 # Proteins per update.
-      epochs: 500                                    # Safety ceiling.
-      patience: 30                                   # Global-only validation patience.
-      precision: auto                                # Hardware-safe mixed precision.
-      surface_metrics: true                          # Evaluation-only local metrics.
-      surface_metrics_interval: 1                    # Track G/S/coupling over time.
-      surface_visualization: none                    # Avoid duplicate heavy viewer artifacts.
-      evaluate_test: false                           # Keep test sealed.
-      data_workers: 4                                # Persistent graph decoders.
-    seeds: [4, 7, 32, 54, 65, 94, 109, 124, 142, 167] # Ten initialization replications.
-    objective: {metric: val_wisdom_hpo_score, mode: max} # Index results without HPO selection.
-    resources: {gpu: 1, cpu: 8, memory: 24GiB, time: 168h} # Per-replication allocation.
+search:                                             # Parallel finite initialization sweep without censoring.
+  strategy: adaptive                                # Retain concurrent child Runs, not adaptive elimination.
+  trials: 19                                        # Enumerate every authored profile once.
+  proposal_pool_size: 19                            # Exact categorical-space cardinality.
+  runs_per_gpu: 3                                   # Pack three measured Runs per H100.
+  max_parallel: 9                                   # Bound a three-H100 study to nine Runs.
+  min_seeds: 4                                      # Force all four seeds for every initialization profile.
+  confirmation_seeds: []                            # Full paired evidence needs no extra winner-only seeds.
+  early_stopping:                                   # Disable probability-based curve pruning for this sweep.
+    enabled: false                                  # Every Run reaches WISDOM's own patience or epoch ceiling.
+  initialization_profile:                          # One mutually exclusive initialization change.
+    values:                                         # Closed InitializationProfile vocabulary.
+      - baseline                                    # Historical initialization control.
+      - embedding_fan                               # Scale embeddings from fan-in/fan-out.
+      - embedding_small                             # Start embeddings from a small normal law.
+      - embedding_physical                          # Deterministic chemistry-informed embedding seed.
+      - gate_050                                    # Start semantic gates half active.
+      - gate_099                                    # Start semantic gates almost fully active.
+      - gate_warmup                                 # Delay and then ramp learned gate sparsification.
+      - diffusion_rezero                            # Zero-start DiffusionNet residual contribution.
+      - diffusion_layerscale                        # Small learned DiffusionNet residual scale.
+      - atomic_rezero                               # Zero-start atomic residual contribution.
+      - atomic_layerscale                           # Small learned atomic residual scale.
+      - neutral_edges                               # Start learned edge-attribute residuals neutral.
+      - neutral_transfer                            # Start transfer orientation/content residuals neutral.
+      - local_small                                 # Start the local head with small weights.
+      - local_calibrated                            # Small local weights plus prevalence-calibrated bias.
+      - activation_aware                            # Nonlinear-activation-aware dense initialization.
+      - orthogonal                                  # Orthogonal dense weight initialization.
+      - broader_diffusion                           # Spread initial physical diffusion lengths.
+      - same_diffusion                              # Start all existing blocks at one diffusion scale.
 
-    # The fixed training seed resets torch RNG after model construction and local-head calibration.
-    # DataLoader order, dropout, and Hard-Concrete samples therefore match as closely as deterministic
-    # CUDA kernels allow. Compare variance with fixed-initialization to identify the dominant source.
+objective:                                          # Rank candidates by WISDOM's complete validation purpose.
+  metric: val_wisdom_hpo_score                      # Joint global/surface utility.
+  mode: max                                         # Larger is better.
 
-# V2 varies initialization or training randomness through the seed lists; the architecture is fixed
-# intentionally so variance can be attributed to one RNG source. Step fields accept run, with,
-# seeds, objective, and resources. Both steps deliberately omit search:
-# adaptive pruning would bias the ten-seed variance estimate and collapse-rate diagnosis.
+resources:                                          # Complete adaptive-study allocation.
+  gpu: 3                                            # Three available accelerators.
+  gpu_memory: 20GiB                                 # Per-child free-memory admission threshold.
+  cpu: 36                                           # Shared host decoding capacity.
+  memory: 96GiB                                     # Shared host-memory ceiling.
+  time: 168h                                        # Seven-day ceiling.
+
+# initialization_profile defaults to custom. baseline changes no detailed parameter. This screen
+# deliberately keeps surface_layers=2; diffusion schedules adapt to the actual backbone depth.
+# min_seeds=4 equals the complete seeds list, early_stopping=false disables curve pruning, and
+# confirmation_seeds=[] avoids appending winner-only evidence to an already complete paired sweep.

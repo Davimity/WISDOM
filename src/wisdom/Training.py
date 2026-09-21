@@ -25,6 +25,8 @@ from wisdom.models.ModelWeightAverage import ModelWeightAverage
 from wisdom.models.ArchitectureSpike import ArchitectureSpike
 from wisdom.models.WeakLossProfile import WeakLossProfile
 from wisdom.models.StabilityProfile import StabilityProfile
+from wisdom.models.InitializationProfile import InitializationProfile
+from wisdom.models.OptimizationProfile import OptimizationProfile
 from wisdom.models.WeightAveragingMode import WeightAveragingMode
 from wisdom.data.WisdomDataset import WisdomDataset
 from wisdom.data.WisdomCollator import WisdomCollator
@@ -121,7 +123,9 @@ class Training(lf.Work):
         gate_lambda          : float = 1.0e-3,
         architecture_spike            : str   = "custom",
         weak_loss_profile              : str   = "custom",
-        stability_profile             : str   = "custom",
+        initialization_profile        : str   = "custom",
+        optimization_profile          : str   = "custom",
+        stability_profile             : str | None = None,
         embedding_initialization       : str   = "current",
         gate_initial_active            : float = 0.95,
         gate_warmup_fraction           : float = 0.0,
@@ -220,8 +224,12 @@ class Training(lf.Work):
                 or vector-state hypothesis. ``custom`` preserves the detailed model arguments.
             weak_loss_profile: Named sequential weak-supervision candidate. ``custom`` preserves
                 the detailed weak-loss coefficients.
-            stability_profile: Named one-factor initialization/optimization candidate. ``custom``
-                leaves all following detailed controls unchanged.
+            initialization_profile: Named model-initialization candidate. It changes no optimizer
+                behavior, so its winner can remain active during the optimizer screen.
+            optimization_profile: Named optimizer-stability candidate. It changes no model
+                initialization, so it composes with ``initialization_profile``.
+            stability_profile: Deprecated combined profile accepted for archived YAMLs. It cannot
+                be combined with either new named profile.
             embedding_initialization: Categorical embedding scale policy.
             gate_initial_active: Initial Hard-Concrete activity probability.
             gate_warmup_fraction: Initial training fraction with all semantic gates forced on and
@@ -350,6 +358,8 @@ class Training(lf.Work):
             gate_lambda=gate_lambda,
             architecture_spike=architecture_spike,
             weak_loss_profile=weak_loss_profile,
+            initialization_profile=initialization_profile,
+            optimization_profile=optimization_profile,
             stability_profile=stability_profile,
             embedding_initialization=embedding_initialization,
             gate_initial_active=gate_initial_active,
@@ -443,7 +453,9 @@ def _train_wisdom(
     gate_lambda          : float = 1.0e-3,
     architecture_spike            : str   = "custom",
     weak_loss_profile              : str   = "custom",
-    stability_profile             : str   = "custom",
+    initialization_profile        : str   = "custom",
+    optimization_profile          : str   = "custom",
+    stability_profile             : str | None = None,
     embedding_initialization       : str   = "current",
     gate_initial_active            : float = 0.95,
     gate_warmup_fraction           : float = 0.0,
@@ -541,7 +553,9 @@ def _train_wisdom(
         gate_lambda: Non-negative multiplier for the normalized expected L0 gate cost.
         architecture_spike: Named one-factor architecture candidate or ``custom``.
         weak_loss_profile: Named sequential weak-loss candidate or ``custom``.
-        stability_profile: Named one-factor candidate or ``custom`` for explicit detailed values.
+        initialization_profile: Named initialization candidate or ``custom`` for explicit values.
+        optimization_profile: Named optimizer candidate or ``custom`` for explicit values.
+        stability_profile: Deprecated combined profile. It cannot be mixed with the new profiles.
         embedding_initialization: Categorical embedding scale policy.
         gate_initial_active: Initial Hard-Concrete activity probability.
         gate_warmup_fraction: Initial all-on/no-L0 fraction of training.
@@ -669,8 +683,27 @@ def _train_wisdom(
         loss_overrides.get("dirichlet_lambda", dirichlet_lambda),
     )
 
-    profile = StabilityProfile(stability_profile)
-    profile_overrides = profile.overrides()
+    # Initialization and optimization are independent scientific decisions. The legacy selector
+    # remains reproducible, but mixing it with either new selector would make precedence ambiguous.
+
+    initialization = InitializationProfile(initialization_profile)
+    optimization   = OptimizationProfile(optimization_profile)
+    legacy_profile = StabilityProfile(stability_profile or "custom")
+
+    if legacy_profile is not StabilityProfile.CUSTOM and (
+        initialization is not InitializationProfile.CUSTOM
+        or optimization is not OptimizationProfile.CUSTOM
+    ):
+        raise ValueError(
+            "legacy stability_profile cannot be combined with initialization_profile or "
+            "optimization_profile"
+        )
+
+    profile_overrides = {
+        **legacy_profile.overrides(),
+        **initialization.overrides(),
+        **optimization.overrides(),
+    }
     embedding_initialization = str(
         profile_overrides.get("embedding_initialization", embedding_initialization)
     )
@@ -842,7 +875,9 @@ def _train_wisdom(
     }
     initialization_configuration = {
         "architecture_spike":               architecture.value,
-        "stability_profile":                profile.value,
+        "initialization_profile":           initialization.value,
+        "optimization_profile":             optimization.value,
+        "stability_profile":                legacy_profile.value,
         "embedding_initialization":         embedding_initialization,
         "gate_initial_active":              gate_initial_active,
         "gate_warmup_fraction":             gate_warmup_fraction,

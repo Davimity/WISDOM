@@ -1,0 +1,132 @@
+# OBJECTIVE: test positive existence, regional existence, and regional ranking one family at a time.
+# PREREQUISITES: run only if V6a found useful negative-surface supervision.
+# VARIES: one additional regional/existence coefficient within each independent step.
+# FIXED: the V6a negative_surface_lambda winner and every earlier campaign winner.
+# DECISION: choose at most one added regional prior; do not combine the three families here.
+name: wisdom-v6b                                    # Short campaign name for regional weak losses.
+
+steps:                                              # Each step adds one family to the same V6a winner.
+  - name: positive-existence                       # Require some positive point in positive bags.
+    run: wisdom.Training.Training                   # Shared LambdaForge Work.
+    with: &loss_region_base                         # Common frozen backbone for all three steps.
+      dataset: {dataset: wisdom-dna-reduced@6}      # Immutable reduced benchmark.
+      model_version: 2                              # Pooling-capable internal generation.
+      subset: full                                  # Complete reduced training population.
+      pooling_type: max                             # REPLACE with the V5 winner.
+      topk_fraction: 0.05                           # REPLACE if V5 selects top-k.
+      attention_hidden_dim: 32                      # REPLACE if V5 selects attention.
+      regional_diffusion_scale: 2.5                 # REPLACE if V5 selects local-mean-max.
+      log_sum_exp_beta: 5.0                         # REPLACE if V5 selects LogSumExp.
+      initialization_profile: baseline              # REPLACE with the V2 winner.
+      optimization_profile: baseline                # REPLACE with the V3 winner.
+      hidden_dim: 128                               # REPLACE with the V4 winner.
+      embedding_dim: 32                             # REPLACE with the V4 winner.
+      residue_embedding_dim: 32                     # REPLACE with the V4 winner.
+      atomic_layers: 2                              # REPLACE with the V4 winner.
+      projection_depth: 1                           # REPLACE with the V4 winner.
+      surface_layers: 2                             # REPLACE with the V4 winner.
+      atom_spatial_k: 16                            # REPLACE with the V4 winner.
+      surface_atom_k: 16                            # REPLACE with the V4 winner.
+      diffusion_spectral_modes: 128                 # REPLACE with the V4 winner.
+      surface_atom_radius: 6.0                      # REPLACE with the V4 winner.
+      dropout: 0.2                                  # REPLACE with the V4 winner.
+      learning_rate: 0.0003                         # REPLACE with the V4 winner.
+      weight_decay: 0.0001                          # REPLACE with the V4 winner.
+      gate_lambda: 0.001                            # REPLACE with the V4 winner.
+      negative_surface_lambda: 0.3                  # REPLACE with the V6a winner.
+      positive_existence_lambda: 0.0                # Search overrides this only in its own step.
+      regional_positive_lambda: 0.0                 # Search overrides this only in its own step.
+      regional_ranking_lambda: 0.0                  # Search overrides this only in its own step.
+      weak_loss_profile: custom                     # Preserve explicit composable coefficients.
+      architecture_spike: baseline                  # No architecture change.
+      head_type: single                             # Fixed head relationship.
+      regional_loss_length: 2.5                     # Intrinsic smoothing length in ångströms.
+      regional_ranking_margin: 0.5                  # Positive-versus-negative regional margin.
+      batch_size: 16                                # Proteins per optimizer update.
+      epochs: 500                                   # Safety ceiling.
+      patience: 30                                  # Global validation patience.
+      precision: auto                               # Hardware-safe mixed precision.
+      surface_metrics: true                         # Evaluation-only local metrics.
+      surface_metrics_interval: 1                   # Required G/S/regret curves.
+      surface_visualization: none                   # Avoid candidate galleries.
+      evaluate_test: false                          # Keep test sealed.
+      data_workers: 4                               # Persistent NPZ workers.
+    seeds: &loss_region_seeds                       # Four complete paired seeds per coefficient.
+      - 4                                           # Replication seed 1.
+      - 7                                           # Replication seed 2.
+      - 32                                          # Replication seed 3.
+      - 54                                          # Replication seed 4.
+    search:                                         # Existence-only coefficient search.
+      strategy: adaptive                            # Retain concurrent child Runs without elimination.
+      trials: 4                                     # Control plus three weights.
+      proposal_pool_size: 4                         # Enumerate the finite grid.
+      runs_per_gpu: 3                               # Three Runs per H100.
+      max_parallel: 9                               # Nine Runs over three H100s.
+      min_seeds: 4                                  # Force all four seeds for every coefficient.
+      confirmation_seeds: []                        # Do not add unequal winner-only seeds.
+      early_stopping:                               # Disable probability-based curve pruning.
+        enabled: false                              # Every Run reaches WISDOM's own stopping rule.
+      positive_existence_lambda:                    # Positive-bag existential prior.
+        values:                                     # One-dimensional screen.
+          - 0.0                                     # V6a parent control.
+          - 0.1                                     # Weak existence constraint.
+          - 0.3                                     # Moderate existence constraint.
+          - 1.0                                     # Strong existence constraint.
+    objective: &loss_region_objective               # Shared joint validation decision.
+      metric: val_wisdom_hpo_score                  # Global/surface/coupling utility.
+      mode: max                                     # Larger is better.
+    resources: &loss_region_resources               # Shared study allocation.
+      gpu: 3                                        # Three accelerators.
+      gpu_memory: 20GiB                             # Per-child admission threshold.
+      cpu: 36                                       # Shared host capacity.
+      memory: 96GiB                                 # Shared host-memory ceiling.
+      time: 168h                                    # Seven-day ceiling.
+
+  - name: regional-existence                       # Require positive evidence after fixed diffusion.
+    run: wisdom.Training.Training                   # Same LambdaForge Work.
+    with: *loss_region_base                         # Exact same frozen parent configuration.
+    seeds: *loss_region_seeds                       # Exact same paired seeds.
+    search:                                         # Regional-existence-only screen.
+      strategy: adaptive                            # Retain concurrent child Runs without elimination.
+      trials: 3                                     # Control plus two planned weights.
+      proposal_pool_size: 3                         # Enumerate the finite grid.
+      runs_per_gpu: 3                               # Three Runs per H100.
+      max_parallel: 9                               # Nine Runs over three H100s.
+      min_seeds: 4                                  # Force all four seeds for every coefficient.
+      confirmation_seeds: []                        # Do not add unequal winner-only seeds.
+      early_stopping:                               # Disable probability-based curve pruning.
+        enabled: false                              # Every Run reaches WISDOM's own stopping rule.
+      regional_positive_lambda:                     # Diffused positive-bag prior.
+        values:                                     # One-dimensional screen.
+          - 0.0                                     # V6a parent control.
+          - 0.1                                     # Weak regional constraint.
+          - 0.3                                     # Moderate regional constraint.
+    objective: *loss_region_objective               # Same joint decision metric.
+    resources: *loss_region_resources               # Same allocation.
+
+  - name: regional-ranking                         # Rank positive regional evidence above negatives.
+    run: wisdom.Training.Training                   # Same LambdaForge Work.
+    with: *loss_region_base                         # Exact same frozen parent configuration.
+    seeds: *loss_region_seeds                       # Exact same paired seeds.
+    search:                                         # Ranking-only coefficient screen.
+      strategy: adaptive                            # Retain concurrent child Runs without elimination.
+      trials: 3                                     # Control plus two planned weights.
+      proposal_pool_size: 3                         # Enumerate the finite grid.
+      runs_per_gpu: 3                               # Three Runs per H100.
+      max_parallel: 9                               # Nine Runs over three H100s.
+      min_seeds: 4                                  # Force all four seeds for every coefficient.
+      confirmation_seeds: []                        # Do not add unequal winner-only seeds.
+      early_stopping:                               # Disable probability-based curve pruning.
+        enabled: false                              # Every Run reaches WISDOM's own stopping rule.
+      regional_ranking_lambda:                      # Mixed-batch regional ranking prior.
+        values:                                     # One-dimensional screen.
+          - 0.0                                     # V6a parent control.
+          - 0.1                                     # Weak ranking constraint.
+          - 0.3                                     # Moderate ranking constraint.
+    objective: *loss_region_objective               # Same joint decision metric.
+    resources: *loss_region_resources               # Same allocation.
+
+# YAML anchors duplicate only configuration text; LambdaForge still expands three independent
+# studies. No Run combines existence, regional, and ranking coefficients.
+# Every step uses all four seeds, disables curve pruning, and disables fresh confirmation so its
+# coefficient comparison is complete and paired rather than adaptively censored.

@@ -1,0 +1,101 @@
+# OBJECTIVE: separate variance from parameter initialization and later training randomness.
+# PREREQUISITES: V1a must show that seed variance is scientifically relevant.
+# VARIES: one RNG source at a time through two complementary, fully replicated controls.
+# FIXED: the complete baseline architecture, initialization policy, optimizer, loss, and data.
+# DECISION: identify which RNG source must be controlled in later comparisons.
+name: wisdom-v1b                                    # Short campaign name for seed factorization.
+
+steps:                                              # A paired variance decomposition, not duplicate Runs.
+  - name: vary-training-rng                         # Fix weights; vary shuffle, dropout, and gates.
+    run: wisdom.Training.Training                   # Shared LambdaForge Work.
+    with:                                           # Fixed epoch-zero parameter seed.
+      dataset: {dataset: wisdom-dna-reduced@6}      # Same immutable dataset as V1a.
+      model_version: 1                              # Same internal capability generation.
+      subset: full                                  # Same complete reduced train set.
+      pooling_type: max                             # Same MAX aggregation.
+      initialization_profile: baseline              # Same initialization policy.
+      optimization_profile: baseline                # Same optimizer policy.
+      weak_loss_profile: baseline                   # Same global BCE.
+      architecture_spike: baseline                  # Same scalar one-pass model.
+      initialization_seed: 2026                     # Identical parameter tensors in all Runs.
+      training_seed: null                           # Each LambdaForge seed drives later randomness.
+      save_initial_checkpoint: true                 # Preserve epoch-zero identity evidence.
+      optimization_diagnostics: true                # Record collapse and gradient evidence.
+      batch_size: 16                                # Proteins per update.
+      epochs: 500                                   # Safety ceiling.
+      patience: 30                                  # Global validation patience.
+      precision: auto                               # Hardware-safe mixed precision.
+      surface_metrics: true                         # Evaluation-only local diagnostics.
+      surface_metrics_interval: 1                   # Coupling curve at every validation epoch.
+      surface_visualization: none                   # No repeated viewer galleries.
+      evaluate_test: false                          # Keep test sealed.
+      data_workers: 4                               # Persistent NPZ workers.
+    seeds:                                          # Complete uncensored training-RNG sample.
+      - 4                                           # Training-randomness seed 1.
+      - 7                                           # Training-randomness seed 2.
+      - 32                                          # Training-randomness seed 3.
+      - 54                                          # Training-randomness seed 4.
+      - 65                                          # Training-randomness seed 5.
+      - 94                                          # Training-randomness seed 6.
+      - 109                                         # Training-randomness seed 7.
+      - 124                                         # Training-randomness seed 8.
+      - 142                                         # Training-randomness seed 9.
+      - 167                                         # Training-randomness seed 10.
+    objective:                                      # Index all replications without pruning.
+      metric: val_wisdom_hpo_score                  # Joint validation utility.
+      mode: max                                     # Larger is better.
+    resources:                                      # Allocation for this independent step.
+      gpu: 2                                        # One accelerator per Run.
+      cpu: 32                                       # Trainer plus data workers.
+      memory: 20GiB                                 # Host decoding budget.
+      time: 1680h                                   # Seven-day ceiling.
+
+  - name: vary-initialization-rng                   # Vary weights; fix shuffle, dropout, and gates.
+    run: wisdom.Training.Training                   # Same LambdaForge Work.
+    with:                                           # Complementary seed control.
+      dataset: {dataset: wisdom-dna-reduced@6}      # Exact dataset used above.
+      model_version: 1                              # Exact internal generation used above.
+      subset: full                                  # Exact training population used above.
+      pooling_type: max                             # Exact MAX aggregation used above.
+      initialization_profile: baseline              # Same initialization policy, not same tensors.
+      optimization_profile: baseline                # Same optimizer policy.
+      weak_loss_profile: baseline                   # Same global BCE.
+      architecture_spike: baseline                  # Same scalar one-pass model.
+      initialization_seed: null                     # LambdaForge seed changes parameter tensors.
+      training_seed: 2026                           # Fix shuffle/dropout/gates after construction.
+      save_initial_checkpoint: true                 # Preserve each distinct epoch-zero state.
+      optimization_diagnostics: true                # Same diagnostic measurements.
+      batch_size: 16                                # Proteins per update.
+      epochs: 500                                   # Safety ceiling.
+      patience: 30                                  # Global validation patience.
+      precision: auto                               # Hardware-safe mixed precision.
+      surface_metrics: true                         # Evaluation-only local diagnostics.
+      surface_metrics_interval: 1                   # Coupling curve every epoch.
+      surface_visualization: none                   # No repeated viewer galleries.
+      evaluate_test: false                          # Keep test sealed.
+      data_workers: 4                               # Persistent NPZ workers.
+    seeds:                                          # Complete uncensored initialization sample.
+      - 4                                           # Initialization seed 1.
+      - 7                                           # Initialization seed 2.
+      - 32                                          # Initialization seed 3.
+      - 54                                          # Initialization seed 4.
+      - 65                                          # Initialization seed 5.
+      - 94                                          # Initialization seed 6.
+      - 109                                         # Initialization seed 7.
+      - 124                                         # Initialization seed 8.
+      - 142                                         # Initialization seed 9.
+      - 167                                         # Initialization seed 10.
+    objective:                                      # Index all replications without pruning.
+      metric: val_wisdom_hpo_score                  # Joint validation utility.
+      mode: max                                     # Larger is better.
+    resources:                                      # Allocation for this independent step.
+      gpu: 2                                        # One accelerator per Run.
+      cpu: 32                                       # Trainer plus data workers.
+      memory: 20GiB                                 # Host decoding budget.
+      time: 1680h                                    # Seven-day ceiling.
+
+# The first step estimates variance from training stochasticity conditional on identical epoch-zero
+# weights. The second estimates variance from parameter initialization while subsequent stochastic
+# draws are held fixed. They answer complementary questions and therefore cannot be merged.
+# This experiment deliberately has no search section: adaptive selection would truncate weak seeds
+# and bias the variance decomposition.

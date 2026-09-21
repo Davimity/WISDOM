@@ -99,14 +99,17 @@ lf run experiments/dna_preprocess.yaml --dry-run
 lf run experiments/dna_preprocess.yaml --on citius-ctgpgpu12
 
 lf validate experiments/validate_dna.yaml  # after wisdom-dna-reduced@6 exists
-lf validate experiments/wisdom_v1.yaml
-lf run experiments/wisdom_v1.yaml --dry-run
-for version in 2 3 4 5 6 7 8 9; do lf validate "experiments/wisdom_v${version}.yaml"; done
+lf validate experiments/wisdom_v1a.yaml
+lf run experiments/wisdom_v1a.yaml --dry-run
+lf validate experiments/wisdom_v4.yaml
 
-# After reviewing the HPO winner and copying its exact best-model.pt artifact:
-lf validate experiments/wisdom_v10.yaml
-lf run experiments/wisdom_v10.yaml --dry-run
+# After V10 and after copying its reviewed best-model.pt artifact:
+lf validate experiments/interpretability_sparse_concepts.yaml
+lf run experiments/interpretability_sparse_concepts.yaml --dry-run
 ```
+
+[`experiments/README.md`](experiments/README.md) is the authoritative execution order. Construction
+files use `stage_*` names; they are not formal WISDOM generations.
 
 `validate` checks the YAML, method arguments, imports, and dataset/file references. `explain` shows
 the resolved parameters and defaults. `run` executes the enabled actions. Preprocessing publishes a
@@ -2166,9 +2169,9 @@ mypy src/wisdom
 pytest -q
 lf validate experiments/dna_preprocess.yaml
 lf validate experiments/validate_dna.yaml
-lf validate experiments/wisdom_v1.yaml
-lf validate experiments/wisdom_v2.yaml
-lf validate experiments/wisdom_v3.yaml
+lf validate experiments/wisdom_v1a.yaml
+lf validate experiments/wisdom_v4.yaml
+lf validate experiments/wisdom_v10.yaml
 ```
 
 Tests are offline and cover PDB/mmCIF/gzip, input grammar, model and chain errors, filters, alternate
@@ -2746,18 +2749,19 @@ Thus one strongly positive region can make the protein prediction positive. Only
 enter training. MAX is not claimed to be universally optimal: Section 5.3 performs a small
 pre-freeze sanity check before any formal version is assigned to a pooling study.
 
-**Current experiment order.** The master plan separates measurement from model changes.
-The executable campaign is numbered in scientific order. `wisdom_v1.yaml` measures the unchanged
-baseline over ten complete seeds; `wisdom_v2.yaml` separates weight-initialization randomness from
-later shuffle/dropout/gate randomness; V3 varies initialization; V4 varies optimizer stabilization;
-V5 varies pooling; V6 varies one weak surface prior; V7 varies the relationship between global and
-surface heads; V8 varies one architecture spike; and V9 varies only the surface encoder. The many
-fixed values in each file are controls, not an empty experiment: exactly the factor named by that
-stage changes. A later stage must not be run merely because its YAML exists; the preceding decision
-gate must first provide a winner worth carrying forward.
+**Current experiment order.** The short filenames run from `wisdom_v1a.yaml` to
+`wisdom_v10.yaml`. These labels order the construction campaign; they are not ten validated model
+generations. V1a–V1b diagnose seed variance, V2 selects initialization, V3 selects optimizer
+stability, V4 performs broad core HPO, V5 checks pooling, V6a–V6c screen weak-loss families, and
+V6d tests their joint contribution. V7 compares heads, V8 tests isolated spikes, V9 performs a
+small final retune, and V10 confirms the frozen ledger on fresh seeds.
+[`experiments/README.md`](experiments/README.md) gives the authoritative order. Formal scientific
+WISDOM generations in the roadmap remain distinct from these compact experiment labels.
 
-Protein logits receive binary cross-entropy. Surface labels remain diagnostic: they do not enter
-gradients, gate learning, checkpoint selection, HPO or pruning. The first planned weak loss is
+Protein logits receive binary cross-entropy. Surface labels do not enter gradients, gate learning,
+or within-Run checkpoint selection. Their aggregate validation metrics do enter the declared
+campaign objective and can therefore guide experiment-level HPO/pruning, as Section 5.5 explains;
+test labels remain sealed. The first planned weak loss is
 implemented behind `negative_surface_lambda`, which defaults to zero. It uses only the logically
 known fact that a curated negative protein contains no positive site; it never reads point labels.
 Every epoch records task loss, negative-bag loss, gate regularization, their total, expected active
@@ -2841,7 +2845,7 @@ Fractional top-k always selects at least one point. Noisy-OR remains absent beca
 of points as independent Bernoulli variables makes `1-product(1-p)` saturate near one without a
 justified physical independence model.
 
-V2 exposes maps that can be saved in the original NPZ point order:
+The pooling-capable internal model implementation exposes maps in the original NPZ point order:
 
 - `surface_logits[M]` and `surface_probabilities[M]=sigmoid(surface_logits)`;
 - `localization_scores[M]`, an area-aware distribution
@@ -2860,11 +2864,10 @@ architecture-level HPO score described in Section 5.5.
 
 ### 5.4. Deferred surface-encoder screen
 
-The implemented encoder screen holds the gated atomic encoder, bounded transfer, local output
-layer, an explicitly selected pooling, loss and data splits fixed. It changes only
-`surface_encoder_type`, so differences can be attributed to surface propagation rather than to
-simultaneous changes in supervision or aggregation. Under the master plan this is a future V5
-question, not V3, and must wait for the stability, weak-loss and formal pooling decision gates.
+Alternative encoders are implemented as capability infrastructure, but no current YAML executes an
+encoder screen. That comparison is formal WISDOM V5 and must wait for a frozen V1. Its future YAML
+must hold the selected atomic encoder, transfer, local output, pooling, weak loss, head and data
+fixed while changing only `surface_encoder_type`.
 
 | Value | Implemented idea | Geometric input |
 |---|---|---|
@@ -2878,9 +2881,9 @@ These are compact WISDOM implementations of the published mechanisms, not claims
 code reproduction. Every encoder runs forward/backward on variable-size synthetic proteins; the
 default DiffusionNet and transfer additionally have rigid-motion and permutation tests. Morton
 serialization in PTv3/PointMamba is a deliberate orientation-sensitive experimental bias, not a
-property of the invariant v1/v2 default. The bounded table keeps local encoders at `O(M K_s D)`; spectral
-diffusion uses `O(M Q D)`. The experiment YAML enumerates every encoder and uses adaptive seed
-racing to concentrate repetitions on plausible alternatives; it is not a second capacity HPO.
+property of the invariant V1 default. The bounded table keeps local encoders at `O(M K_s D)`;
+spectral diffusion uses `O(M Q D)`. Their existence in source code is technical readiness, not
+evidence that the comparison has run or that any encoder has improved WISDOM.
 
 The names summarize different communication rules. The dMaSIF-like encoder weights a small patch
 using distances and agreement between surface normals. DeltaConv alternates scalar features with
@@ -2920,28 +2923,34 @@ explicitly; automatic compatibility would hide a scientific change.
 
 | Configuration | Responsibility |
 |---|---|
-| `wisdom_v1.yaml` | Measure the unfiltered ten-seed baseline; only the complete run seed changes. |
-| `wisdom_v2.yaml` | Hold initialization fixed while training randomness changes, then perform the complementary control. |
-| `wisdom_v3.yaml` | Compare one initialization policy at a time with architecture, loss, and optimizer fixed. |
-| `wisdom_v4.yaml` | Compare LR warm-up, clipping, EMA, and SWA independently after selecting initialization. |
-| `wisdom_v5.yaml` | Compare conditional pooling families and their family-specific parameters. |
-| `wisdom_v6.yaml` | Compare the baseline with one weak surface-prior family at a time. |
-| `wisdom_v7.yaml` | Compare single, dual, global-context, and FiLM head relationships. |
-| `wisdom_v8.yaml` | Compare point-conditioned transfer, a depth control, feedback, and vector-state spikes. |
-| `wisdom_v9.yaml` | Conditionally compare surface encoders after all earlier gates pass. |
-| `wisdom_v10.yaml` | Interpret one explicit winning checkpoint after the trainable campaign; the sparse fit varies its regularization internally. |
+| `V1a`–`V1b` | Measure baseline variance and separate its two random sources without HPO. |
+| `V2`–`V3` | Select initialization and optimizer stability independently so both winners compose. |
+| `wisdom_v4.yaml` | Search the complete fixed-MAX core widths, depths, neighbourhoods and regularization. |
+| `wisdom_v5.yaml` | Check conditional pooling families before weak local supervision. |
+| `V6a`–`V6c` | Add weak-loss families sequentially and only when the previous decision justifies them. |
+| `wisdom_v6d.yaml` | Tune the joint contribution of credible negative, regional, and smoothing losses. |
+| `V7`–`V8` | Compare head relationships and then isolated architecture spikes. |
+| `V9`–`V10` | Retune sensitive numeric values, then confirm the frozen ledger on fresh seeds. |
+| `interpretability_sparse_concepts.yaml` | Analyze one explicit frozen checkpoint post hoc. |
 
-The filename number is the campaign stage. The `model_version` field is a narrower implementation
-selector: `1` enforces the original MAX/DiffusionNet interface, `2` exposes pooling and head
-alternatives, and `3` exposes surface-encoder alternatives. Therefore V6 may legitimately use
-`model_version: 2`; that does not skip four experiments or claim a sixth neural architecture.
+The `model_version` field is only an internal capability selector: `1` enforces the original
+MAX/DiffusionNet interface, `2` exposes pooling/head/spike interfaces, and `3` exposes alternative
+surface encoders. It is not a stage number or a claim that a formal scientific version exists.
+
+Initialization and optimizer stabilization are also separate selectors. `initialization_profile`
+controls only epoch-zero model state, while `optimization_profile` controls warm-up, clipping or
+weight averaging. Consequently a selected initialization such as `gate_warmup` remains active when
+V3 tests `ema_0999`. The older combined `stability_profile` is accepted only to reproduce
+archived YAMLs and cannot be mixed with either new selector.
 
 The baseline uses all ten ordered seeds `[4,7,32,54,65,94,109,124,142,167]`; none may be pruned.
-Later screens may start each candidate with one shared seed. LambdaForge requests another seed while the estimated
-probability that the candidate lies within `0.015` utility of the incumbent remains at least 5%.
-It then confirms the winning search result on fresh seeds that were not used to guide the search.
-V3 through V9 still test only one scientific factor per stage: racing affects the amount of evidence collected,
-not architecture values, data membership, loss, or validation definitions.
+Finite one-factor sweeps (V2, V3, V5, V6a–V6c, V7, and V8) also disable curve pruning and set
+`min_seeds` equal to their complete four- or five-seed list. LambdaForge therefore executes every
+candidate on the same paired seeds. They retain `strategy: adaptive` only because its child scheduler
+can run trials concurrently; LambdaForge's literal `strategy: exhaustive` executes members serially.
+The multidimensional searches V4, V6d, and V9 keep probability-based pruning and seed racing because
+their purpose is efficient hyperparameter optimization. Their finalists are re-evaluated on fresh
+confirmation seeds that did not guide the search.
 
 The baseline sets `negative_surface_lambda: 0.0`. A later weak-loss screen may make it positive.
 For each globally negative training protein `i`, let `l_ip` be the local logit and `a_ip` its
@@ -2955,6 +2964,28 @@ L_{neg}=\frac{1}{|B_-|}\sum_{i\in B_-}\sum_p a_{ip}\,\operatorname{softplus}(l_{
 surface GT: it follows from the curated negative-bag definition. Positive proteins are excluded
 because their weak label says only that at least one positive region exists, not which points are
 positive. The planned first screen uses weights 0.1, 0.3, and 1.0 only after pooling is fixed.
+
+V6b separately tests positive existence, existence after fixed intrinsic diffusion, and ranking of
+positive regions above negative ones. V6c separately tests an expected positive-area interval,
+edgewise total variation, and intrinsic Dirichlet energy. These are weak priors: they use protein
+labels and surface geometry, never the local DNA-contact ground truth. Testing them separately first
+shows which assumption helps and prevents one coefficient from hiding another.
+
+V6d is run only if one term from each family is credible. Its authored default combines the negative
+term above, regional positive existence, and Dirichlet smoothing. Let `L_BCE` be protein-level binary
+cross-entropy, `L_reg` require the largest diffused logit in a positive protein to be positive, and
+`L_D` be the normalized spectral energy of its probability map. The optimized training loss is
+
+```math
+L_{V6d}=L_{BCE}+\lambda_{neg}L_{neg}+\lambda_{reg}L_{reg}
+         +\lambda_D L_D+\lambda_{gate}L_{gate}.
+```
+
+The 27 combinations are the Cartesian product of three values for each of `lambda_neg`,
+`lambda_reg`, and `lambda_D`. This is an interaction HPO rather than a one-factor sweep, so it keeps
+probabilistic pruning and seed racing, then re-evaluates the three best mixtures on four untouched
+seeds. If V6b or V6c selects a different family, its existing `*_lambda` key replaces the regional
+or Dirichlet key in `wisdom_v6d.yaml`; TV and Dirichlet are never enabled together.
 
 WISDOM is intended to produce a meaningful surface map, not merely a correct protein label. The
 development protocol therefore records three distinct quantities. `G` measures protein
@@ -3289,7 +3320,7 @@ already lives in the YAML:
 
 ```bash
 lf datasets materialize wisdom-dna-reduced@6 --on citius-ctgpgpu12 --strategy replicate --apply
-lf run experiments/wisdom_v1.yaml --on citius-ctgpgpu12
+lf run experiments/wisdom_v1a.yaml --on citius-ctgpgpu12
 ```
 
 The direct-process cluster normally uses exclusive LambdaForge GPU leases and avoids devices with
@@ -3313,40 +3344,31 @@ Inspect composition and plans without creating study state:
 lf datasets list --all
 lf datasets show wisdom-dna-reduced@6
 lf datasets locations wisdom-dna-reduced@6
-lf validate experiments/wisdom_v1.yaml
-lf explain experiments/wisdom_v1.yaml
-lf run experiments/wisdom_v1.yaml --dry-run
+lf validate experiments/wisdom_v1a.yaml
+lf explain experiments/wisdom_v1a.yaml
+lf run experiments/wisdom_v1a.yaml --dry-run
 
-lf validate experiments/wisdom_v2.yaml
-lf explain experiments/wisdom_v2.yaml
-lf run experiments/wisdom_v2.yaml --dry-run
-
-lf validate experiments/wisdom_v3.yaml
-lf explain experiments/wisdom_v3.yaml
-lf run experiments/wisdom_v3.yaml --dry-run
-
-for version in 4 5 6 7 8 9; do
-  lf validate "experiments/wisdom_v${version}.yaml"
-  lf run "experiments/wisdom_v${version}.yaml" --dry-run
-done
+lf validate experiments/wisdom_v4.yaml
+lf explain experiments/wisdom_v4.yaml
+lf run experiments/wisdom_v4.yaml --dry-run
 ```
 
-Start v1 with the normal command. Repeating the exact command lets LambdaForge reuse or resume its
-own durable Work evidence; never edit framework state or event files manually.
+Start V1a with the normal command. Repeating it lets LambdaForge reuse or resume its durable
+Work evidence; never edit framework state or event files manually.
 
 ```bash
-lf run experiments/wisdom_v1.yaml
+lf run experiments/wisdom_v1a.yaml
 lf results list
 lf results analyze EXECUTION_ID
-lf results report EXECUTION_ID --output wisdom-v1-report.html
+lf results report EXECUTION_ID --output wisdom-v1a-report.html
 ```
 
 Review seed dispersion, learning curves, suspicious search boundaries, and model simplicity; do not
-copy the largest decimal blindly. V2 next identifies whether weight initialization or subsequent
-training stochasticity dominates. Carry supported choices through V3 initialization, V4 optimizer
-stability, and then V5 pooling:
+copy the largest decimal blindly. Then separate both random sources, select initialization and
+optimizer policies, run the restored core HPO, and check pooling:
 
 ```bash
+lf run experiments/wisdom_v1b.yaml
 lf run experiments/wisdom_v2.yaml
 lf run experiments/wisdom_v3.yaml
 lf run experiments/wisdom_v4.yaml
@@ -3354,16 +3376,23 @@ lf run experiments/wisdom_v5.yaml
 lf results analyze EXECUTION_ID
 ```
 
-Continue only after each previous decision gate passes. V6 compares weak priors, V7 head
-relationships, V8 isolated architecture spikes, and V9 the deferred surface encoders:
+Continue only after each decision gate passes. The weak-loss stages are sequential and conditional;
+heads, architecture, final retuning and uncensored confirmation follow:
 
 ```bash
-lf run experiments/wisdom_v6.yaml
+lf run experiments/wisdom_v6a.yaml
+lf run experiments/wisdom_v6b.yaml       # only after useful V6a signal
+lf run experiments/wisdom_v6c.yaml       # only for a diagnosed remaining failure
+lf run experiments/wisdom_v6d.yaml       # only if one term from each family is credible
 lf run experiments/wisdom_v7.yaml
 lf run experiments/wisdom_v8.yaml
 lf run experiments/wisdom_v9.yaml
+lf run experiments/wisdom_v10.yaml
 lf results analyze EXECUTION_ID
 ```
+
+Before each downstream launch, copy every reviewed winner into the fields marked `REPLACE`. The
+complete question/prerequisite/decision table is in [`experiments/README.md`](experiments/README.md).
 
 Each completed, non-pruned Training Work writes these explicit outputs beside LambdaForge's normal
 run evidence:
@@ -3552,12 +3581,12 @@ lf results show WINNING_RUN_ID --json
 ```
 
 Copy the winning `best-model` artifact to the path declared as `checkpoint` in
-`wisdom_v10.yaml`; then validate and execute exactly one analysis:
+`interpretability_sparse_concepts.yaml`; then validate and execute exactly one analysis:
 
 ```bash
-lf validate experiments/wisdom_v10.yaml
-lf run experiments/wisdom_v10.yaml --dry-run
-lf run experiments/wisdom_v10.yaml --on citius-ctgpgpu12
+lf validate experiments/interpretability_sparse_concepts.yaml
+lf run experiments/interpretability_sparse_concepts.yaml --dry-run
+lf run experiments/interpretability_sparse_concepts.yaml --on citius-ctgpgpu12
 ```
 
 The checkpoint records both model parameters and collator budgets, so extraction reproduces the
@@ -3567,8 +3596,8 @@ second V1 configuration whose parameters could drift away from the production se
 
 ### 5.7. Formal roadmap and decision gates
 
-The numbered YAML files are the **campaign stages required to decide and freeze V1**. They are not
-claims that the later formal model generations already exist. V1 can be frozen only after the seed,
+The `stage_*` YAML files are the **campaign stages required to decide and freeze V1**. They are not
+claims that later formal model generations already exist. V1 can be frozen only after the seed,
 initialization, optimizer, pooling, weak-loss, head, and architecture studies have produced a stable
 choice. This distinction prevents a convenient filename from being mistaken for scientific
 evidence.
@@ -3603,15 +3632,12 @@ post-freeze data contract.
 
 | Formal generation | Question | Current executable boundary |
 |---|---|---|
-| V2 | Do physically equivalent views contain complementary or reliability information? | Correspondence and consistency metrics are implemented; view generation waits for a frozen V1. |
+| V2 | Do physically equivalent views contain complementary or reliability information? | Correspondence/consistency primitives exist; view generation, shortcut/identifiability checks, and discretization-invariance tests wait for frozen V1. |
 | V3 | Can view sampling during training absorb the useful V2 invariance? | Run only if V2 shows oracle headroom, useful aggregation, or error-predictive disagreement. |
-| V4 | Which conditional pooling family is best on the frozen backbone? | The conditional pooling machinery is exercised in campaign `wisdom_v5.yaml`; repeat it with the frozen winners. |
-| V5 | Which surface encoder improves quality at acceptable compute? | The controlled encoder machinery is exercised in campaign `wisdom_v9.yaml`; formal comparison waits for prior choices. |
+| V4 | Which conditional pooling family is best on the frozen backbone? | `wisdom_v5.yaml` exercises the interface only; formal comparison must repeat it after freezing V1 and add the future area-aware probabilistic link. |
+| V5 | Which surface encoder improves quality at acceptable compute? | Encoder classes exist, but no current YAML exercises them; formal comparison waits for the frozen prior backbone. |
 | V6 | Does validated self-supervision support safe protein-specific test-time training? | Not enabled until an SSL loss predicts surface quality or view consistency and a probability-change guardrail is calibrated. |
 | V7 | Does shared-weight recurrent refinement help? | Not enabled until one useful refinement operation exists and is stable across trained unroll counts. |
-| V8 | Does the global prediction actually depend on the reported surface hotspot? | Pooling-boundary deletion, matched random/bottom controls, and insertion are implemented. Backbone re-execution remains gated by the first audit. |
-| V9 | Can WISDOM identify unreliable maps without local GT? | Entropy and direct-versus-surface head disagreement support risk–coverage metrics; view, ensemble, and TTT signals wait for their parent stages. |
-| V10 | Does width scaling justify μTransfer? | Deliberately absent while the selected backbone remains small or moderate. |
 
 The final leave-one-phenomenon-out experiment also remains a real data requirement rather than a
 software switch. DNA binding supplies only one phenomenon; testing transfer requires several

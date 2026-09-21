@@ -1,66 +1,101 @@
-# V8: test architecture spikes independently after stability, loss, and head decisions.
-name: wisdom-v8-architecture-spikes                 # Eighth campaign stage: one structural spike varies.
-run: wisdom.Training.Training                       # Shared training Work.
+# OBJECTIVE: test isolated architectural hypotheses only after all training-policy choices are fixed.
+# PREREQUISITES: V7 must provide one reviewed head winner.
+# VARIES: architecture_spike only, including an added-depth control for feedback.
+# FIXED: every V2-V7 winner, loss, pooling, core hyperparameters, and data.
+# DECISION: retain a spike only if it beats its relevant control across utility and faithfulness.
+name: wisdom-v8                                     # Short campaign name for architecture spikes.
+run: wisdom.Training.Training                       # Shared LambdaForge training Work.
 
-with:                                               # Replace provisional values with earlier winners before execution.
+with:                                               # Explicit carry-forward ledger.
   dataset: {dataset: wisdom-dna-reduced@6}          # Immutable reduced benchmark.
-  model_version: 2                                  # Allows controlled pre-freeze spike profiles.
+  model_version: 2                                  # Internal generation exposing controlled spikes.
   subset: full                                      # Complete reduced training population.
-  pooling_type: max                                 # Fixed provisional faithful pooling.
-  head_type: single                                 # Fixed head relationship.
-  hidden_dim: 128                                   # Fixed latent width.
-  embedding_dim: 32                                 # Fixed element embedding width.
-  residue_embedding_dim: 32                         # Fixed residue embedding width.
-  atomic_layers: 2                                  # Fixed atomic depth.
-  projection_depth: 1                               # Fixed projection depth.
-  surface_layers: 2                                 # Fixed surface depth per interaction round.
-  weak_loss_profile: negative_030                   # Fixed provisional weak loss.
-  stability_profile: baseline                       # Fixed provisional initialization.
-  batch_size: 16                                    # Proteins per update.
+  pooling_type: max                                 # REPLACE with the V5 winner.
+  topk_fraction: 0.05                               # REPLACE if V5 selects top-k.
+  attention_hidden_dim: 32                          # REPLACE if V5 selects attention.
+  regional_diffusion_scale: 2.5                     # REPLACE if V5 selects local-mean-max.
+  log_sum_exp_beta: 5.0                             # REPLACE if V5 selects LogSumExp.
+  initialization_profile: baseline                  # REPLACE with the V2 winner.
+  optimization_profile: baseline                    # REPLACE with the V3 winner.
+  hidden_dim: 128                                   # REPLACE with the V4 winner.
+  embedding_dim: 32                                 # REPLACE with the V4 winner.
+  residue_embedding_dim: 32                         # REPLACE with the V4 winner.
+  atomic_layers: 2                                  # REPLACE with the V4 winner.
+  projection_depth: 1                               # REPLACE with the V4 winner.
+  surface_layers: 2                                 # REPLACE with the V4 winner.
+  atom_spatial_k: 16                                # REPLACE with the V4 winner.
+  surface_atom_k: 16                                # REPLACE with the V4 winner.
+  diffusion_spectral_modes: 128                     # REPLACE with the V4 winner.
+  surface_atom_radius: 6.0                          # REPLACE with the V4 winner.
+  dropout: 0.2                                      # REPLACE with the V4 winner.
+  learning_rate: 0.0003                             # REPLACE with the V4 winner.
+  weight_decay: 0.0001                              # REPLACE with the V4 winner.
+  gate_lambda: 0.001                                # REPLACE with the V4 winner.
+  weak_loss_profile: custom                         # Preserve selected weak coefficients.
+  negative_surface_lambda: 0.3                      # REPLACE with the V6a or V6d winner.
+  positive_existence_lambda: 0.0                    # REPLACE if selected at V6b.
+  regional_positive_lambda: 0.0                     # REPLACE if selected at V6b or V6d.
+  regional_loss_length: 2.5                         # REPLACE with the selected regional scale.
+  regional_ranking_lambda: 0.0                      # REPLACE if selected at V6b.
+  regional_ranking_margin: 0.5                      # REPLACE with the selected ranking margin.
+  cardinality_lambda: 0.0                           # REPLACE if selected at V6c.
+  total_variation_lambda: 0.0                       # REPLACE if selected at V6c.
+  dirichlet_lambda: 0.0                             # REPLACE if selected at V6c or V6d.
+  head_type: single                                 # REPLACE with the V7 winner.
+  global_context_dim: 16                            # REPLACE if V7 selects a conditioned head.
+  detach_global_context: true                       # REPLACE with the V7 winner policy.
+  direct_head_weight: 1.0                          # REPLACE with the V7 winner policy.
+  surface_head_weight: 1.0                         # REPLACE with the V7 winner policy.
+  batch_size: 16                                    # Proteins per optimizer update.
   epochs: 500                                       # Safety ceiling.
-  patience: 30                                      # Global-only validation patience.
-  minimum_delta: 0.001                              # Required G improvement.
+  patience: 30                                      # Global validation patience.
+  minimum_delta: 0.001                              # Required score improvement.
   precision: auto                                   # Hardware-safe mixed precision.
-  surface_metrics: true                             # Evaluation-only localization quality.
-  surface_metrics_interval: 1                       # Track G/S/regret every epoch.
-  surface_visualization: viewer                     # Final HTML/PLY only.
-  faithfulness_audit: true                          # Test whether each candidate uses its claimed hotspot.
+  surface_metrics: true                             # Evaluation-only local metrics.
+  surface_metrics_interval: 1                       # Required G/S/regret curves.
+  surface_visualization: none                       # Avoid candidate galleries.
+  faithfulness_audit: true                          # Required architecture-faithfulness evidence.
   evaluate_test: false                              # Keep test sealed.
-  data_workers: 2                                   # Bound loader processes across nine packed Runs.
+  data_workers: 2                                   # Bound host load across packed Runs.
 
-# faithfulness_audit=false by default and never changes optimization. architecture_spike="custom"
-# by default and preserves detailed surface_geometry_transfer,
-# interaction_round, and vector_atomic_channels arguments. Every named profile first resets those
-# three controls to the scalar one-pass baseline. point_geometry is spike A. depth_control repeats
-# transfer/projection/DiffusionNet without feedback. bidirectional is spike B with one S->A->S round.
-# vector_8 and vector_16 are spike C. They are isolated here; do not add combination profiles until
-# individual evidence justifies them.
+seeds:                                              # Five seeds for expensive structural changes.
+  - 4                                               # Initial comparison seed.
+  - 7                                               # Confirmation seed 2.
+  - 32                                              # Confirmation seed 3.
+  - 48                                              # Confirmation seed 4.
+  - 92                                              # Confirmation seed 5.
 
-seeds: [4, 7, 32, 48, 92]                           # Five-seed screen for expensive structural changes.
+search:                                             # Finite one-factor spike comparison.
+  strategy: adaptive                                # Retain concurrent child Runs without elimination.
+  trials: 6                                         # Enumerate every authored profile.
+  proposal_pool_size: 6                             # Exact categorical-space cardinality.
+  runs_per_gpu: 3                                   # Three measured Runs per H100.
+  max_parallel: 9                                   # Nine Runs over three H100s.
+  min_seeds: 5                                      # Force all five seeds for every architecture spike.
+  confirmation_seeds: []                            # Do not add unequal winner-only seeds.
+  early_stopping:                                   # Disable probability-based curve pruning.
+    enabled: false                                  # Every Run reaches WISDOM's own stopping rule.
+  architecture_spike:                              # Mutually exclusive architectural hypothesis.
+    values:                                         # Closed ArchitectureSpike vocabulary.
+      - baseline                                    # Scalar one-pass atom-to-surface control.
+      - point_geometry                              # Condition transfer scoring on point geometry.
+      - depth_control                               # Add depth without surface-to-atom feedback.
+      - bidirectional                               # Add one surface-to-atom-to-surface refinement round.
+      - vector_8                                    # Add eight equivariant atomic vector channels.
+      - vector_16                                   # Add sixteen equivariant atomic vector channels.
 
-search:                                              # Compare the baseline and isolated A/B/C hypotheses.
-  strategy: adaptive                                # Allocate confirmation seeds by validation W.
-  trials: 6                                         # Exact finite profile count.
-  proposal_pool_size: 6                             # Enumerate every profile once.
-  runs_per_gpu: 3                                    # Pack at most three measured Runs per accelerator.
-  max_parallel: 9                                    # Bound a three-GPU study to nine concurrent Runs.
-  min_seeds: 1                                      # One seed before adaptive promotion.
-  architecture_spike:                               # Mutually exclusive hypothesis selector.
-    values: [baseline, point_geometry, depth_control, bidirectional, vector_8, vector_16] # A, B control, B, C8, C16.
-
-# The depth control is essential: bidirectional wins only if it exceeds added depth without
-# feedback. Vector states require atom coordinates already present in schema-3 NPZ archives; no
-# model-specific preprocessing is introduced.
-
-objective:                                           # Joint architecture-development utility.
-  metric: val_wisdom_hpo_score                      # Frozen G/S@G/coupling combination.
+objective:                                          # Rank by joint validation evidence.
+  metric: val_wisdom_hpo_score                      # Global/surface/coupling utility.
   mode: max                                         # Larger is better.
 
-resources:                                           # Complete study reservation.
-  gpu: 3                                             # Expose the three configured accelerators.
-  gpu_memory: 30GiB                                  # Safe per-run admission threshold.
-  cpu: 36                                            # Two loaders plus trainer headroom for each active Run.
-  memory: 96GiB                                      # Shared host-memory ceiling.
-  time: 168h                                         # Seven-day study ceiling.
+resources:                                          # Complete adaptive-study allocation.
+  gpu: 3                                            # Three available accelerators.
+  gpu_memory: 20GiB                                 # Per-child admission threshold.
+  cpu: 36                                           # Shared host capacity.
+  memory: 96GiB                                     # Shared host-memory ceiling.
+  time: 168h                                        # Seven-day ceiling.
 
-# LambdaForge owns run expansion, placement, metrics, and outputs; WISDOM changes no scheduler state.
+# The bidirectional candidate must exceed depth_control, not merely baseline, before feedback can
+# be credited. No spike combination is searched in this stage.
+# min_seeds=5 equals the seeds list; early_stopping=false and confirmation_seeds=[] prevent
+# candidate-dependent censoring while retaining concurrent child scheduling.

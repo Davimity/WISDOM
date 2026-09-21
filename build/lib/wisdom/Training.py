@@ -19,11 +19,14 @@ from torch.utils.data import DataLoader
 from collections.abc import Mapping, Sequence
 
 from wisdom.models.WisdomV1 import WisdomV1
+from wisdom.models.DiffusionBlock import DiffusionBlock
 from wisdom.models.WeakSurfaceLoss import WeakSurfaceLoss
 from wisdom.models.ModelWeightAverage import ModelWeightAverage
 from wisdom.models.ArchitectureSpike import ArchitectureSpike
 from wisdom.models.WeakLossProfile import WeakLossProfile
 from wisdom.models.StabilityProfile import StabilityProfile
+from wisdom.models.InitializationProfile import InitializationProfile
+from wisdom.models.OptimizationProfile import OptimizationProfile
 from wisdom.models.WeightAveragingMode import WeightAveragingMode
 from wisdom.data.WisdomDataset import WisdomDataset
 from wisdom.data.WisdomCollator import WisdomCollator
@@ -120,7 +123,9 @@ class Training(lf.Work):
         gate_lambda          : float = 1.0e-3,
         architecture_spike            : str   = "custom",
         weak_loss_profile              : str   = "custom",
-        stability_profile             : str   = "custom",
+        initialization_profile        : str   = "custom",
+        optimization_profile          : str   = "custom",
+        stability_profile             : str | None = None,
         embedding_initialization       : str   = "current",
         gate_initial_active            : float = 0.95,
         gate_warmup_fraction           : float = 0.0,
@@ -219,8 +224,12 @@ class Training(lf.Work):
                 or vector-state hypothesis. ``custom`` preserves the detailed model arguments.
             weak_loss_profile: Named sequential weak-supervision candidate. ``custom`` preserves
                 the detailed weak-loss coefficients.
-            stability_profile: Named one-factor initialization/optimization candidate. ``custom``
-                leaves all following detailed controls unchanged.
+            initialization_profile: Named model-initialization candidate. It changes no optimizer
+                behavior, so its winner can remain active during the optimizer screen.
+            optimization_profile: Named optimizer-stability candidate. It changes no model
+                initialization, so it composes with ``initialization_profile``.
+            stability_profile: Deprecated combined profile accepted for archived YAMLs. It cannot
+                be combined with either new named profile.
             embedding_initialization: Categorical embedding scale policy.
             gate_initial_active: Initial Hard-Concrete activity probability.
             gate_warmup_fraction: Initial training fraction with all semantic gates forced on and
@@ -349,6 +358,8 @@ class Training(lf.Work):
             gate_lambda=gate_lambda,
             architecture_spike=architecture_spike,
             weak_loss_profile=weak_loss_profile,
+            initialization_profile=initialization_profile,
+            optimization_profile=optimization_profile,
             stability_profile=stability_profile,
             embedding_initialization=embedding_initialization,
             gate_initial_active=gate_initial_active,
@@ -442,7 +453,9 @@ def _train_wisdom(
     gate_lambda          : float = 1.0e-3,
     architecture_spike            : str   = "custom",
     weak_loss_profile              : str   = "custom",
-    stability_profile             : str   = "custom",
+    initialization_profile        : str   = "custom",
+    optimization_profile          : str   = "custom",
+    stability_profile             : str | None = None,
     embedding_initialization       : str   = "current",
     gate_initial_active            : float = 0.95,
     gate_warmup_fraction           : float = 0.0,
@@ -540,7 +553,9 @@ def _train_wisdom(
         gate_lambda: Non-negative multiplier for the normalized expected L0 gate cost.
         architecture_spike: Named one-factor architecture candidate or ``custom``.
         weak_loss_profile: Named sequential weak-loss candidate or ``custom``.
-        stability_profile: Named one-factor candidate or ``custom`` for explicit detailed values.
+        initialization_profile: Named initialization candidate or ``custom`` for explicit values.
+        optimization_profile: Named optimizer candidate or ``custom`` for explicit values.
+        stability_profile: Deprecated combined profile. It cannot be mixed with the new profiles.
         embedding_initialization: Categorical embedding scale policy.
         gate_initial_active: Initial Hard-Concrete activity probability.
         gate_warmup_fraction: Initial all-on/no-L0 fraction of training.
@@ -668,8 +683,27 @@ def _train_wisdom(
         loss_overrides.get("dirichlet_lambda", dirichlet_lambda),
     )
 
-    profile = StabilityProfile(stability_profile)
-    profile_overrides = profile.overrides()
+    # Initialization and optimization are independent scientific decisions. The legacy selector
+    # remains reproducible, but mixing it with either new selector would make precedence ambiguous.
+
+    initialization = InitializationProfile(initialization_profile)
+    optimization   = OptimizationProfile(optimization_profile)
+    legacy_profile = StabilityProfile(stability_profile or "custom")
+
+    if legacy_profile is not StabilityProfile.CUSTOM and (
+        initialization is not InitializationProfile.CUSTOM
+        or optimization is not OptimizationProfile.CUSTOM
+    ):
+        raise ValueError(
+            "legacy stability_profile cannot be combined with initialization_profile or "
+            "optimization_profile"
+        )
+
+    profile_overrides = {
+        **legacy_profile.overrides(),
+        **initialization.overrides(),
+        **optimization.overrides(),
+    }
     embedding_initialization = str(
         profile_overrides.get("embedding_initialization", embedding_initialization)
     )
@@ -841,7 +875,9 @@ def _train_wisdom(
     }
     initialization_configuration = {
         "architecture_spike":               architecture.value,
-        "stability_profile":                profile.value,
+        "initialization_profile":           initialization.value,
+        "optimization_profile":             optimization.value,
+        "stability_profile":                legacy_profile.value,
         "embedding_initialization":         embedding_initialization,
         "gate_initial_active":              gate_initial_active,
         "gate_warmup_fraction":             gate_warmup_fraction,
@@ -1055,6 +1091,11 @@ def _train_wisdom(
     model, model_parameters = _create_model(model_version, available_parameters)
     architecture_name       = str(getattr(model, "ARCHITECTURE_NAME", type(model).__name__))
     model.to(device)
+    initial_diffusion_times = _diffusion_time_summary(model)
+    for statistic in ("minimum", "mean", "median", "maximum"):
+        value = initial_diffusion_times.get(statistic)
+        if isinstance(value, float):
+            work.metrics.log(f"initial_diffusion_time_{statistic}", value)
 
     calibrated_local_bias: float | None = None
     if calibrate_local_head_bias:
@@ -1992,6 +2033,12 @@ def _train_wisdom(
             if optional_metric is not None:
                 work.metrics.log(name, optional_metric, split="val")
 
+    final_diffusion_times = _diffusion_time_summary(model)
+    for statistic in ("minimum", "mean", "median", "maximum"):
+        value = final_diffusion_times.get(statistic)
+        if isinstance(value, float):
+            work.metrics.log(f"final_diffusion_time_{statistic}", value)
+
     report = {
         "model_version":                  model_version,
         "architecture":                   architecture_name,
@@ -2003,6 +2050,8 @@ def _train_wisdom(
         "gate_lambda":                    gate_lambda,
         "weak_surface_loss":              weak_surface_configuration,
         "initialization":                 initialization_configuration,
+        "initial_diffusion_times":         initial_diffusion_times,
+        "final_diffusion_times":           final_diffusion_times,
         "calibrated_local_head_bias":     calibrated_local_bias,
         "model_parameters":               model_parameters,
         "subset":                         subset,
@@ -2074,6 +2123,59 @@ def _train_wisdom(
     if optimization_monitor is not None:
         optimization_monitor.close()
     return report
+
+
+def _diffusion_time_summary(model: torch.nn.Module) -> dict[str, Any]:
+    """Summarize every learned DiffusionNet heat time without changing model state.
+
+    A DiffusionNet block owns one positive heat time per hidden channel. If ``t`` is expressed in
+    square ångströms, its characteristic spatial length is approximately ``sqrt(t)`` ångströms.
+    WISDOM stores per-block extrema, mean, and median so initialization profiles can be compared
+    with the distribution reached by the globally selected checkpoint. The same statistics over
+    every discovered channel form the top-level LambdaForge metrics.
+
+    Args:
+        model: WISDOM module that may contain one or more ``DiffusionSurfaceEncoder`` instances.
+
+    Returns:
+        JSON-compatible mapping with a ``blocks`` list and aggregate ``minimum``, ``mean``,
+        ``median``, and ``maximum`` values. A non-DiffusionNet encoder returns only an empty block
+        list because no heat-time parameter exists.
+    """
+    blocks     : list[dict[str, float | int | str]] = []
+    all_values : list[Tensor] = []
+
+    for module_name, module in model.named_modules():
+        if not isinstance(module, DiffusionSurfaceEncoder):
+            continue
+        for block_index, block in enumerate(module.blocks):
+            typed_block = cast(DiffusionBlock, block)
+            values      = typed_block.diffusion_times.detach().float().cpu()
+            all_values.append(values)
+            blocks.append(
+                {
+                    "module":   module_name,
+                    "block":    block_index,
+                    "channels": len(values),
+                    "minimum":  float(values.min()),
+                    "mean":     float(values.mean()),
+                    "median":   float(values.median()),
+                    "maximum":  float(values.max()),
+                }
+            )
+
+    summary: dict[str, Any] = {"blocks": blocks}
+    if all_values:
+        values = torch.cat(all_values)
+        summary.update(
+            {
+                "minimum": float(values.min()),
+                "mean":    float(values.mean()),
+                "median":  float(values.median()),
+                "maximum": float(values.max()),
+            }
+        )
+    return summary
 
 
 def _calibrate_local_head_bias(
@@ -2167,8 +2269,9 @@ def _evaluate(
             intended for final restored checkpoints, not every training epoch.
 
     Returns:
-        Protein metric mapping including mean binary cross-entropy loss, and an optional surface
-        metric mapping. Mathematically undefined values remain ``None``.
+        Protein metric mapping including mean binary cross-entropy loss, model-only forward time,
+        throughput, and latency, plus an optional surface metric mapping. Mathematically undefined
+        values remain ``None``.
     """
     logits            : list[Tensor] = []
     surface_protein_logits: list[Tensor] = []
@@ -2189,6 +2292,8 @@ def _evaluate(
     attention_available = True
     faithfulness_sums : dict[str, float] = {}
     faithfulness_count = 0
+    cpu_forward_seconds = 0.0
+    cuda_forward_events: list[tuple[torch.cuda.Event, torch.cuda.Event]] = []
 
     protein_offset = 0
     mixed_dtype = (
@@ -2200,12 +2305,29 @@ def _evaluate(
         for batch in loader:
             tensors = _device_batch(batch, device)
 
+            # CUDA events measure only enqueued model work without synchronizing every batch.
+            # CPU evaluation uses the monotonic wall clock around the same forward boundary.
+
+            if device.type == "cuda":
+                event_factory = cast(Any, torch.cuda.Event)
+                forward_start = event_factory(enable_timing=True)
+                forward_stop  = event_factory(enable_timing=True)
+                forward_start.record()
+            else:
+                cpu_forward_started = time.perf_counter()
+
             with torch.autocast(
                 device_type=device.type,
                 dtype=mixed_dtype or torch.bfloat16,
                 enabled=mixed_dtype is not None,
             ):
                 output = model(**_model_inputs(tensors))
+
+            if device.type == "cuda":
+                forward_stop.record()
+                cuda_forward_events.append((forward_start, forward_stop))
+            else:
+                cpu_forward_seconds += time.perf_counter() - cpu_forward_started
 
             if prediction_report is not None:
                 prediction_report.collect(batch, output)
@@ -2266,11 +2388,28 @@ def _evaluate(
 
             del tensors, output
 
+    if cuda_forward_events:
+        torch.cuda.synchronize(device)
+        forward_seconds = math.fsum(
+            start.elapsed_time(stop) / 1000.0
+            for start, stop in cuda_forward_events
+        )
+    else:
+        forward_seconds = cpu_forward_seconds
+
     protein_logits  = torch.cat(logits).cpu()
     protein_targets = torch.cat(targets)
     protein_metrics = BinaryMetricSuite().compute(torch.sigmoid(protein_logits), protein_targets)
     protein_metrics["loss"] = float(
         F.binary_cross_entropy_with_logits(protein_logits, protein_targets)
+    )
+    protein_count = len(protein_targets)
+    protein_metrics["forward_seconds"] = forward_seconds
+    protein_metrics["forward_proteins_per_second"] = (
+        protein_count / max(forward_seconds, 1.0e-9)
+    )
+    protein_metrics["forward_milliseconds_per_protein"] = (
+        1000.0 * forward_seconds / protein_count
     )
     if surface_protein_logits:
         surface_global_logits = torch.cat(surface_protein_logits).cpu()
@@ -2378,8 +2517,8 @@ def _surface_coupling(
             values. Surface values are positive-protein macro AUPRC.
 
     Returns:
-        Global/surface scores at the globally selected epoch, regret, both Spearman diagnostics,
-        coupling, and the scalar WISDOM HPO score.
+        Global/surface scores at the globally selected epoch, the independently best surface epoch
+        and score, regret, both Spearman diagnostics, coupling, and the scalar WISDOM HPO score.
 
     Raises:
         ValueError: If the curve is empty or contains a non-finite/out-of-range score.
@@ -2395,10 +2534,11 @@ def _surface_coupling(
     ):
         raise ValueError("surface coupling scores must be finite values in [0,1]")
 
-    global_index  = max(range(len(curve)), key=global_values.__getitem__)
-    global_score  = global_values[global_index]
-    surface_score = surface_values[global_index]
-    regret        = max(0.0, max(surface_values) - surface_score)
+    global_index       = max(range(len(curve)), key=global_values.__getitem__)
+    surface_best_index = max(range(len(curve)), key=surface_values.__getitem__)
+    global_score       = global_values[global_index]
+    surface_score      = surface_values[global_index]
+    regret             = max(0.0, surface_values[surface_best_index] - surface_score)
 
     correlation_all = _spearman(global_values, surface_values)
     late_start      = math.ceil(0.30 * len(curve))
@@ -2415,6 +2555,9 @@ def _surface_coupling(
         "wisdom_hpo_score":            wisdom_score,
         "protein_global_score":        global_score,
         "surface_selected_score":      surface_score,
+        "global_selected_epoch":       float(curve[global_index]["epoch"]),
+        "surface_best_epoch":          float(curve[surface_best_index]["epoch"]),
+        "surface_best_score":          surface_values[surface_best_index],
         "surface_selection_regret":    regret,
         "surface_regret_component":    regret_component,
         "global_surface_spearman":    correlation,

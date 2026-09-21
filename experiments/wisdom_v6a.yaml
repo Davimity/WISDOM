@@ -1,14 +1,14 @@
-# OBJECTIVE: compare global/local head relationships after choosing one weak-loss policy.
-# PREREQUISITES: V6a and any justified V6b/V6c/V6d follow-up must have reviewed winners.
-# VARIES: head_type only.
-# FIXED: every selected initialization, optimizer, core, pooling, and weak-loss decision.
-# DECISION: select the simplest head whose utility and surface faithfulness improve credibly.
-name: wisdom-v7                                     # Short campaign name for head screening.
+# OBJECTIVE: determine whether negative proteins provide useful weak surface supervision.
+# PREREQUISITES: V5 must provide one reviewed pooling winner.
+# VARIES: negative_surface_lambda in the prescribed baseline/0.1/0.3/1.0 screen.
+# FIXED: every V2-V5 winner, all other weak-loss terms, architecture, and data.
+# DECISION: continue to V6b only if negative supervision adds credible surface signal.
+name: wisdom-v6a                                    # Short campaign name for negative weak loss.
 run: wisdom.Training.Training                       # Shared LambdaForge training Work.
 
 with:                                               # Explicit carry-forward ledger.
   dataset: {dataset: wisdom-dna-reduced@6}          # Immutable reduced benchmark.
-  model_version: 2                                  # Internal generation exposing head alternatives.
+  model_version: 2                                  # Pooling-capable internal generation.
   subset: full                                      # Complete reduced training population.
   pooling_type: max                                 # REPLACE with the V5 winner.
   topk_fraction: 0.05                               # REPLACE if V5 selects top-k.
@@ -31,21 +31,9 @@ with:                                               # Explicit carry-forward led
   learning_rate: 0.0003                             # REPLACE with the V4 winner.
   weight_decay: 0.0001                              # REPLACE with the V4 winner.
   gate_lambda: 0.001                                # REPLACE with the V4 winner.
-  weak_loss_profile: custom                         # Preserve explicit selected weak-loss coefficients.
-  negative_surface_lambda: 0.3                      # REPLACE with the V6a or V6d winner.
-  positive_existence_lambda: 0.0                    # REPLACE only if V6b selected this term.
-  regional_positive_lambda: 0.0                     # REPLACE if V6b or V6d selected this term.
-  regional_loss_length: 2.5                         # REPLACE with the selected regional scale.
-  regional_ranking_lambda: 0.0                      # REPLACE only if V6b selected this term.
-  regional_ranking_margin: 0.5                      # REPLACE with the selected ranking margin.
-  cardinality_lambda: 0.0                           # REPLACE only if V6c selected cardinality.
-  total_variation_lambda: 0.0                       # REPLACE only if V6c selected TV.
-  dirichlet_lambda: 0.0                             # REPLACE if V6c or V6d selected Dirichlet.
-  architecture_spike: baseline                      # Architecture remains one-pass and scalar.
-  global_context_dim: 16                            # Context bottleneck for conditioned heads.
-  detach_global_context: true                       # Prevent local loss gradients entering context.
-  direct_head_weight: 1.0                          # Direct protein BCE coefficient.
-  surface_head_weight: 1.0                         # Surface-derived protein BCE coefficient.
+  weak_loss_profile: custom                         # Direct coefficients below remain authoritative.
+  architecture_spike: baseline                      # No architecture change.
+  head_type: single                                 # Fixed head relationship.
   batch_size: 16                                    # Proteins per optimizer update.
   epochs: 500                                       # Safety ceiling.
   patience: 30                                      # Global validation patience.
@@ -54,32 +42,32 @@ with:                                               # Explicit carry-forward led
   surface_metrics: true                             # Evaluation-only local metrics.
   surface_metrics_interval: 1                       # Required G/S/regret curves.
   surface_visualization: none                       # Avoid candidate galleries.
-  faithfulness_audit: true                          # Audit hotspot dependence.
+  faithfulness_audit: true                          # Diagnose hotspot dependence.
   evaluate_test: false                              # Keep test sealed.
   data_workers: 4                                   # Persistent NPZ workers.
 
-seeds:                                              # Four paired seeds completed for every head.
+seeds:                                              # Four paired seeds completed for every coefficient.
   - 4                                               # Replication seed 1.
   - 7                                               # Replication seed 2.
   - 32                                              # Replication seed 3.
   - 54                                              # Replication seed 4.
 
-search:                                             # Finite one-factor head comparison.
-  strategy: adaptive                                # Retain concurrent child Runs without elimination.
-  trials: 4                                         # Enumerate every authored head exactly once.
-  proposal_pool_size: 4                             # Exact categorical-space cardinality.
+search:                                             # Parallel coefficient sweep without censoring.
+  strategy: adaptive                                # Retain concurrent child Runs, not adaptive elimination.
+  trials: 4                                         # Exactly four authored coefficients.
+  proposal_pool_size: 4                             # Enumerate the finite grid.
   runs_per_gpu: 3                                   # Three measured Runs per H100.
   max_parallel: 9                                   # Nine Runs over three H100s.
-  min_seeds: 4                                      # Force all four seeds for every head.
+  min_seeds: 4                                      # Force all four seeds for every coefficient.
   confirmation_seeds: []                            # Do not add unequal winner-only seeds.
-  early_stopping:                                   # Disable probability-based curve pruning.
+  early_stopping:                                   # Disable probability-based curve pruning for this sweep.
     enabled: false                                  # Every Run reaches WISDOM's own stopping rule.
-  head_type:                                        # Relationship between global and local predictions.
-    values:                                         # Closed HeadType vocabulary.
-      - single                                      # Protein score is pooled directly from local logits.
-      - dual                                        # Independent direct and surface-derived protein heads.
-      - global_context                              # Detached global context is concatenated into localization.
-      - film                                        # Zero-start FiLM conditions localization on global context.
+  negative_surface_lambda:                          # Area-weighted negative-bag local penalty.
+    values:                                         # Prescribed non-factorial screen.
+      - 0.0                                         # Global-BCE baseline with no local penalty.
+      - 0.1                                         # Weak negative-surface constraint.
+      - 0.3                                         # Moderate negative-surface constraint.
+      - 1.0                                         # Strong negative-surface constraint.
 
 objective:                                          # Rank by joint validation evidence.
   metric: val_wisdom_hpo_score                      # Global/surface/coupling utility.
@@ -92,6 +80,6 @@ resources:                                          # Complete adaptive-study al
   memory: 96GiB                                     # Shared host-memory ceiling.
   time: 168h                                        # Seven-day ceiling.
 
-# head_type defaults to single. The direct and surface head weights are non-negative and cannot
-# both be zero for a multi-head candidate. Surface ground truth remains outside optimization.
+# All omitted weak coefficients default to zero. Surface ground truth remains evaluation-only and
+# never enters the loss or checkpoint selector.
 # min_seeds=4, early_stopping=false, and confirmation_seeds=[] produce a complete paired sweep.

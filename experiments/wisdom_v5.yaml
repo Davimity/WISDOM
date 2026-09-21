@@ -1,122 +1,105 @@
-# V5: compare pooling families after seed, initialization, and optimizer stability are understood.
-name: wisdom-v5-pooling                              # Fifth campaign stage: only MIL pooling varies.
-run: wisdom.Training.Training                       # Same LambdaForge 0.14 Work class as v1.
+# OBJECTIVE: test whether MAX is an obviously poor aggregation rule before adding weak local losses.
+# PREREQUISITES: V4 must provide one reviewed core-HPO winner.
+# VARIES: pooling family and only the hyperparameters belonging to that family.
+# FIXED: core-HPO winner, initialization/optimizer winners, global BCE, architecture, and data.
+# DECISION: carry one pooling rule forward; formal pooling remains a post-V1 roadmap question.
+name: wisdom-v5                                     # Short campaign name for pooling screening.
+run: wisdom.Training.Training                       # Shared LambdaForge training Work.
 
-with:                                                # Replace these fixed backbone values with the V1 winner.
-  dataset:                                           # Resolve one immutable managed placement.
-    dataset: wisdom-dna-reduced@6                    # Exact reduced schema-3 release used by v1.
-  model_version: 2                                  # Internal implementation exposing pooling alternatives.
-  subset: full                                      # Use every train member already retained in this release.
-  hidden_dim: 128                                   # Fixed reviewed v1 latent width.
-  embedding_dim: 32                                 # Fixed reviewed v1 embedding width.
-  residue_embedding_dim: 32                         # Fixed winning v1 residue embedding width.
-  atomic_layers: 2                                  # Fixed reviewed v1 atomic depth.
-  projection_depth: 1                              # Fixed reviewed v1 projection depth.
-  surface_layers: 2                                 # Fixed reviewed v1 surface depth.
-  atom_spatial_k: 16                                # Fixed reviewed v1 atomic-neighbor budget.
-  surface_atom_k: 16                                # Fixed reviewed v1 transfer-neighbor budget.
-  diffusion_spectral_modes: 128                     # Fixed reviewed v1 intrinsic frequency budget.
-  atomic_edge_distance_scale: 6.0                   # Fixed winning v1 edge-distance scale in Å.
-  surface_atom_radius: 6.0                          # Fixed transfer geometry normalization in Å.
-  surface_chunk_size: 8192                          # Bound atom-transfer gathered activations.
-  atomic_message_chunk_size: 65536                  # Bound LambdaForge RGCN edge activations.
-  dropout: 0.2                                      # Fixed reviewed v1 dropout.
-  learning_rate: 0.0003                             # Fixed reviewed v1 AdamW rate.
-  weight_decay: 0.0001                              # Fixed reviewed v1 AdamW decay.
-  gate_lambda: 0.001                                # Fixed winning v1 L0 pressure; gates relearn per pooling.
-  negative_surface_lambda: 0.0                      # Keep the pooling comparison free of new weak losses.
-  topk_fraction: 0.05                               # Retained fraction for top-k mean.
-  attention_hidden_dim: 32                          # Attention scoring-network width.
-  regional_diffusion_scale: 2.5                     # Physical smoothing length in Å before MAX.
-  log_sum_exp_beta: 5.0                             # Log-sum-exp inverse temperature.
-  batch_size: 2                                     # Variable-size proteins per step.
-  epochs: 100                                       # Maximum epochs per pooling/seed run.
-  patience: 30                                      # Stop a plateau without changing model selection.
-  minimum_delta: 0.001                              # Meaningful protein-score G improvement.
-  precision: auto                                   # BF16 dense CUDA layers with FP32 sparse derivatives.
-  surface_metrics: true                             # Compare local maps without supervising them.
-  surface_metrics_interval: 1                       # Measure G/S/coupling on every validation epoch.
-  surface_visualization: viewer                     # Save final HTML/PLY without companion prediction NPZ.
-  faithfulness_audit: true                          # Audit deletion/insertion on each restored best checkpoint.
-  surface_prediction_threshold: 0.5                 # Start hard prediction views at probability 0.5.
-  surface_visualization_maximum: 12                 # Render 12 balanced final HTML/PLY examples.
-  evaluate_test: false                              # Keep test unopened during pooling comparison.
-  data_workers: 2                                   # Overlap NPZ decoding without consuming all four CPUs.
+with:                                               # Explicit carry-forward ledger.
+  dataset: {dataset: wisdom-dna-reduced@6}          # Immutable reduced benchmark.
+  model_version: 2                                  # Internal capability generation exposing poolings.
+  subset: full                                      # Complete reduced training population.
+  initialization_profile: baseline                  # REPLACE with the V2 winner.
+  optimization_profile: baseline                    # REPLACE with the V3 winner.
+  hidden_dim: 128                                   # REPLACE with the V4 winner.
+  embedding_dim: 32                                 # REPLACE with the V4 winner.
+  residue_embedding_dim: 32                         # REPLACE with the V4 winner.
+  atomic_layers: 2                                  # REPLACE with the V4 winner.
+  projection_depth: 1                               # REPLACE with the V4 winner.
+  surface_layers: 2                                 # REPLACE with the V4 winner.
+  atom_spatial_k: 16                                # REPLACE with the V4 winner.
+  surface_atom_k: 16                                # REPLACE with the V4 winner.
+  diffusion_spectral_modes: 128                     # REPLACE with the V4 winner.
+  surface_atom_radius: 6.0                          # REPLACE with the V4 winner.
+  dropout: 0.2                                      # REPLACE with the V4 winner.
+  learning_rate: 0.0003                             # REPLACE with the V4 winner.
+  weight_decay: 0.0001                              # REPLACE with the V4 winner.
+  gate_lambda: 0.001                                # REPLACE with the V4 winner.
+  weak_loss_profile: baseline                       # Protein BCE only during pooling comparison.
+  architecture_spike: baseline                      # No architecture change.
+  head_type: single                                 # One faithful local-to-global head.
+  batch_size: 16                                    # Proteins per optimizer update.
+  epochs: 500                                       # Safety ceiling.
+  patience: 30                                      # Global validation patience.
+  minimum_delta: 0.001                              # Required score improvement.
+  precision: auto                                   # Hardware-safe mixed precision.
+  surface_metrics: true                             # Evaluation-only local metrics.
+  surface_metrics_interval: 1                       # Required G/S/regret curves.
+  surface_visualization: none                       # Avoid candidate galleries.
+  faithfulness_audit: true                          # Test whether selected regions drive predictions.
+  evaluate_test: false                              # Keep test sealed.
+  data_workers: 4                                   # Persistent NPZ workers.
 
-# Fixed Training.run option reference:
-# Values shown above equal public defaults except model_version=2,
-# residue_embedding_dim=32, gate_lambda=0.001, evaluate_test=false, and data_workers=2.
-# Semantic gates are reinitialized and learned for every pooling candidate; their definitions and
-# Hard-Concrete constants are fixed, so pooling_type remains the only architectural comparison.
-# subset="full" selects every train member retained by this reduced release; validation/test are
-# never filtered by a training view. Widths and depths/K/J/mode budgets are positive; dropout is in [0,1);
-# topk_fraction is in (0,1];
-# attention_hidden_dim and regional_diffusion_scale are positive; log_sum_exp_beta and learning_rate are positive; weight_decay and
-# data_workers=4 by default; this 4-CPU experiment selects two so the trainer retains CPU capacity.
-# data_workers and minimum_delta are non-negative; batch_size, epochs, and patience are positive;
-# precision accepts "auto", "bfloat16", "float16", or "float32";
-# surface_metrics=true, surface_metrics_interval=0, surface_visualization="viewer",
-# surface_prediction_threshold=0.5, surface_visualization_maximum=12, and
-# faithfulness_audit=false by default. False disables
-# the respective diagnostics/artifacts; interval zero evaluates the restored best checkpoint only,
-# while positive N also evaluates every N validation epochs. Threshold must be in [0,1]; the
-# visualization limit is non-negative and zero renders every protein instead of a balanced sample.
+seeds:                                              # Four paired seeds completed for every pooling rule.
+  - 4                                               # Replication seed 1.
+  - 7                                               # Replication seed 2.
+  - 32                                              # Replication seed 3.
+  - 54                                              # Replication seed 4.
 
-seeds: [4, 7, 32, 54, 65, 94, 109, 124, 142, 167]    # Shared ordered seed budget for paired comparisons.
-search:                                              # Adaptive one-factor pooling comparison.
-  strategy: adaptive                                # Race poolings using validation evidence.
-  trials: 12                                        # Cover the plan's 12 small-grid pooling configurations.
-  proposal_pool_size: 12                            # Match the exact conditional-space cardinality.
-  runs_per_gpu: 3                                    # Pack at most three measured Runs per accelerator.
-  max_parallel: 9                                    # Bound a three-GPU study to nine concurrent Runs.
-  min_seeds: 1                                      # Give every pooling at least one search seed.
+search:                                             # Parallel finite pooling sweep without censoring.
+  strategy: adaptive                                # Retain concurrent child Runs, not adaptive elimination.
+  trials: 12                                        # Exact finite conditional-space size.
+  proposal_pool_size: 12                            # Enumerate all authored configurations.
+  runs_per_gpu: 3                                   # Three measured Runs per H100.
+  max_parallel: 9                                   # Nine concurrent Runs over three H100s.
+  min_seeds: 4                                      # Force all four seeds for every pooling configuration.
+  confirmation_seeds: []                            # Complete paired evidence needs no extra confirmation.
+  early_stopping:                                   # Disable probability-based curve pruning for this sweep.
+    enabled: false                                  # Every Run reaches WISDOM's own stopping rule.
+  pooling_type:                                     # Protein aggregation family.
+    values:                                         # Closed PoolingType vocabulary.
+      - max                                         # One highest-scoring point determines the bag.
+      - mean                                        # Average evidence over every surface point.
+      - attention                                   # Learned weighting; flexible but may decouple localization.
+      - topk                                        # Average only the highest-scoring surface fraction.
+      - local_mean_max                              # Diffuse locally, then take the strongest region.
+      - log_sum_exp                                 # Smooth MAX with a tunable inverse temperature.
+  topk_fraction:                                    # Active only for top-k pooling.
+    values:                                         # Tested hotspot fractions.
+      - 0.01                                        # Top one percent of the surface.
+      - 0.05                                        # Top five percent of the surface.
+      - 0.10                                        # Top ten percent of the surface.
+    when: {pooling_type: topk}                      # Prevent irrelevant duplicate candidates.
+  attention_hidden_dim:                             # Active only for learned attention.
+    values:                                         # Keep attention capacity fixed in this sanity screen.
+      - 32                                          # Compact scoring network.
+    when: {pooling_type: attention}                 # Ignore for every other pooling family.
+  regional_diffusion_scale:                         # Active only for local-mean-max.
+    values:                                         # Physical smoothing lengths in ångströms.
+      - 1.5                                         # Compact local patch.
+      - 2.5                                         # Intermediate local patch.
+      - 5.0                                         # Broad coherent region.
+    when: {pooling_type: local_mean_max}            # Ignore outside regional pooling.
+  log_sum_exp_beta:                                 # Active only for normalized LogSumExp.
+    values:                                         # Inverse temperatures.
+      - 1.0                                         # Mean-like smooth aggregation.
+      - 5.0                                         # Intermediate baseline sharpness.
+      - 10.0                                        # MAX-like sharp aggregation.
+    when: {pooling_type: log_sum_exp}               # Ignore outside LogSumExp.
 
-  seed_racing:                                      # Allocate seeds while a pooling remains plausible.
-    probability_threshold: 0.05                     # Continue above 5% practical-equivalence probability.
-    equivalence_margin: 0.015                        # Treat utility differences <=0.015 as equivalent.
+objective:                                          # Select by WISDOM's complete validation purpose.
+  metric: val_wisdom_hpo_score                      # Joint global/surface/coupling score.
+  mode: max                                         # Larger is better.
 
-  early_stopping:                                   # Prune weak learning curves conservatively.
-    enabled: true                                   # Enable cooperative Work stopping.
-    min_step: 40                                    # Wait for forty validation epochs.
-    confirmations: 3                                # Require three distinct confirmations.
-    probability_threshold: 0.02                     # Stop below 2% competitive probability.
-    equivalence_margin: 0.015                        # Preserve curves within 0.015 utility.
+resources:                                          # Complete adaptive-study allocation.
+  gpu: 3                                            # Three available accelerators.
+  gpu_memory: 20GiB                                 # Per-child admission threshold.
+  cpu: 36                                           # Shared host decoding capacity.
+  memory: 96GiB                                     # Shared host-memory ceiling.
+  time: 168h                                        # Seven-day ceiling.
 
-  pooling_type:                                     # Choose the pooling family compared by V5.
-    values: [max, mean, attention, topk, local_mean_max, log_sum_exp] # Closed PoolingType set.
-  topk_fraction:                                    # Fraction averaged by top-k pooling only.
-    values: [0.01, 0.05, 0.10]                      # Plan-defined sparse-to-moderate hotspot fractions.
-    when: {pooling_type: topk}                      # Inactive for every other pooling family.
-  attention_hidden_dim:                             # Capacity of learned attention scoring only.
-    values: [32]                                    # One high-flex control, not an attention-capacity HPO.
-    when: {pooling_type: attention}                 # Inactive unless attention pooling is selected.
-  regional_diffusion_scale:                         # Local-Mean-Max smoothing length in ångströms.
-    values: [1.5, 2.5, 5.0]                         # Test compact through broad coherent patches.
-    when: {pooling_type: local_mean_max}            # Inactive for non-regional poolings.
-  log_sum_exp_beta:                                 # Inverse temperature of normalized LogSumExp.
-    values: [1.0, 5.0, 10.0]                        # Low beta is mean-like; high beta approaches MAX.
-    when: {pooling_type: log_sum_exp}               # Inactive outside LogSumExp.
-
-# strategy defaults to adaptive when an objective exists. trials=12 and proposal_pool_size=12 cover the finite conditional
-# pooling space; adaptive seed racing changes replication effort, never the fixed backbone or data.
-# pooling_type defaults to max and accepts MAX, arithmetic mean, learned sparse attention, top-k
-# mean, fixed spectral diffusion/global MAX, and normalized log-sum-exp. Search-policy values match
-# V1 so pooling comparisons use the same statistical decision thresholds. Conditional defaults are
-# topk_fraction=0.05, attention_hidden_dim=32, regional_diffusion_scale=2.5 Å, and
-# log_sum_exp_beta=5.0; `when` prevents irrelevant values from creating duplicate candidates.
-
-objective:                                           # Select pooling by the complete WISDOM purpose.
-  metric: val_wisdom_hpo_score                      # W=0.35G+0.45S+0.20C from the validation curve.
-  mode: max                                         # Favor classification, localization, and coupling together.
-
-resources:                                           # Fixed outer allocation for the complete study.
-  gpu: 3                                             # Expose the three configured accelerators.
-  gpu_memory: 20GiB                                  # Per-Run free-VRAM admission threshold.
-  cpu: 36                                            # Total CPU shared by active Runs.
-  memory: 96GiB                                      # Total host RAM shared by active Runs.
-  time: 168h                                         # Seven-day study ceiling.
-
-# LambdaForge adaptive defaults include probabilistic racing, fresh confirmation seeds, convergence
-# detection, and failure recovery. WISDOM overrides the thresholds shown above to match V1.
-# The scalar objective reads the total validation metric emitted by Training. Resource options are
-# cpu, gpu, memory, gpu_memory, time, storage, and processes; output paths remain framework-owned.
+# Pooling hyperparameter defaults are topk_fraction=.05, attention_hidden_dim=32,
+# regional_diffusion_scale=2.5 Å, and log_sum_exp_beta=5.0. `when` removes inactive dimensions.
+# min_seeds=4 equals the seeds list; early_stopping=false and confirmation_seeds=[] prevent
+# candidate-dependent censoring while preserving parallel child scheduling.

@@ -1,78 +1,76 @@
-# V3: screen one initialization hypothesis at a time on the fixed pre-freeze backbone.
-name: wisdom-v3-initialization                      # Third campaign stage: initialization profiles vary.
-run: wisdom.Training.Training                       # Shared train/validate Work implementation.
+# OBJECTIVE: choose optimizer stabilization while retaining the initialization winner.
+# PREREQUISITES: V2 must provide one reviewed initialization_profile winner.
+# VARIES: optimization_profile only.
+# FIXED: initialization winner, architecture, MAX pooling, global BCE, and data.
+# DECISION: retain a policy only if four complete seeds improve utility/stability without slowdown.
+name: wisdom-v3                                     # Short campaign name for optimizer screening.
+run: wisdom.Training.Training                       # Shared LambdaForge training Work.
 
-with:                                               # Fixed data, architecture, loss, and optimizer controls.
-  dataset: {dataset: wisdom-dna-reduced@6}          # Immutable schema-3 reduced benchmark.
-  model_version: 1                                  # Fixed scalar DiffusionNet/MAX backbone.
-  subset: full                                      # Use the complete reduced training population.
-  pooling_type: max                                 # Keep MIL aggregation fixed during initialization screening.
-  hidden_dim: 128                                   # Fixed latent width.
-  embedding_dim: 32                                 # Fixed element embedding width.
-  residue_embedding_dim: 32                         # Fixed residue embedding width.
-  atomic_layers: 2                                  # Fixed atomic message-passing depth.
-  projection_depth: 1                               # Fixed atom-to-surface projection depth.
-  surface_layers: 4                                 # Four blocks expose every planned diffusion-time schedule.
-  atom_spatial_k: 16                                # Fixed atom-neighbour budget.
-  surface_atom_k: 16                                # Fixed point-to-atom candidate budget.
-  diffusion_spectral_modes: 128                     # Fixed intrinsic frequency budget.
-  dropout: 0.2                                      # Fixed stochastic regularization.
-  learning_rate: 0.0003                             # Fixed AdamW learning rate.
-  weight_decay: 0.0001                              # Fixed AdamW decoupled decay.
-  gate_lambda: 0.001                                # Fixed expected-L0 pressure.
-  weak_loss_profile: baseline                       # Use global BCE only while studying initialization.
-  architecture_spike: baseline                      # Disable every architectural spike.
-  optimization_diagnostics: true                    # Record gradients, activations, logits, and gate saturation.
+with:                                               # Carry-forward ledger for all earlier decisions.
+  dataset: {dataset: wisdom-dna-reduced@6}          # Immutable reduced benchmark.
+  model_version: 1                                  # Scalar DiffusionNet/MAX generation.
+  subset: full                                      # Complete reduced train population.
+  pooling_type: max                                 # Fixed baseline aggregation.
+  initialization_profile: baseline                  # REPLACE with the reviewed V2 winner.
+  weak_loss_profile: baseline                       # Global BCE only.
+  architecture_spike: baseline                      # No architecture change.
+  hidden_dim: 128                                   # Fixed pre-HPO latent width.
+  embedding_dim: 32                                 # Fixed pre-HPO element width.
+  residue_embedding_dim: 32                         # Fixed pre-HPO residue width.
+  atomic_layers: 2                                  # Fixed pre-HPO atomic depth.
+  projection_depth: 1                               # Fixed pre-HPO projection depth.
+  surface_layers: 2                                 # Fixed pre-HPO DiffusionNet depth.
+  optimization_diagnostics: true                    # Required stability and gradient evidence.
   batch_size: 16                                    # Proteins per optimizer step.
-  epochs: 500                                       # Safety ceiling; patience normally stops sooner.
-  patience: 30                                      # Global-only validation patience.
-  minimum_delta: 0.001                              # Required improvement in global checkpoint utility.
-  precision: auto                                   # BF16 dense CUDA work and FP32 sparse derivatives when supported.
-  surface_metrics: true                             # Measure localization without training on local targets.
-  surface_metrics_interval: 1                       # Required epoch-wise G/S/coupling curves.
-  surface_visualization: viewer                     # Keep final HTML/PLY but omit prediction NPZ.
-  surface_visualization_maximum: 12                 # Render a balanced twelve-protein gallery.
-  evaluate_test: false                              # Never expose test during architecture development.
-  data_workers: 2                                   # Leave CPU headroom while nine Runs are packed.
+  epochs: 500                                       # Safety ceiling.
+  patience: 30                                      # Global validation patience.
+  minimum_delta: 0.001                              # Required score improvement.
+  precision: auto                                   # Hardware-safe mixed precision.
+  surface_metrics: true                             # Evaluation-only local metrics.
+  surface_metrics_interval: 1                       # G/S/coupling every epoch.
+  surface_visualization: none                       # Avoid candidate galleries.
+  evaluate_test: false                              # Keep test sealed.
+  data_workers: 4                                   # Persistent NPZ workers.
 
-# Training defaults not selected above include model_version=1, subset="full", hidden_dim=128,
-# embedding_dim=32, residue_embedding_dim=null, atomic_layers=2, projection_depth=1,
-# surface_layers=2, atom_spatial_k=16, surface_atom_k=16, diffusion_spectral_modes=128,
-# dropout=.2, learning_rate=3e-4, weight_decay=1e-4, gate_lambda=1e-3, batch_size=2,
-# epochs=100, patience=30, precision="auto", surface_metrics=true,
-# surface_metrics_interval=0, surface_visualization="viewer", evaluate_test=true, and
-# data_workers=4. stability_profile="custom" exposes detailed initialization arguments. This
-# study instead searches named one-factor profiles; every profile not named below remains available
-# through Training but must be promoted only after its prerequisite result justifies it.
+seeds:                                              # Four paired seeds completed for every profile.
+  - 4                                               # Replication seed 1.
+  - 7                                               # Replication seed 2.
+  - 32                                              # Replication seed 3.
+  - 54                                              # Replication seed 4.
 
-seeds: [4, 7, 32]                                   # Three-seed screen; promote a signal to five or ten seeds.
+search:                                             # Parallel finite optimizer sweep without censoring.
+  strategy: adaptive                                # Retain concurrent child Runs, not adaptive elimination.
+  trials: 8                                         # Enumerate every distinct optimizer profile.
+  proposal_pool_size: 8                             # Exact categorical-space cardinality.
+  runs_per_gpu: 3                                   # Three measured Runs per H100.
+  max_parallel: 9                                   # Nine Runs over three H100s.
+  min_seeds: 4                                      # Force all four seeds for every optimizer profile.
+  confirmation_seeds: []                            # Do not add unequal winner-only replications.
+  early_stopping:                                   # Disable probability-based curve pruning for this sweep.
+    enabled: false                                  # Every Run reaches WISDOM's own stopping rule.
+  optimization_profile:                            # One mutually exclusive optimizer change.
+    values:                                         # Closed OptimizationProfile vocabulary.
+      - baseline                                    # Plain AdamW control.
+      - lr_warmup_05                                # Linear LR warm-up for first 5% of epochs.
+      - lr_warmup_10                                # Linear LR warm-up for first 10% of epochs.
+      - clip_1                                      # Clip global gradient norm at 1.
+      - clip_5                                      # Clip global gradient norm at 5.
+      - ema_099                                     # Evaluate exponential weight average with decay 0.99.
+      - ema_0999                                    # Evaluate exponential weight average with decay 0.999.
+      - swa                                         # Average late optimizer states with SWA.
 
-search:                                              # Compare isolated initialization hypotheses.
-  strategy: adaptive                                # Allocate confirmation seeds to plausible candidates.
-  trials: 19                                        # Exact finite profile count listed below.
-  proposal_pool_size: 19                            # Enumerate the whole finite screen without duplicates.
-  runs_per_gpu: 3                                    # Pack at most three measured Runs on each H100.
-  max_parallel: 9                                    # Use at most nine Runs across three H100s.
-  min_seeds: 1                                      # Give every profile one observation before racing.
-  stability_profile:                                # One profile overrides only its declared subsystem.
-    values: [baseline, embedding_fan, embedding_small, embedding_physical, gate_050, gate_099, gate_warmup, diffusion_rezero, diffusion_layerscale, atomic_rezero, atomic_layerscale, neutral_edges, neutral_transfer, local_small, local_calibrated, activation_aware, orthogonal, broader_diffusion, same_diffusion] # I0/I1/I2/I3/I4/I4b/I5/I6/I8/I9-A.
+objective:                                          # Rank optimizer policies by joint validation evidence.
+  metric: val_wisdom_hpo_score                      # Joint global/surface utility.
+  mode: max                                         # Larger is better.
 
-# Search defaults are framework-defined adaptive racing when an objective exists. trials and
-# proposal_pool_size are positive integers; values is a finite categorical domain. Data-dependent
-# LSUV and GradInit remain decision-gated because they require the diagnostics from this screen;
-# optimization profiles (LR warm-up, clipping, EMA, SWA) belong to wisdom_v4.yaml so
-# initialization and optimizer dynamics are not changed in the same comparison.
+resources:                                          # Complete adaptive-study allocation.
+  gpu: 3                                            # Three available accelerators.
+  gpu_memory: 20GiB                                 # Per-child admission threshold.
+  cpu: 36                                           # Shared host decoding capacity.
+  memory: 96GiB                                     # Shared host-memory ceiling.
+  time: 168h                                        # Seven-day ceiling.
 
-objective:                                           # Rank by the frozen architecture-development utility.
-  metric: val_wisdom_hpo_score                      # W=0.35G+0.45S@G+0.20C.
-  mode: max                                         # Larger coupled global/local quality is better.
-
-resources:                                           # Fixed outer study allocation.
-  gpu: 3                                             # Expose all three H100 accelerators.
-  gpu_memory: 20GiB                                  # Safe per-run admission threshold.
-  cpu: 36                                            # Four host CPUs per active Run at full concurrency.
-  memory: 96GiB                                      # Shared decoded-graph budget.
-  time: 168h                                         # Seven-day study ceiling.
-
-# LambdaForge resource fields accept cpu>=1, gpu>=0, memory/gpu_memory/storage sizes, a positive
-# duration, and optional processes<=cpu. LambdaForge owns run paths, placement, racing, and metrics.
+# optimization_profile defaults to custom. The chosen initialization remains independently active,
+# so combinations such as gate_warmup + ema_0999 are now represented without precedence loss.
+# min_seeds=4, early_stopping=false, and confirmation_seeds=[] make the comparison complete and
+# paired while keeping LambdaForge's concurrent adaptive-study execution path.

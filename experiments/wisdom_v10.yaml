@@ -1,44 +1,86 @@
-# V10: discover sparse concepts after an explicit winning predictor checkpoint exists.
-name: wisdom-v10-sparse-concepts                       # Tenth campaign stage: post-training interpretation.
-run: wisdom.interpretability.SparseConceptDiscovery.SparseConceptDiscovery # Frozen analysis Work.
+# OBJECTIVE: estimate the frozen V1 configuration across untouched confirmation seeds and test once.
+# PREREQUISITES: V9 must provide the reviewed final parameter ledger and checkpoint policy.
+# VARIES: only the complete confirmation seed.
+# FIXED: every selected V1 construction decision; no HPO or adaptive pruning remains.
+# DECISION: freeze WISDOM V1 only if variance, failure rate, surface quality, and test evidence pass.
+name: wisdom-v10                                    # Short campaign name for final V1 confirmation.
+run: wisdom.Training.Training                       # Shared LambdaForge training Work.
 
-with:                                                  # Arguments passed to SparseConceptDiscovery.run(...).
-  checkpoint: {file: ../best-model.pt}                 # Copy the official winning artifact here explicitly.
-  dataset: {dataset: wisdom-dna-reduced@6}            # Use the same immutable predictor dataset as V1-V9.
-  subset: full                                        # This release already contains the reduced train view.
-  lambda_values: []                                   # Empty activates the seven-value automatic grid.
-  selected_lambda: null                               # Null chooses a deterministic Pareto knee.
-  calibration_seeds: [17, 29, 43]                     # Small seed set for concept stability.
-  maximum_points_per_protein: 4096                    # Uniformly cap each protein to limit size bias.
-  epochs: 80                                          # Sparse-candidate optimization ceiling.
-  patience: 12                                        # Label-free validation patience.
-  batch_size: 4096                                    # Surface embeddings per sparse update.
-  learning_rate: 0.001                                # Adam rate for the sparse model only.
-  near_dead_threshold: 0.001                          # <=0.1% activation is practically near-dead.
-  dominant_threshold: 0.95                            # >=95% activation is globally dominant.
-  redundancy_threshold: 0.95                         # Decoder cosine warning threshold.
-  stability_threshold: 0.80                          # Matched mean cosine required across seeds.
-  top_activations_per_concept: 10                     # Visualization references retained per concept.
-  output_directory: ../data/dna/interpretability     # Durable human-facing result directory.
-  overwrite_output: false                             # Refuse to replace an earlier interpretation.
+with:                                               # Replace every marked value before confirmation.
+  dataset: {dataset: wisdom-dna-reduced@6}          # Immutable reduced benchmark.
+  model_version: 2                                  # Internal capabilities used by the frozen design.
+  subset: full                                      # Complete reduced training population.
+  pooling_type: max                                 # REPLACE with the V5 winner.
+  topk_fraction: 0.05                               # REPLACE if V5 selects top-k.
+  attention_hidden_dim: 32                          # REPLACE if V5 selects attention.
+  regional_diffusion_scale: 2.5                     # REPLACE if V5 selects local-mean-max.
+  log_sum_exp_beta: 5.0                             # REPLACE if V5 selects LogSumExp.
+  initialization_profile: baseline                  # REPLACE with the V2 winner.
+  optimization_profile: baseline                    # REPLACE with the V3 winner.
+  hidden_dim: 128                                   # REPLACE with the V4 winner.
+  embedding_dim: 32                                 # REPLACE with the V4 winner.
+  residue_embedding_dim: 32                         # REPLACE with the V4 winner.
+  atomic_layers: 2                                  # REPLACE with the V4 winner.
+  projection_depth: 1                               # REPLACE with the V4 winner.
+  surface_layers: 2                                 # REPLACE with the V4 winner.
+  atom_spatial_k: 16                                # REPLACE with the V4 winner.
+  surface_atom_k: 16                                # REPLACE with the V4 winner.
+  diffusion_spectral_modes: 128                     # REPLACE with the V4 winner.
+  surface_atom_radius: 6.0                          # REPLACE with the V4 winner.
+  dropout: 0.2                                      # REPLACE with the V9 winner.
+  learning_rate: 0.0003                             # REPLACE with the V9 winner.
+  weight_decay: 0.0001                              # REPLACE with the V9 winner.
+  gate_lambda: 0.001                                # REPLACE with the V9 winner.
+  weak_loss_profile: custom                         # Preserve selected weak coefficients.
+  negative_surface_lambda: 0.3                      # REPLACE with the V6a or V6d winner.
+  positive_existence_lambda: 0.0                    # REPLACE if selected at V6b.
+  regional_positive_lambda: 0.0                     # REPLACE if selected at V6b or V6d.
+  regional_loss_length: 2.5                         # REPLACE with the selected regional scale.
+  regional_ranking_lambda: 0.0                      # REPLACE if selected at V6b.
+  regional_ranking_margin: 0.5                      # REPLACE with the selected ranking margin.
+  cardinality_lambda: 0.0                           # REPLACE if selected at V6c.
+  total_variation_lambda: 0.0                       # REPLACE if selected at V6c.
+  dirichlet_lambda: 0.0                             # REPLACE if selected at V6c or V6d.
+  head_type: single                                 # REPLACE with the V7 winner.
+  global_context_dim: 16                            # REPLACE if V7 selects a conditioned head.
+  detach_global_context: true                       # REPLACE with the V7 winner policy.
+  direct_head_weight: 1.0                          # REPLACE with the V7 winner policy.
+  surface_head_weight: 1.0                         # REPLACE with the V7 winner policy.
+  architecture_spike: baseline                      # REPLACE with the V8 winner.
+  batch_size: 16                                    # Proteins per optimizer update.
+  epochs: 500                                       # Safety ceiling.
+  patience: 30                                      # Global validation patience.
+  minimum_delta: 0.001                              # Required score improvement.
+  precision: auto                                   # Hardware-safe mixed precision.
+  surface_metrics: true                             # Required final localization evidence.
+  surface_metrics_interval: 1                       # Preserve full G/S/regret trajectories.
+  surface_visualization: viewer                     # Final HTML/PLY without large prediction NPZ files.
+  surface_visualization_maximum: 12                 # Balanced gallery size per evaluated split.
+  faithfulness_audit: true                          # Required final hotspot-dependence audit.
+  evaluate_test: true                               # Open held-out test only in this confirmation stage.
+  data_workers: 4                                   # Persistent NPZ workers.
 
-# SparseConceptDiscovery.run defaults equal the selected values above except checkpoint and dataset,
-# which have no defaults, and maximum_points_per_protein=0. This experiment selects 4096 to prevent
-# large proteins from dominating calibration; zero retains every point when that is desired.
-# lambda_values=() uses [0,1e-5,1e-4,1e-3,1e-2,1e-1,1]; a supplied list
-# must be non-negative. selected_lambda=null uses the Pareto knee and otherwise must name a tested
-# value. Positive maximum_points_per_protein values uniformly cap each protein.
-# epochs, patience, batch_size, and top_activations_per_concept are positive; learning_rate>0;
-# 0<=near_dead_threshold<dominant_threshold<=1; redundancy/stability thresholds lie in (0,1].
-# output_directory=null retains only the LambdaForge artifact; overwrite_output=false is safe.
+seeds:                                              # Ten uncensored confirmation replications.
+  - 211                                             # Fresh confirmation seed 1.
+  - 223                                             # Fresh confirmation seed 2.
+  - 227                                             # Fresh confirmation seed 3.
+  - 229                                             # Fresh confirmation seed 4.
+  - 233                                             # Fresh confirmation seed 5.
+  - 239                                             # Fresh confirmation seed 6.
+  - 241                                             # Fresh confirmation seed 7.
+  - 251                                             # Fresh confirmation seed 8.
+  - 257                                             # Fresh confirmation seed 9.
+  - 263                                             # Fresh confirmation seed 10.
 
-resources:                                             # One post-HPO analysis allocation.
-  gpu: 1                                               # Predictor extraction and sparse fitting use one GPU.
-  cpu: 8                                               # NPZ decoding and orchestration capacity.
-  memory: 48GiB                                        # Embedding and report storage in host memory.
-  storage: 30GiB                                       # Interpretability tables and checkpoints.
-  time: 24h                                            # Complete calibration/final-fit ceiling.
+objective:                                          # Index confirmation evidence without selecting a seed.
+  metric: val_wisdom_hpo_score                      # Joint validation utility.
+  mode: max                                         # Larger is better.
 
-# This Work has no seeds/search/objective: it runs exactly once. LambdaForge currently cannot bind
-# the artifact of the adaptively selected HPO winner as a downstream named output. Export/copy the
-# winning `best-model` artifact explicitly and update checkpoint above; WISDOM never guesses a trial.
+resources:                                          # Per-seed allocation because no search packs Runs.
+  gpu: 1                                            # One accelerator per confirmation Run.
+  cpu: 8                                            # Trainer and data workers.
+  memory: 24GiB                                     # Host decoding budget.
+  time: 168h                                        # Seven-day safety ceiling.
+
+# This stage deliberately has no search section: every seed must complete and contribute to the
+# final variance estimate. The test split is opened here, never during candidate selection.

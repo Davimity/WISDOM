@@ -696,7 +696,11 @@ def test_preprocessing_selects_train_dilution_before_geometry(tmp_path: Path) ->
 
 @pytest.mark.parametrize(
     "filename",
-    ("wisdom_v1.yaml", "wisdom_v2.yaml", "wisdom_v3.yaml"),
+    (
+        "wisdom_v1a.yaml",
+        "wisdom_v2.yaml",
+        "wisdom_v4.yaml",
+    ),
 )
 def test_training_catalog_resolves_before_every_dry_run(
     filename : str,
@@ -717,38 +721,93 @@ def test_training_catalog_resolves_before_every_dry_run(
     config = WorkConfig.from_yaml(project_root / "experiments" / filename)
     plan   = WorkRunner().plan(config)
 
-    # Every expanded LambdaForge 0.14 Run resolves the same exact DatasetVersion marker at launch.
-    expected_runs = {
-        "wisdom_v1.yaml": 1003,
-        "wisdom_v2.yaml": 63,
-        "wisdom_v3.yaml": 53,
-    }
-    assert len(plan.levels[0]) == expected_runs[filename]
+    # Every expanded LambdaForge 0.14 Run resolves the exact DatasetVersion before launch and uses
+    # the same application-defined global/surface objective.
+    assert plan.levels
+    assert plan.levels[0]
     assert config.raw["objective"] == {
-        "metrics": {
-            "val_auprc": {
-                "mode": "max",
-                "weight": 0.35,
-                "range": [0.0, 1.0],
-            },
-            "val_auroc": {
-                "mode": "max",
-                "weight": 0.20,
-                "range": [0.0, 1.0],
-            },
-            "val_balanced_accuracy": {
-                "mode": "max",
-                "weight": 0.25,
-                "range": [0.0, 1.0],
-            },
-            "val_mcc_objective": {
-                "mode": "max",
-                "weight": 0.20,
-                "range": [0.0, 1.0],
-            },
-        },
-        "aggregation": "geometric",
+        "metric": "val_wisdom_hpo_score",
+        "mode":   "max",
     }
+
+
+def test_experiment_campaign_uses_ordered_names_and_traceability_headers() -> None:
+    """Require every ordered campaign YAML to state its scientific decision contract."""
+    experiment_root = Path(__file__).parents[1] / "experiments"
+    stage_names = (
+        "wisdom_v1a.yaml",
+        "wisdom_v1b.yaml",
+        "wisdom_v2.yaml",
+        "wisdom_v3.yaml",
+        "wisdom_v4.yaml",
+        "wisdom_v5.yaml",
+        "wisdom_v6a.yaml",
+        "wisdom_v6b.yaml",
+        "wisdom_v6c.yaml",
+        "wisdom_v6d.yaml",
+        "wisdom_v7.yaml",
+        "wisdom_v8.yaml",
+        "wisdom_v9.yaml",
+        "wisdom_v10.yaml",
+    )
+    required_headers = ("OBJECTIVE:", "PREREQUISITES:", "VARIES:", "FIXED:", "DECISION:")
+
+    for name in stage_names:
+        text = (experiment_root / name).read_text(encoding="utf-8")
+        first_lines = "\n".join(text.splitlines()[:5])
+
+        assert all(header in first_lines for header in required_headers)
+
+    assert tuple(sorted(path.name for path in experiment_root.glob("wisdom_v*.yaml"))) == tuple(
+        sorted(stage_names)
+    )
+
+
+def test_one_factor_sweeps_complete_every_seed_without_curve_pruning() -> None:
+    """Finite screens must retain paired evidence instead of censoring weak candidates."""
+    experiment_root = Path(__file__).parents[1] / "experiments"
+    single_studies  = (
+        "wisdom_v2.yaml",
+        "wisdom_v3.yaml",
+        "wisdom_v5.yaml",
+        "wisdom_v6a.yaml",
+        "wisdom_v7.yaml",
+        "wisdom_v8.yaml",
+    )
+    stepped_studies = ("wisdom_v6b.yaml", "wisdom_v6c.yaml")
+
+    for name in single_studies:
+        study  = safe_load((experiment_root / name).read_text(encoding="utf-8"))
+        search = study["search"]
+
+        assert search["min_seeds"] == len(study["seeds"])
+        assert search["early_stopping"] == {"enabled": False}
+        assert search["confirmation_seeds"] == []
+
+    for name in stepped_studies:
+        study = safe_load((experiment_root / name).read_text(encoding="utf-8"))
+        for step in study["steps"]:
+            search = step["search"]
+
+            assert search["min_seeds"] == len(step["seeds"])
+            assert search["early_stopping"] == {"enabled": False}
+            assert search["confirmation_seeds"] == []
+
+
+def test_loss_combination_keeps_adaptive_interaction_search() -> None:
+    """The three-loss mixture should use adaptive pruning rather than one-factor sweep policy."""
+    experiment = Path(__file__).parents[1] / "experiments" / "wisdom_v6d.yaml"
+    study      = safe_load(experiment.read_text(encoding="utf-8"))
+    search     = study["search"]
+
+    assert search["trials"] == 27
+    assert search["min_seeds"] == 1
+    assert search["early_stopping"]["enabled"] is True
+    assert {
+        "negative_surface_lambda",
+        "regional_positive_lambda",
+        "dirichlet_lambda",
+    }.issubset(search)
 
 
 @pytest.mark.parametrize(

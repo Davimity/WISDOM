@@ -1,15 +1,10 @@
-"""Legacy combined profiles retained for reproducibility of older experiment YAMLs."""
+"""Closed initialization profiles used by the V1 construction campaign."""
 
 from enum import Enum
 
 
-class StabilityProfile(str, Enum):
-    """Resolve pre-split stability names used by archived WISDOM experiments.
-
-    New experiments use ``InitializationProfile`` and ``OptimizationProfile`` so both selected
-    policies can remain active simultaneously. This enum remains because archived experiment
-    configurations are part of scientific provenance and must stay reproducible.
-    """
+class InitializationProfile(str, Enum):
+    """Name one initialization policy without changing optimizer behavior."""
 
     CUSTOM               = "custom"
     BASELINE             = "baseline"
@@ -31,22 +26,15 @@ class StabilityProfile(str, Enum):
     ORTHOGONAL           = "orthogonal"
     BROADER_DIFFUSION    = "broader_diffusion"
     SAME_DIFFUSION       = "same_diffusion"
-    LR_WARMUP_05         = "lr_warmup_05"
-    LR_WARMUP_10         = "lr_warmup_10"
-    CLIP_1               = "clip_1"
-    CLIP_5               = "clip_5"
-    EMA_099              = "ema_099"
-    EMA_0999             = "ema_0999"
-    SWA                  = "swa"
 
     def overrides(self) -> dict[str, str | float | bool | None]:
-        """Return the values intentionally changed from the historical baseline.
+        """Return only the model-initialization values changed by this profile.
 
         Returns:
-            Training parameter overrides for this one-factor candidate. ``custom`` returns an
-            empty mapping so every explicit YAML value remains authoritative.
+            Training parameter overrides for one initialization hypothesis. ``custom`` and
+            ``baseline`` return empty mappings, leaving explicit parameters authoritative.
         """
-        profiles: dict[StabilityProfile, dict[str, str | float | bool | None]] = {
+        profiles: dict[InitializationProfile, dict[str, str | float | bool | None]] = {
             self.CUSTOM:               {},
             self.BASELINE:             {},
             self.EMBEDDING_FAN:        {"embedding_initialization": "fan_scaled"},
@@ -73,12 +61,5 @@ class StabilityProfile(str, Enum):
             self.ORTHOGONAL:           {"linear_initialization": "orthogonal"},
             self.BROADER_DIFFUSION:    {"diffusion_time_initialization": "broader_lengths"},
             self.SAME_DIFFUSION:       {"diffusion_time_initialization": "same_scale"},
-            self.LR_WARMUP_05:         {"learning_rate_warmup_fraction": 0.05},
-            self.LR_WARMUP_10:         {"learning_rate_warmup_fraction": 0.10},
-            self.CLIP_1:               {"gradient_clip_norm": 1.0},
-            self.CLIP_5:               {"gradient_clip_norm": 5.0},
-            self.EMA_099:              {"weight_averaging": "ema", "ema_decay": 0.99},
-            self.EMA_0999:             {"weight_averaging": "ema", "ema_decay": 0.999},
-            self.SWA:                  {"weight_averaging": "swa", "swa_start_fraction": 0.80},
         }
         return profiles[self]

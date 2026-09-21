@@ -1,0 +1,115 @@
+# OBJECTIVE: test whether three individually credible weak losses cooperate when trained together.
+# PREREQUISITES: V6a, V6b, and V6c must each identify a credible family before this study is run.
+# VARIES: the contribution of negative-surface, regional-positive, and Dirichlet losses jointly.
+# FIXED: every V2-V5 winner, loss definitions, head relationship, architecture, and dataset.
+# DECISION: retain the mixture only if interaction-aware HPO beats every single-family parent.
+name: wisdom-v6d                                    # Short campaign name for combined weak losses.
+run: wisdom.Training.Training                       # Shared LambdaForge training Work.
+
+with:                                               # Frozen backbone and selected loss families.
+  dataset: {dataset: wisdom-dna-reduced@6}          # Immutable reduced benchmark.
+  model_version: 2                                  # Pooling-capable internal generation.
+  subset: full                                      # Complete reduced training population.
+  pooling_type: max                                 # REPLACE with the V5 winner.
+  topk_fraction: 0.05                               # REPLACE if V5 selects top-k.
+  attention_hidden_dim: 32                          # REPLACE if V5 selects attention.
+  regional_diffusion_scale: 2.5                     # REPLACE if V5 selects local-mean-max.
+  log_sum_exp_beta: 5.0                             # REPLACE if V5 selects LogSumExp.
+  initialization_profile: baseline                  # REPLACE with the V2 winner.
+  optimization_profile: baseline                    # REPLACE with the V3 winner.
+  hidden_dim: 128                                   # REPLACE with the V4 winner.
+  embedding_dim: 32                                 # REPLACE with the V4 winner.
+  residue_embedding_dim: 32                         # REPLACE with the V4 winner.
+  atomic_layers: 2                                  # REPLACE with the V4 winner.
+  projection_depth: 1                               # REPLACE with the V4 winner.
+  surface_layers: 2                                 # REPLACE with the V4 winner.
+  atom_spatial_k: 16                                # REPLACE with the V4 winner.
+  surface_atom_k: 16                                # REPLACE with the V4 winner.
+  diffusion_spectral_modes: 128                     # REPLACE with the V4 winner.
+  surface_atom_radius: 6.0                          # REPLACE with the V4 winner.
+  dropout: 0.2                                      # REPLACE with the V4 winner.
+  learning_rate: 0.0003                             # REPLACE with the V4 winner.
+  weight_decay: 0.0001                              # REPLACE with the V4 winner.
+  gate_lambda: 0.001                                # REPLACE with the V4 winner.
+  weak_loss_profile: custom                         # Direct composable coefficients are authoritative.
+  positive_existence_lambda: 0.0                    # Disable the unselected V6b alternative.
+  regional_loss_length: 2.5                         # Intrinsic smoothing length in ångströms.
+  regional_ranking_lambda: 0.0                      # Disable the unselected V6b alternative.
+  regional_ranking_margin: 0.5                      # Inactive ranking margin retained explicitly.
+  cardinality_lambda: 0.0                           # Disable the unselected V6c alternative.
+  minimum_positive_area: 0.01                       # Inactive cardinality target retained explicitly.
+  total_variation_lambda: 0.0                       # Do not mix TV with Dirichlet smoothing.
+  architecture_spike: baseline                      # No architecture change during loss composition.
+  head_type: single                                 # One faithful local-to-global head.
+  batch_size: 16                                    # Proteins per optimizer update.
+  epochs: 500                                       # Safety ceiling.
+  patience: 30                                      # WISDOM checkpoint-selection patience.
+  minimum_delta: 0.001                              # Required validation-score improvement.
+  precision: auto                                   # Hardware-safe mixed precision.
+  surface_metrics: true                             # Evaluation-only local metrics.
+  surface_metrics_interval: 1                       # Required global/surface/coupling curves.
+  surface_visualization: none                       # Avoid candidate galleries during HPO.
+  faithfulness_audit: true                          # Check whether hotspots drive bag predictions.
+  evaluate_test: false                              # Keep held-out test data sealed.
+  data_workers: 4                                   # Persistent NPZ workers.
+
+seeds:                                              # Adaptive seed pool for the interaction search.
+  - 4                                               # Initial shared seed.
+  - 7                                               # Additional seed for plausible candidates.
+  - 32                                              # Additional seed for plausible candidates.
+  - 54                                              # Additional seed for plausible candidates.
+  - 65                                              # Additional seed for plausible candidates.
+  - 94                                              # Additional seed for plausible candidates.
+
+search:                                             # Three-dimensional loss-interaction HPO.
+  strategy: adaptive                                # Prune and seed-race weak mixtures efficiently.
+  trials: 27                                        # Cover the complete 3 x 3 x 3 finite proposal pool.
+  proposal_pool_size: 27                            # Keep every authored interaction available.
+  runs_per_gpu: 3                                   # Pack three measured Runs per H100.
+  max_parallel: 9                                   # Nine concurrent Runs over three H100s.
+  min_seeds: 1                                      # Large interaction search starts cheaply.
+  confirmation_top_k: 3                             # Re-evaluate the three strongest mixtures.
+  confirmation_seeds:                               # Fresh seeds used only after candidate selection.
+    - 1001                                          # Confirmation seed 1.
+    - 1002                                          # Confirmation seed 2.
+    - 1003                                          # Confirmation seed 3.
+    - 1004                                          # Confirmation seed 4.
+  early_stopping:                                   # Probability-based pruning is appropriate here.
+    enabled: true                                   # Stop mixtures unlikely to become competitive.
+    min_step: 40                                    # Observe forty epochs before comparing curves.
+    confirmations: 3                                # Require three distinct uncompetitive checkpoints.
+    probability_threshold: 0.02                     # Stop below 2% competitive probability.
+    equivalence_margin: 0.015                       # Treat score gaps <=0.015 as practically tied.
+  negative_surface_lambda:                          # V6a contribution to negative proteins.
+    values:                                         # Local scale around the V6a screen.
+      - 0.1                                         # Weak all-negative surface pressure.
+      - 0.3                                         # Moderate all-negative surface pressure.
+      - 1.0                                         # Strong all-negative surface pressure.
+  regional_positive_lambda:                         # V6b contribution to coherent positive regions.
+    values:                                         # Smaller scale for the diffused regional term.
+      - 0.03                                        # Weak regional-existence pressure.
+      - 0.1                                         # Moderate regional-existence pressure.
+      - 0.3                                         # Strong regional-existence pressure.
+  dirichlet_lambda:                                 # V6c intrinsic smoothness contribution.
+    values:                                         # Spectral-energy coefficients.
+      - 0.0003                                      # Very weak intrinsic smoothing.
+      - 0.001                                       # Weak intrinsic smoothing.
+      - 0.003                                       # Moderate intrinsic smoothing.
+
+objective:                                          # Rank mixtures by the complete validation purpose.
+  metric: val_wisdom_hpo_score                      # Joint global/surface/coupling utility.
+  mode: max                                         # Larger is better.
+
+resources:                                          # Complete adaptive-study allocation.
+  gpu: 3                                            # Three available accelerators.
+  gpu_memory: 20GiB                                 # Per-child admission threshold.
+  cpu: 36                                           # Shared host decoding capacity.
+  memory: 96GiB                                     # Shared host-memory ceiling.
+  time: 168h                                        # Seven-day ceiling.
+
+# This authored mixture uses regional-positive and Dirichlet as the V6b/V6c representatives. If
+# those screens select positive-existence, ranking, cardinality, or TV instead, replace the matching
+# search key with that winner's existing `*_lambda` parameter before execution; never enable TV and
+# Dirichlet together. Unlike the one-factor sweeps, this 27-point interaction search deliberately
+# keeps LambdaForge pruning and adaptive seed allocation, then confirms the top three on four fresh
+# seeds. Training defaults for omitted weak-loss coefficients are zero.

@@ -1,0 +1,56 @@
+# OBJECTIVE: measure the untouched V1 baseline distribution before changing any scientific choice.
+# PREREQUISITES: wisdom-dna-reduced@6 must be registered on the execution cluster.
+# VARIES: only the complete LambdaForge run seed.
+# FIXED: architecture, initialization, optimizer, MAX pooling, global BCE, and data.
+# DECISION: quantify variance and collapse frequency; this stage selects no winner.
+name: wisdom-v1a                                    # Short campaign name for the baseline diagnostic.
+run: wisdom.Training.Training                       # LambdaForge 0.14 training Work.
+
+with:                                               # Exact baseline passed to Training.run(...).
+  dataset: {dataset: wisdom-dna-reduced@6}          # Immutable reduced schema-3 benchmark.
+  model_version: 1                                  # Internal scalar DiffusionNet capability generation.
+  subset: full                                      # Complete reduced training population.
+  pooling_type: max                                 # Existential multiple-instance baseline.
+  initialization_profile: baseline                  # Historical initialization policy.
+  optimization_profile: baseline                    # Historical AdamW policy without averaging.
+  weak_loss_profile: baseline                       # Protein BCE only.
+  architecture_spike: baseline                      # Scalar, one-pass atom-to-surface architecture.
+  batch_size: 16                                    # Proteins per optimizer update.
+  epochs: 500                                       # Safety ceiling; patience normally stops earlier.
+  patience: 30                                      # Non-improving validation epochs before stopping.
+  minimum_delta: 0.001                              # Required protein-score improvement.
+  precision: auto                                   # BF16 where supported, otherwise FP32.
+  surface_metrics: true                             # Evaluation-only localization diagnostics.
+  surface_metrics_interval: 1                       # Measure global/surface coupling every epoch.
+  surface_visualization: none                       # Avoid ten duplicate viewer galleries.
+  optimization_diagnostics: true                    # Record gradients, activations, and gate saturation.
+  evaluate_test: false                              # Keep the held-out test partition sealed.
+  data_workers: 4                                   # Persistent NPZ decoding workers per Run.
+
+# Training defaults not selected above remain authoritative. In particular, hidden_dim=128,
+# embedding_dim=32, residue_embedding_dim=null, atomic_layers=2, projection_depth=1,
+# surface_layers=2, learning_rate=3e-4, weight_decay=1e-4, and gate_lambda=1e-3.
+seeds:                                              # Ten complete replications; no adaptive pruning.
+  - 4                                               # Independent full-run seed 1.
+  - 7                                               # Independent full-run seed 2.
+  - 32                                              # Independent full-run seed 3.
+  - 54                                              # Independent full-run seed 4.
+  - 65                                              # Independent full-run seed 5.
+  - 94                                              # Independent full-run seed 6.
+  - 109                                             # Independent full-run seed 7.
+  - 124                                             # Independent full-run seed 8.
+  - 142                                             # Independent full-run seed 9.
+  - 167                                             # Independent full-run seed 10.
+
+objective:                                          # Index the diagnostic runs without selecting among them.
+  metric: val_wisdom_hpo_score                      # Joint global/surface validation utility.
+  mode: max                                         # Larger utility is better.
+
+resources:                                          # Per-seed allocation because no search packs child Runs.
+  gpu: 3                                            # One accelerator per replication.
+  cpu: 46                                           # Trainer and four data workers.
+  memory: 20GiB                                     # Host graph-decoding budget.
+  time: 16800h                                      # Seven-day safety ceiling.
+
+# This stage deliberately has no search section: pruning or promotion would censor the seed
+# distribution that it is intended to measure.
