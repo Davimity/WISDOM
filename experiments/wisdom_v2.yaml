@@ -51,11 +51,11 @@ seeds:                                              # Four paired seeds complete
 
 search:                                             # Parallel finite initialization sweep without censoring.
   strategy: adaptive                                # Retain concurrent child Runs, not adaptive elimination.
-  trials: 19                                        # Enumerate every authored profile once.
-  proposal_pool_size: 19                            # Exact categorical-space cardinality.
+  trials: 100                                       # Enumerate every authored profile once.
+  proposal_pool_size: 100                           # Exact categorical-space cardinality.
   runs_per_gpu: 3                                   # Pack three measured Runs per H100.
   max_parallel: 9                                   # Bound a three-H100 study to nine Runs.
-  min_seeds: 4                                      # Force all four seeds for every initialization profile.
+  min_seeds: 8                                      # Force all four seeds for every initialization profile.
   confirmation_seeds: []                            # Full paired evidence needs no extra winner-only seeds.
   early_stopping:                                   # Disable probability-based curve pruning for this sweep.
     enabled: false                                  # Every Run reaches WISDOM's own patience or epoch ceiling.

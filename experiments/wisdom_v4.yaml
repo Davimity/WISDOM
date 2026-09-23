@@ -41,8 +41,8 @@ seeds:                                              # Ordered adaptive confirmat
 search:                                             # Restored broad V1 backbone search.
   strategy: adaptive                                # Allocate epochs/seeds to plausible candidates.
   trials: 500                                       # Maximum distinct proposals.
-  runs_per_gpu: 3                                   # Pack three measured Runs per H100.
-  max_parallel: 9                                   # Bound three H100s to nine concurrent Runs.
+  runs_per_gpu: 50                                   # Pack three measured Runs per H100.
+  max_parallel: 150                                   # Bound three H100s to nine concurrent Runs.
   min_seeds: 1                                      # Every proposal receives one seed.
   hidden_dim:                                       # Shared atom/surface latent width.
     values:                                         # Discrete capacity choices.
@@ -112,7 +112,7 @@ objective:                                          # Use the already logged joi
 resources:                                          # Complete adaptive-study allocation.
   gpu: 3                                            # Three available accelerators.
   gpu_memory: 20GiB                                 # Per-child free-memory admission threshold.
-  cpu: 36                                           # Shared host decoding capacity.
+  cpu: 46                                           # Shared host decoding capacity.
   memory: 100GiB                                    # Shared host-memory ceiling.
   time: 1000h                                       # Long safety ceiling for the broad HPO.
 

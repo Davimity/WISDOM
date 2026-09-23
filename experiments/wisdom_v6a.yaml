@@ -65,8 +65,12 @@ search:                                             # Parallel coefficient sweep
   negative_surface_lambda:                          # Area-weighted negative-bag local penalty.
     values:                                         # Prescribed non-factorial screen.
       - 0.0                                         # Global-BCE baseline with no local penalty.
+      - 0.05                                        # Weak negative-surface constraint.
       - 0.1                                         # Weak negative-surface constraint.
+      - 0.2                                         # Moderate negative-surface constraint.
       - 0.3                                         # Moderate negative-surface constraint.
+      - 0.6                                         # Strong negative-surface constraint.
+      - 0.8                                         # Strong negative-surface constraint.
       - 1.0                                         # Strong negative-surface constraint.
 
 objective:                                          # Rank by joint validation evidence.

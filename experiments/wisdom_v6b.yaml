@@ -69,8 +69,12 @@ steps:                                              # Each step adds one family 
       positive_existence_lambda:                    # Positive-bag existential prior.
         values:                                     # One-dimensional screen.
           - 0.0                                     # V6a parent control.
+          - 0.05                                    # Weak existence constraint.
           - 0.1                                     # Weak existence constraint.
+          - 0.2                                     # Moderate existence constraint.
           - 0.3                                     # Moderate existence constraint.
+          - 0.6                                     # Strong existence constraint.
+          - 0.8                                     # Strong existence constraint.
           - 1.0                                     # Strong existence constraint.
     objective: &loss_region_objective               # Shared joint validation decision.
       metric: val_wisdom_hpo_score                  # Global/surface/coupling utility.

@@ -37,14 +37,20 @@ seeds:                                              # Four paired seeds complete
   - 7                                               # Replication seed 2.
   - 32                                              # Replication seed 3.
   - 54                                              # Replication seed 4.
+  - 65                                              # Replication seed 5.
+  - 94                                              # Replication seed 6.
+  - 109                                             # Replication seed 7.
+  - 124                                             # Replication seed 8.
+  - 142                                             # Replication seed 9.
+  - 167                                             # Replication seed 10.
 
 search:                                             # Parallel finite optimizer sweep without censoring.
   strategy: adaptive                                # Retain concurrent child Runs, not adaptive elimination.
-  trials: 8                                         # Enumerate every distinct optimizer profile.
-  proposal_pool_size: 8                             # Exact categorical-space cardinality.
-  runs_per_gpu: 3                                   # Three measured Runs per H100.
-  max_parallel: 9                                   # Nine Runs over three H100s.
-  min_seeds: 4                                      # Force all four seeds for every optimizer profile.
+  trials: 100                                       # Enumerate every distinct optimizer profile.
+  proposal_pool_size: 100                           # Exact categorical-space cardinality.
+  runs_per_gpu: 50                                  # Three measured Runs per H100.
+  max_parallel: 100                                 # Nine Runs over three H100s.
+  min_seeds: 10                                      # Force all four seeds for every optimizer profile.
   confirmation_seeds: []                            # Do not add unequal winner-only replications.
   early_stopping:                                   # Disable probability-based curve pruning for this sweep.
     enabled: false                                  # Every Run reaches WISDOM's own stopping rule.
@@ -64,7 +70,7 @@ objective:                                          # Rank optimizer policies by
   mode: max                                         # Larger is better.
 
 resources:                                          # Complete adaptive-study allocation.
-  gpu: 3                                            # Three available accelerators.
+  gpu: 2                                            # Three available accelerators.
   gpu_memory: 20GiB                                 # Per-child admission threshold.
   cpu: 36                                           # Shared host decoding capacity.
   memory: 96GiB                                     # Shared host-memory ceiling.
