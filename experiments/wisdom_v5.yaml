@@ -1,10 +1,13 @@
-# OBJECTIVE: test whether MAX is an obviously poor aggregation rule before adding weak local losses.
+# OBJECTIVE: LEGACY historical pooling sanity screen; V5a/V5b are now authoritative.
 # PREREQUISITES: V4 must provide one reviewed core-HPO winner.
 # VARIES: pooling family and only the hyperparameters belonging to that family.
 # FIXED: core-HPO winner, initialization/optimizer winners, global BCE, architecture, and data.
-# DECISION: carry one pooling rule forward; formal pooling remains a post-V1 roadmap question.
-name: wisdom-v5                                     # Short campaign name for pooling screening.
-run: wisdom.Training.Training                       # Shared LambdaForge training Work.
+# DECISION: historical evidence only; use V5a/V5b to nominate a family shortlist for V6.
+run: wisdom.Training.Training                       # Shared Work; the filename supplies its study name.
+
+# Research Analysis inherits Training.analysis_profile, including G/S/C/W and pooling questions.
+# Optional analysis overrides use metrics/defaults/families/questions/discovery; {} retains the
+# central class profile. Metadata never changes this legacy sweep, its seeds, or its objective.
 
 with:                                               # Explicit carry-forward ledger.
   dataset: {dataset: wisdom-dna-reduced@6}          # Immutable reduced benchmark.
@@ -14,18 +17,18 @@ with:                                               # Explicit carry-forward led
   optimization_profile: baseline                    # REPLACE with the V3 winner.
   hidden_dim: 128                                   # REPLACE with the V4 winner.
   embedding_dim: 32                                 # REPLACE with the V4 winner.
-  residue_embedding_dim: 32                         # REPLACE with the V4 winner.
+  residue_embedding_dim: 64                          # REPLACE with the V4 winner.
   atomic_layers: 2                                  # REPLACE with the V4 winner.
-  projection_depth: 1                               # REPLACE with the V4 winner.
-  surface_layers: 2                                 # REPLACE with the V4 winner.
-  atom_spatial_k: 16                                # REPLACE with the V4 winner.
+  projection_depth: 3                               # REPLACE with the V4 winner.
+  surface_layers: 4                                 # REPLACE with the V4 winner.
+  atom_spatial_k: 8                                 # REPLACE with the V4 winner.
   surface_atom_k: 16                                # REPLACE with the V4 winner.
-  diffusion_spectral_modes: 128                     # REPLACE with the V4 winner.
-  surface_atom_radius: 6.0                          # REPLACE with the V4 winner.
+  diffusion_spectral_modes: 32                      # REPLACE with the V4 winner.
+  surface_atom_radius: 4.0                          # REPLACE with the V4 winner.
   dropout: 0.2                                      # REPLACE with the V4 winner.
-  learning_rate: 0.0003                             # REPLACE with the V4 winner.
-  weight_decay: 0.0001                              # REPLACE with the V4 winner.
-  gate_lambda: 0.001                                # REPLACE with the V4 winner.
+  learning_rate: 0.001                              # REPLACE with the V4 winner.
+  weight_decay: 0.0005                              # REPLACE with the V4 winner.
+  gate_lambda: 0.04                                 # REPLACE with the V4 winner.
   weak_loss_profile: baseline                       # Protein BCE only during pooling comparison.
   architecture_spike: baseline                      # No architecture change.
   head_type: single                                 # One faithful local-to-global head.
@@ -37,69 +40,57 @@ with:                                               # Explicit carry-forward led
   surface_metrics: true                             # Evaluation-only local metrics.
   surface_metrics_interval: 1                       # Required G/S/regret curves.
   surface_visualization: none                       # Avoid candidate galleries.
-  faithfulness_audit: true                          # Test whether selected regions drive predictions.
+  faithfulness_audit: true                          # Audit point deletion; unavailable for regional diffusion.
   evaluate_test: false                              # Keep test sealed.
   data_workers: 4                                   # Persistent NPZ workers.
 
-seeds:                                              # Four paired seeds completed for every pooling rule.
-  - 4                                               # Replication seed 1.
-  - 7                                               # Replication seed 2.
-  - 32                                              # Replication seed 3.
-  - 54                                              # Replication seed 4.
-
-search:                                             # Parallel finite pooling sweep without censoring.
-  strategy: adaptive                                # Retain concurrent child Runs, not adaptive elimination.
-  trials: 12                                        # Exact finite conditional-space size.
-  proposal_pool_size: 12                            # Enumerate all authored configurations.
-  runs_per_gpu: 3                                   # Three measured Runs per H100.
-  max_parallel: 9                                   # Nine concurrent Runs over three H100s.
-  min_seeds: 4                                      # Force all four seeds for every pooling configuration.
-  confirmation_seeds: []                            # Complete paired evidence needs no extra confirmation.
-  early_stopping:                                   # Disable probability-based curve pruning for this sweep.
-    enabled: false                                  # Every Run reaches WISDOM's own stopping rule.
-  pooling_type:                                     # Protein aggregation family.
-    values:                                         # Closed PoolingType vocabulary.
-      - max                                         # One highest-scoring point determines the bag.
-      - mean                                        # Average evidence over every surface point.
-      - attention                                   # Learned weighting; flexible but may decouple localization.
-      - topk                                        # Average only the highest-scoring surface fraction.
-      - local_mean_max                              # Diffuse locally, then take the strongest region.
-      - log_sum_exp                                 # Smooth MAX with a tunable inverse temperature.
-  topk_fraction:                                    # Active only for top-k pooling.
-    values:                                         # Tested hotspot fractions.
-      - 0.01                                        # Top one percent of the surface.
-      - 0.05                                        # Top five percent of the surface.
-      - 0.10                                        # Top ten percent of the surface.
-    when: {pooling_type: topk}                      # Prevent irrelevant duplicate candidates.
-  attention_hidden_dim:                             # Active only for learned attention.
-    values:                                         # Keep attention capacity fixed in this sanity screen.
-      - 32                                          # Compact scoring network.
-    when: {pooling_type: attention}                 # Ignore for every other pooling family.
-  regional_diffusion_scale:                         # Active only for local-mean-max.
-    values:                                         # Physical smoothing lengths in ångströms.
-      - 1.5                                         # Compact local patch.
-      - 2.5                                         # Intermediate local patch.
-      - 5.0                                         # Broad coherent region.
-    when: {pooling_type: local_mean_max}            # Ignore outside regional pooling.
-  log_sum_exp_beta:                                 # Active only for normalized LogSumExp.
-    values:                                         # Inverse temperatures.
-      - 1.0                                         # Mean-like smooth aggregation.
-      - 5.0                                         # Intermediate baseline sharpness.
-      - 10.0                                        # MAX-like sharp aggregation.
-    when: {pooling_type: log_sum_exp}               # Ignore outside LogSumExp.
+sweep:                                              # Complete conditional pooling comparison.
+  space:                                            # Enumerate every valid family-specific configuration.
+    pooling_type:                                   # Protein aggregation family.
+      values:                                       # Closed PoolingType vocabulary.
+        - max                                       # One highest-scoring point determines the bag.
+        - mean                                      # Average evidence over every surface point.
+        - attention                                 # Learned weighting; may decouple localization.
+        - topk                                      # Average only the highest-scoring surface fraction.
+        - local_mean_max                            # Diffuse locally, then take the strongest region.
+        - log_sum_exp                               # Smooth MAX with a tunable inverse temperature.
+    topk_fraction:                                  # Active only for top-k pooling.
+      values:                                       # Tested hotspot fractions.
+        - 0.01                                      # Top one percent of the surface.
+        - 0.05                                      # Top five percent of the surface.
+        - 0.10                                      # Top ten percent of the surface.
+      when: {pooling_type: topk}                    # Prevent irrelevant duplicate candidates.
+    attention_hidden_dim:                           # Active only for learned attention.
+      values:                                       # Keep attention capacity fixed in this sanity screen.
+        - 32                                        # Compact scoring network.
+      when: {pooling_type: attention}               # Ignore for every other pooling family.
+    regional_diffusion_scale:                       # Active only for local-mean-max.
+      values:                                       # Physical smoothing lengths in ångströms.
+        - 1.5                                       # Compact local patch.
+        - 2.5                                       # Intermediate local patch.
+        - 5.0                                       # Broad coherent region.
+      when: {pooling_type: local_mean_max}          # Ignore outside regional pooling.
+    log_sum_exp_beta:                               # Active only for normalized LogSumExp.
+      values:                                       # Inverse temperatures.
+        - 1.0                                       # Mean-like smooth aggregation.
+        - 5.0                                       # Intermediate baseline sharpness.
+        - 10.0                                      # MAX-like sharp aggregation.
+      when: {pooling_type: log_sum_exp}             # Ignore outside LogSumExp.
+  reference: {pooling_type: max}                    # Compare all families against the current control.
 
 objective:                                          # Select by WISDOM's complete validation purpose.
   metric: val_wisdom_hpo_score                      # Joint global/surface/coupling score.
-  mode: max                                         # Larger is better.
+  mode: max                                         # Maximize the composite validation utility.
+  range: [0.0, 1.0]                                 # Mathematical bounds of the composite utility.
+  practical_margin: 0.015                           # Smaller paired differences are negligible.
 
-resources:                                          # Complete adaptive-study allocation.
+resources:                                          # Shared allocation for the complete study.
   gpu: 3                                            # Three available accelerators.
-  gpu_memory: 20GiB                                 # Per-child admission threshold.
   cpu: 36                                           # Shared host decoding capacity.
   memory: 96GiB                                     # Shared host-memory ceiling.
   time: 168h                                        # Seven-day ceiling.
 
 # Pooling hyperparameter defaults are topk_fraction=.05, attention_hidden_dim=32,
 # regional_diffusion_scale=2.5 Å, and log_sum_exp_beta=5.0. `when` removes inactive dimensions.
-# min_seeds=4 equals the seeds list; early_stopping=false and confirmation_seeds=[] prevent
-# candidate-dependent censoring while preserving parallel child scheduling.
+# LambdaForge 0.15 makes all conditional cells mandatory, adds complete shared-replicate blocks,
+# and applies no HPO pruning or per-cell seed racing. ARI chooses concurrency and memory admission.

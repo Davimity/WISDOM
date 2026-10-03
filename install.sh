@@ -10,7 +10,7 @@ set -euo pipefail
 ENV_NAME="wisdom"
 
 LAMBDAFORGE_REPO="https://github.com/simplelambda/LambdaForge.git"
-LAMBDAFORGE_MIN_VERSION="0.13.0"
+LAMBDAFORGE_MIN_VERSION="0.16.0"
 
 MINIFORGE_DIR="$HOME/miniforge3"
 

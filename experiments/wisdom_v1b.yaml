@@ -3,8 +3,6 @@
 # VARIES: one RNG source at a time through two complementary, fully replicated controls.
 # FIXED: the complete baseline architecture, initialization policy, optimizer, loss, and data.
 # DECISION: identify which RNG source must be controlled in later comparisons.
-name: wisdom-v1b                                    # Short campaign name for seed factorization.
-
 steps:                                              # A paired variance decomposition, not duplicate Runs.
   - name: vary-training-rng                         # Fix weights; vary shuffle, dropout, and gates.
     run: wisdom.Training.Training                   # Shared LambdaForge Work.
@@ -43,7 +41,8 @@ steps:                                              # A paired variance decompos
       - 167                                         # Training-randomness seed 10.
     objective:                                      # Index all replications without pruning.
       metric: val_wisdom_hpo_score                  # Joint validation utility.
-      mode: max                                     # Larger is better.
+      mode: max                                     # Maximize the composite validation utility.
+      range: [0.0, 1.0]                             # Mathematical bounds of the composite utility.
     resources:                                      # Allocation for this independent step.
       gpu: 2                                        # One accelerator per Run.
       cpu: 32                                       # Trainer plus data workers.
@@ -87,7 +86,8 @@ steps:                                              # A paired variance decompos
       - 167                                         # Initialization seed 10.
     objective:                                      # Index all replications without pruning.
       metric: val_wisdom_hpo_score                  # Joint validation utility.
-      mode: max                                     # Larger is better.
+      mode: max                                     # Maximize the composite validation utility.
+      range: [0.0, 1.0]                             # Mathematical bounds of the composite utility.
     resources:                                      # Allocation for this independent step.
       gpu: 2                                        # One accelerator per Run.
       cpu: 32                                       # Trainer plus data workers.

@@ -721,13 +721,14 @@ def test_training_catalog_resolves_before_every_dry_run(
     config = WorkConfig.from_yaml(project_root / "experiments" / filename)
     plan   = WorkRunner().plan(config)
 
-    # Every expanded LambdaForge 0.14 Run resolves the exact DatasetVersion before launch and uses
+    # Every expanded LambdaForge 0.15 Run resolves the exact DatasetVersion before launch and uses
     # the same application-defined global/surface objective.
     assert plan.levels
     assert plan.levels[0]
     assert config.raw["objective"] == {
         "metric": "val_wisdom_hpo_score",
         "mode":   "max",
+        "range":  [0.0, 1.0],
     }
 
 
@@ -741,6 +742,8 @@ def test_experiment_campaign_uses_ordered_names_and_traceability_headers() -> No
         "wisdom_v3.yaml",
         "wisdom_v4.yaml",
         "wisdom_v5.yaml",
+        "wisdom_v5a.yaml",
+        "wisdom_v5b.yaml",
         "wisdom_v6a.yaml",
         "wisdom_v6b.yaml",
         "wisdom_v6c.yaml",
@@ -763,8 +766,8 @@ def test_experiment_campaign_uses_ordered_names_and_traceability_headers() -> No
     )
 
 
-def test_one_factor_sweeps_complete_every_seed_without_curve_pruning() -> None:
-    """Finite screens must retain paired evidence instead of censoring weak candidates."""
+def test_one_factor_comparisons_use_automatic_fixed_sweeps() -> None:
+    """Finite screens must use LambdaForge's paired, non-pruned sweep contract."""
     experiment_root = Path(__file__).parents[1] / "experiments"
     single_studies  = (
         "wisdom_v2.yaml",
@@ -777,37 +780,46 @@ def test_one_factor_sweeps_complete_every_seed_without_curve_pruning() -> None:
     stepped_studies = ("wisdom_v6b.yaml", "wisdom_v6c.yaml")
 
     for name in single_studies:
-        study  = safe_load((experiment_root / name).read_text(encoding="utf-8"))
-        search = study["search"]
+        study = safe_load((experiment_root / name).read_text(encoding="utf-8"))
+        sweep = study["sweep"]
 
-        assert search["min_seeds"] == len(study["seeds"])
-        assert search["early_stopping"] == {"enabled": False}
-        assert search["confirmation_seeds"] == []
+        assert "space" in sweep
+        assert "reference" in sweep
+        assert "search" not in study
+        assert "seeds" not in study
+        assert "replicates" not in study
+        assert study["objective"]["range"] == [0.0, 1.0]
+        assert study["objective"]["practical_margin"] == pytest.approx(0.015)
 
     for name in stepped_studies:
         study = safe_load((experiment_root / name).read_text(encoding="utf-8"))
         for step in study["steps"]:
-            search = step["search"]
+            sweep = step["sweep"]
 
-            assert search["min_seeds"] == len(step["seeds"])
-            assert search["early_stopping"] == {"enabled": False}
-            assert search["confirmation_seeds"] == []
+            assert "space" in sweep
+            assert "reference" in sweep
+            assert "search" not in step
+            assert "seeds" not in step
+            assert "replicates" not in step
+            assert step["objective"]["range"] == [0.0, 1.0]
+            assert step["objective"]["practical_margin"] == pytest.approx(0.015)
 
 
 def test_loss_combination_keeps_adaptive_interaction_search() -> None:
-    """The three-loss mixture should use adaptive pruning rather than one-factor sweep policy."""
+    """The three-loss mixture should use automatic optimize-mode HPO, not a fixed sweep."""
     experiment = Path(__file__).parents[1] / "experiments" / "wisdom_v6d.yaml"
     study      = safe_load(experiment.read_text(encoding="utf-8"))
     search     = study["search"]
 
-    assert search["trials"] == 27
-    assert search["min_seeds"] == 1
-    assert search["early_stopping"]["enabled"] is True
+    assert search["goal"] == "optimize"
+    assert "budget" not in search
+    assert "replication" not in search
+    assert "pruning" not in search
     assert {
         "negative_surface_lambda",
         "regional_positive_lambda",
         "dirichlet_lambda",
-    }.issubset(search)
+    }.issubset(search["space"])
 
 
 @pytest.mark.parametrize(

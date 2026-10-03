@@ -3,8 +3,7 @@
 # VARIES: head_type only.
 # FIXED: every selected initialization, optimizer, core, pooling, and weak-loss decision.
 # DECISION: select the simplest head whose utility and surface faithfulness improve credibly.
-name: wisdom-v7                                     # Short campaign name for head screening.
-run: wisdom.Training.Training                       # Shared LambdaForge training Work.
+run: wisdom.Training.Training                       # Shared Work; the filename supplies its study name.
 
 with:                                               # Explicit carry-forward ledger.
   dataset: {dataset: wisdom-dna-reduced@6}          # Immutable reduced benchmark.
@@ -58,40 +57,29 @@ with:                                               # Explicit carry-forward led
   evaluate_test: false                              # Keep test sealed.
   data_workers: 4                                   # Persistent NPZ workers.
 
-seeds:                                              # Four paired seeds completed for every head.
-  - 4                                               # Replication seed 1.
-  - 7                                               # Replication seed 2.
-  - 32                                              # Replication seed 3.
-  - 54                                              # Replication seed 4.
-
-search:                                             # Finite one-factor head comparison.
-  strategy: adaptive                                # Retain concurrent child Runs without elimination.
-  trials: 4                                         # Enumerate every authored head exactly once.
-  proposal_pool_size: 4                             # Exact categorical-space cardinality.
-  runs_per_gpu: 3                                   # Three measured Runs per H100.
-  max_parallel: 9                                   # Nine Runs over three H100s.
-  min_seeds: 4                                      # Force all four seeds for every head.
-  confirmation_seeds: []                            # Do not add unequal winner-only seeds.
-  early_stopping:                                   # Disable probability-based curve pruning.
-    enabled: false                                  # Every Run reaches WISDOM's own stopping rule.
-  head_type:                                        # Relationship between global and local predictions.
-    values:                                         # Closed HeadType vocabulary.
-      - single                                      # Protein score is pooled directly from local logits.
-      - dual                                        # Independent direct and surface-derived protein heads.
-      - global_context                              # Detached global context is concatenated into localization.
-      - film                                        # Zero-start FiLM conditions localization on global context.
+sweep:                                              # Complete head comparison with paired evidence.
+  space:                                            # Every head is a required sweep cell.
+    head_type:                                      # Relationship between global and local predictions.
+      values:                                       # Closed HeadType vocabulary.
+        - single                                    # Protein score is pooled directly from local logits.
+        - dual                                      # Independent direct and surface-derived protein heads.
+        - global_context                            # Detached global context enters localization.
+        - film                                      # Zero-start FiLM uses global context.
+  reference: {head_type: single}                    # Compare alternatives with the faithful single head.
 
 objective:                                          # Rank by joint validation evidence.
   metric: val_wisdom_hpo_score                      # Global/surface/coupling utility.
-  mode: max                                         # Larger is better.
+  mode: max                                         # Maximize the composite validation utility.
+  range: [0.0, 1.0]                                 # Mathematical bounds of the composite utility.
+  practical_margin: 0.015                           # Smaller paired differences are negligible.
 
-resources:                                          # Complete adaptive-study allocation.
+resources:                                          # Shared allocation for the complete study.
   gpu: 3                                            # Three available accelerators.
-  gpu_memory: 20GiB                                 # Per-child admission threshold.
   cpu: 36                                           # Shared host decoding capacity.
   memory: 96GiB                                     # Shared host-memory ceiling.
   time: 168h                                        # Seven-day ceiling.
 
 # head_type defaults to single. The direct and surface head weights are non-negative and cannot
 # both be zero for a multi-head candidate. Surface ground truth remains outside optimization.
-# min_seeds=4, early_stopping=false, and confirmation_seeds=[] produce a complete paired sweep.
+# LambdaForge 0.15 evaluates every head and grows complete shared-replicate blocks without HPO
+# pruning or seed racing. Omitted execution limits let ARI derive safe parallel packing.

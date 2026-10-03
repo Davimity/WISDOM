@@ -2,9 +2,8 @@
 # PREREQUISITES: V2 must provide one reviewed initialization_profile winner.
 # VARIES: optimization_profile only.
 # FIXED: initialization winner, architecture, MAX pooling, global BCE, and data.
-# DECISION: retain a policy only if four complete seeds improve utility/stability without slowdown.
-name: wisdom-v3                                     # Short campaign name for optimizer screening.
-run: wisdom.Training.Training                       # Shared LambdaForge training Work.
+# DECISION: retain a policy only if paired sweep evidence improves utility without instability.
+run: wisdom.Training.Training                       # Shared Work; the filename supplies its study name.
 
 with:                                               # Carry-forward ledger for all earlier decisions.
   dataset: {dataset: wisdom-dna-reduced@6}          # Immutable reduced benchmark.
@@ -32,51 +31,34 @@ with:                                               # Carry-forward ledger for a
   evaluate_test: false                              # Keep test sealed.
   data_workers: 4                                   # Persistent NPZ workers.
 
-seeds:                                              # Four paired seeds completed for every profile.
-  - 4                                               # Replication seed 1.
-  - 7                                               # Replication seed 2.
-  - 32                                              # Replication seed 3.
-  - 54                                              # Replication seed 4.
-  - 65                                              # Replication seed 5.
-  - 94                                              # Replication seed 6.
-  - 109                                             # Replication seed 7.
-  - 124                                             # Replication seed 8.
-  - 142                                             # Replication seed 9.
-  - 167                                             # Replication seed 10.
-
-search:                                             # Parallel finite optimizer sweep without censoring.
-  strategy: adaptive                                # Retain concurrent child Runs, not adaptive elimination.
-  trials: 100                                       # Enumerate every distinct optimizer profile.
-  proposal_pool_size: 100                           # Exact categorical-space cardinality.
-  runs_per_gpu: 50                                  # Three measured Runs per H100.
-  max_parallel: 100                                 # Nine Runs over three H100s.
-  min_seeds: 10                                      # Force all four seeds for every optimizer profile.
-  confirmation_seeds: []                            # Do not add unequal winner-only replications.
-  early_stopping:                                   # Disable probability-based curve pruning for this sweep.
-    enabled: false                                  # Every Run reaches WISDOM's own stopping rule.
-  optimization_profile:                            # One mutually exclusive optimizer change.
-    values:                                         # Closed OptimizationProfile vocabulary.
-      - baseline                                    # Plain AdamW control.
-      - lr_warmup_05                                # Linear LR warm-up for first 5% of epochs.
-      - lr_warmup_10                                # Linear LR warm-up for first 10% of epochs.
-      - clip_1                                      # Clip global gradient norm at 1.
-      - clip_5                                      # Clip global gradient norm at 5.
-      - ema_099                                     # Evaluate exponential weight average with decay 0.99.
-      - ema_0999                                    # Evaluate exponential weight average with decay 0.999.
-      - swa                                         # Average late optimizer states with SWA.
+sweep:                                              # Complete finite comparison with automatic replication.
+  space:                                            # Every optimizer profile is a required sweep cell.
+    optimization_profile:                          # One mutually exclusive optimizer change.
+      values:                                       # Closed OptimizationProfile vocabulary.
+        - baseline                                  # Plain AdamW control.
+        - lr_warmup_05                              # Linear LR warm-up for first 5% of epochs.
+        - lr_warmup_10                              # Linear LR warm-up for first 10% of epochs.
+        - clip_1                                    # Clip global gradient norm at 1.
+        - clip_5                                    # Clip global gradient norm at 5.
+        - ema_099                                   # Evaluate exponential weight average with decay 0.99.
+        - ema_0999                                  # Evaluate exponential weight average with decay 0.999.
+        - swa                                       # Average late optimizer states with SWA.
+  reference: {optimization_profile: baseline}       # Compare every policy with plain AdamW.
 
 objective:                                          # Rank optimizer policies by joint validation evidence.
   metric: val_wisdom_hpo_score                      # Joint global/surface utility.
-  mode: max                                         # Larger is better.
+  mode: max                                         # Maximize the composite validation utility.
+  range: [0.0, 1.0]                                 # Mathematical bounds of the composite utility.
+  practical_margin: 0.015                           # Smaller paired differences are negligible.
 
-resources:                                          # Complete adaptive-study allocation.
-  gpu: 2                                            # Three available accelerators.
-  gpu_memory: 20GiB                                 # Per-child admission threshold.
+resources:                                          # One shared allocation for the complete sweep.
+  gpu: 2                                            # Two available accelerators.
   cpu: 36                                           # Shared host decoding capacity.
   memory: 96GiB                                     # Shared host-memory ceiling.
   time: 168h                                        # Seven-day ceiling.
 
 # optimization_profile defaults to custom. The chosen initialization remains independently active,
 # so combinations such as gate_warmup + ema_0999 are now represented without precedence loss.
-# min_seeds=4, early_stopping=false, and confirmation_seeds=[] make the comparison complete and
-# paired while keeping LambdaForge's concurrent adaptive-study execution path.
+# LambdaForge 0.15 executes every sweep cell, grows complete shared-replicate blocks, and applies
+# no HPO pruning or per-cell seed racing. ARI derives safe Run packing because execution caps and
+# the optional gpu_memory floor are deliberately omitted.

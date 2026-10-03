@@ -1,13 +1,12 @@
 """WISDOM v2 pooling study on the semantic-gated v1 backbone."""
 
-from typing import Any, ClassVar
-
 import torch
-from lambdaforge.nn import Scatter
-from torch import Tensor
 
-from wisdom.models.WisdomV1 import WisdomV1
+from torch import Tensor
+from typing import Any, ClassVar
+from lambdaforge.nn import Scatter
 from wisdom.models.HeadType import HeadType
+from wisdom.models.WisdomV1 import WisdomV1
 from wisdom.models.PoolingType import PoolingType
 from wisdom.models.GlobalSurfaceHeads import GlobalSurfaceHeads
 from wisdom.models.ProteinPoolingHead import ProteinPoolingHead
@@ -35,6 +34,21 @@ class WisdomV2(WisdomV1):
         attention_hidden_dim     : int = 32,
         regional_diffusion_scale: float = 2.5,
         log_sum_exp_beta         : float = 5.0,
+        pooling_area_mode        : str = "legacy",
+        attention_variant        : str = "simple",
+        regional_scale_mode      : str = "fixed",
+        regional_diffusion_scale_init: float = 1.5,
+        log_sum_exp_mode          : str = "fixed",
+        log_sum_exp_beta_init     : float = 5.0,
+        autopool_alpha            : float = 1.0,
+        autopool_alpha_mode       : str = "fixed",
+        autopool_alpha_init       : float = 1.0,
+        gem_power                 : float = 1.0,
+        gem_power_mode            : str = "fixed",
+        gem_power_init            : float = 4.0,
+        max_mean_lambda           : float = 0.5,
+        max_mean_lambda_mode      : str = "fixed",
+        max_mean_lambda_init      : float = 0.5,
         head_type                : HeadType | str = HeadType.SINGLE,
         global_context_dim       : int = 16,
         detach_global_context    : bool = True,
@@ -48,6 +62,21 @@ class WisdomV2(WisdomV1):
             attention_hidden_dim: Hidden width of learned attention scores.
             regional_diffusion_scale: Heat length in ångströms before regional MAX.
             log_sum_exp_beta: Positive normalized log-sum-exp inverse temperature.
+            pooling_area_mode: point, area, or legacy (area mean, point other families).
+            attention_variant: simple tanh or gated tanh-times-sigmoid attention.
+            regional_scale_mode: fixed or learned regional heat length.
+            regional_diffusion_scale_init: Learned length initialization in (0.05, 12) Å.
+            log_sum_exp_mode: fixed, learned, or curriculum LSE temperature.
+            log_sum_exp_beta_init: Learned beta initialization in (0.25, 200).
+            autopool_alpha: Fixed non-negative probability attention sharpness.
+            autopool_alpha_mode: fixed or learned AutoPool alpha.
+            autopool_alpha_init: Learned alpha initialization in (0, 50).
+            gem_power: Fixed probability-space power >= 1.
+            gem_power_mode: fixed or learned GeM power.
+            gem_power_init: Learned power initialization in (1, 32).
+            max_mean_lambda: Fixed convex MAX-MEAN coefficient in [0, 1].
+            max_mean_lambda_mode: fixed or learned mixture.
+            max_mean_lambda_init: Learned coefficient initialization in (0, 1).
             head_type: ``single`` control, D1 ``dual``, D2 ``global_context``, or D2b ``film``.
             global_context_dim: D2/D2b bottleneck width.
             detach_global_context: Prevent local gradients from modifying the direct context path.
@@ -64,6 +93,21 @@ class WisdomV2(WisdomV1):
             attention_hidden_dim     = attention_hidden_dim,
             regional_diffusion_scale = regional_diffusion_scale,
             log_sum_exp_beta         = log_sum_exp_beta,
+            pooling_area_mode        = pooling_area_mode,
+            attention_variant        = attention_variant,
+            regional_scale_mode      = regional_scale_mode,
+            regional_diffusion_scale_init = regional_diffusion_scale_init,
+            log_sum_exp_mode          = log_sum_exp_mode,
+            log_sum_exp_beta_init     = log_sum_exp_beta_init,
+            autopool_alpha            = autopool_alpha,
+            autopool_alpha_mode       = autopool_alpha_mode,
+            autopool_alpha_init       = autopool_alpha_init,
+            gem_power                 = gem_power,
+            gem_power_mode            = gem_power_mode,
+            gem_power_init            = gem_power_init,
+            max_mean_lambda           = max_mean_lambda,
+            max_mean_lambda_mode      = max_mean_lambda_mode,
+            max_mean_lambda_init      = max_mean_lambda_init,
         )
         self.head_type = HeadType(head_type)
         self.global_surface_heads = (
@@ -174,6 +218,16 @@ class WisdomV2(WisdomV1):
         Returns:
             Protein logits and optional attention weights from ``ProteinPoolingHead``.
         """
+        # Mixed-precision model forward passes may expose BF16 surface embeddings after leaving
+        # their autocast context. The diagnostic pooling boundary is called later by the
+        # faithfulness audit, where the attention scorer still owns FP32 parameters. Recompute
+        # attention scores in the scorer's parameter dtype so PyTorch receives compatible matrix
+        # operands without changing the trained weights or the stored local logits.
+
+        if self.pooling_type is PoolingType.ATTENTION:
+            parameter = next(self.pooling_head.parameters())
+            surface_embeddings = surface_embeddings.to(dtype=parameter.dtype)
+
         return self.pooling_head(
             surface_logits,
             surface_embeddings,

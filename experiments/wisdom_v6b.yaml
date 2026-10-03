@@ -3,8 +3,6 @@
 # VARIES: one additional regional/existence coefficient within each independent step.
 # FIXED: the V6a negative_surface_lambda winner and every earlier campaign winner.
 # DECISION: choose at most one added regional prior; do not combine the three families here.
-name: wisdom-v6b                                    # Short campaign name for regional weak losses.
-
 steps:                                              # Each step adds one family to the same V6a winner.
   - name: positive-existence                       # Require some positive point in positive bags.
     run: wisdom.Training.Training                   # Shared LambdaForge Work.
@@ -34,9 +32,9 @@ steps:                                              # Each step adds one family 
       weight_decay: 0.0001                          # REPLACE with the V4 winner.
       gate_lambda: 0.001                            # REPLACE with the V4 winner.
       negative_surface_lambda: 0.3                  # REPLACE with the V6a winner.
-      positive_existence_lambda: 0.0                # Search overrides this only in its own step.
-      regional_positive_lambda: 0.0                 # Search overrides this only in its own step.
-      regional_ranking_lambda: 0.0                  # Search overrides this only in its own step.
+      positive_existence_lambda: 0.0                # Its sweep overrides this only in its own step.
+      regional_positive_lambda: 0.0                 # Its sweep overrides this only in its own step.
+      regional_ranking_lambda: 0.0                  # Its sweep overrides this only in its own step.
       weak_loss_profile: custom                     # Preserve explicit composable coefficients.
       architecture_spike: baseline                  # No architecture change.
       head_type: single                             # Fixed head relationship.
@@ -51,37 +49,26 @@ steps:                                              # Each step adds one family 
       surface_visualization: none                   # Avoid candidate galleries.
       evaluate_test: false                          # Keep test sealed.
       data_workers: 4                               # Persistent NPZ workers.
-    seeds: &loss_region_seeds                       # Four complete paired seeds per coefficient.
-      - 4                                           # Replication seed 1.
-      - 7                                           # Replication seed 2.
-      - 32                                          # Replication seed 3.
-      - 54                                          # Replication seed 4.
-    search:                                         # Existence-only coefficient search.
-      strategy: adaptive                            # Retain concurrent child Runs without elimination.
-      trials: 4                                     # Control plus three weights.
-      proposal_pool_size: 4                         # Enumerate the finite grid.
-      runs_per_gpu: 3                               # Three Runs per H100.
-      max_parallel: 9                               # Nine Runs over three H100s.
-      min_seeds: 4                                  # Force all four seeds for every coefficient.
-      confirmation_seeds: []                        # Do not add unequal winner-only seeds.
-      early_stopping:                               # Disable probability-based curve pruning.
-        enabled: false                              # Every Run reaches WISDOM's own stopping rule.
-      positive_existence_lambda:                    # Positive-bag existential prior.
-        values:                                     # One-dimensional screen.
-          - 0.0                                     # V6a parent control.
-          - 0.05                                    # Weak existence constraint.
-          - 0.1                                     # Weak existence constraint.
-          - 0.2                                     # Moderate existence constraint.
-          - 0.3                                     # Moderate existence constraint.
-          - 0.6                                     # Strong existence constraint.
-          - 0.8                                     # Strong existence constraint.
-          - 1.0                                     # Strong existence constraint.
+    sweep:                                          # Complete positive-existence comparison.
+      space:                                        # Every coefficient is a required sweep cell.
+        positive_existence_lambda:                  # Positive-bag existential prior.
+          values:                                   # One-dimensional screen.
+            - 0.0                                   # V6a parent control.
+            - 0.05                                  # Weak existence constraint.
+            - 0.1                                   # Weak existence constraint.
+            - 0.2                                   # Moderate existence constraint.
+            - 0.3                                   # Moderate existence constraint.
+            - 0.6                                   # Strong existence constraint.
+            - 0.8                                   # Strong existence constraint.
+            - 1.0                                   # Strong existence constraint.
+      reference: {positive_existence_lambda: 0.0}    # Compare against the V6a parent.
     objective: &loss_region_objective               # Shared joint validation decision.
       metric: val_wisdom_hpo_score                  # Global/surface/coupling utility.
-      mode: max                                     # Larger is better.
+      mode: max                                     # Maximize the composite validation utility.
+      range: [0.0, 1.0]                             # Mathematical bounds of the composite utility.
+      practical_margin: 0.015                       # Smaller paired differences are negligible.
     resources: &loss_region_resources               # Shared study allocation.
       gpu: 3                                        # Three accelerators.
-      gpu_memory: 20GiB                             # Per-child admission threshold.
       cpu: 36                                       # Shared host capacity.
       memory: 96GiB                                 # Shared host-memory ceiling.
       time: 168h                                    # Seven-day ceiling.
@@ -89,48 +76,32 @@ steps:                                              # Each step adds one family 
   - name: regional-existence                       # Require positive evidence after fixed diffusion.
     run: wisdom.Training.Training                   # Same LambdaForge Work.
     with: *loss_region_base                         # Exact same frozen parent configuration.
-    seeds: *loss_region_seeds                       # Exact same paired seeds.
-    search:                                         # Regional-existence-only screen.
-      strategy: adaptive                            # Retain concurrent child Runs without elimination.
-      trials: 3                                     # Control plus two planned weights.
-      proposal_pool_size: 3                         # Enumerate the finite grid.
-      runs_per_gpu: 3                               # Three Runs per H100.
-      max_parallel: 9                               # Nine Runs over three H100s.
-      min_seeds: 4                                  # Force all four seeds for every coefficient.
-      confirmation_seeds: []                        # Do not add unequal winner-only seeds.
-      early_stopping:                               # Disable probability-based curve pruning.
-        enabled: false                              # Every Run reaches WISDOM's own stopping rule.
-      regional_positive_lambda:                     # Diffused positive-bag prior.
-        values:                                     # One-dimensional screen.
-          - 0.0                                     # V6a parent control.
-          - 0.1                                     # Weak regional constraint.
-          - 0.3                                     # Moderate regional constraint.
+    sweep:                                          # Complete regional-existence comparison.
+      space:                                        # Every coefficient is a required sweep cell.
+        regional_positive_lambda:                   # Diffused positive-bag prior.
+          values:                                   # One-dimensional screen.
+            - 0.0                                   # V6a parent control.
+            - 0.1                                   # Weak regional constraint.
+            - 0.3                                   # Moderate regional constraint.
+      reference: {regional_positive_lambda: 0.0}     # Compare against the V6a parent.
     objective: *loss_region_objective               # Same joint decision metric.
     resources: *loss_region_resources               # Same allocation.
 
   - name: regional-ranking                         # Rank positive regional evidence above negatives.
     run: wisdom.Training.Training                   # Same LambdaForge Work.
     with: *loss_region_base                         # Exact same frozen parent configuration.
-    seeds: *loss_region_seeds                       # Exact same paired seeds.
-    search:                                         # Ranking-only coefficient screen.
-      strategy: adaptive                            # Retain concurrent child Runs without elimination.
-      trials: 3                                     # Control plus two planned weights.
-      proposal_pool_size: 3                         # Enumerate the finite grid.
-      runs_per_gpu: 3                               # Three Runs per H100.
-      max_parallel: 9                               # Nine Runs over three H100s.
-      min_seeds: 4                                  # Force all four seeds for every coefficient.
-      confirmation_seeds: []                        # Do not add unequal winner-only seeds.
-      early_stopping:                               # Disable probability-based curve pruning.
-        enabled: false                              # Every Run reaches WISDOM's own stopping rule.
-      regional_ranking_lambda:                      # Mixed-batch regional ranking prior.
-        values:                                     # One-dimensional screen.
-          - 0.0                                     # V6a parent control.
-          - 0.1                                     # Weak ranking constraint.
-          - 0.3                                     # Moderate ranking constraint.
+    sweep:                                          # Complete regional-ranking comparison.
+      space:                                        # Every coefficient is a required sweep cell.
+        regional_ranking_lambda:                    # Mixed-batch regional ranking prior.
+          values:                                   # One-dimensional screen.
+            - 0.0                                   # V6a parent control.
+            - 0.1                                   # Weak ranking constraint.
+            - 0.3                                   # Moderate ranking constraint.
+      reference: {regional_ranking_lambda: 0.0}      # Compare against the V6a parent.
     objective: *loss_region_objective               # Same joint decision metric.
     resources: *loss_region_resources               # Same allocation.
 
 # YAML anchors duplicate only configuration text; LambdaForge still expands three independent
 # studies. No Run combines existence, regional, and ranking coefficients.
-# Every step uses all four seeds, disables curve pruning, and disables fresh confirmation so its
-# coefficient comparison is complete and paired rather than adaptively censored.
+# LambdaForge 0.15 evaluates every cell and adds complete shared-replicate blocks until the paired
+# conclusion is stable. Sweeps disable HPO pruning and seed racing by contract; ARI owns packing.

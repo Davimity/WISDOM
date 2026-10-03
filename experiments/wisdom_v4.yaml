@@ -3,15 +3,14 @@
 # VARIES: core widths, depths, neighbourhood budgets, regularization, and AdamW hyperparameters.
 # FIXED: model generation, MAX pooling, global BCE, architecture spike, dataset, and test policy.
 # DECISION: freeze a core backbone candidate for all later one-factor screens.
-name: wisdom-v4                                     # Short campaign name for the broad core HPO.
-run: wisdom.Training.Training                       # Shared LambdaForge training Work.
+run: wisdom.Training.Training                       # Shared Work; the filename supplies its study name.
 
 with:                                               # Fixed scientific choices around the core search.
   dataset: {dataset: wisdom-dna-reduced@6}          # Immutable reduced benchmark.
   model_version: 1                                  # Fixed bounded-graph DiffusionNet generation.
   subset: full                                      # Complete reduced training population.
   pooling_type: max                                 # Fixed existential aggregation.
-  initialization_profile: baseline                  # REPLACE with the reviewed V2 winner.
+  initialization_profile: activation_aware          # REPLACE with the reviewed V2 winner.
   optimization_profile: baseline                    # REPLACE with the reviewed V3 winner.
   weak_loss_profile: baseline                       # Protein BCE only.
   architecture_spike: baseline                      # Scalar one-pass architecture.
@@ -26,95 +25,82 @@ with:                                               # Fixed scientific choices a
   evaluate_test: false                              # Keep test sealed throughout HPO.
   data_workers: 4                                   # Persistent NPZ decoding workers.
 
-seeds:                                              # Ordered adaptive confirmation budget.
-  - 4                                               # Initial candidate seed.
-  - 7                                               # Confirmation seed 2.
-  - 32                                              # Confirmation seed 3.
-  - 54                                              # Confirmation seed 4.
-  - 65                                              # Confirmation seed 5.
-  - 94                                              # Confirmation seed 6.
-  - 109                                             # Confirmation seed 7.
-  - 124                                             # Confirmation seed 8.
-  - 142                                             # Confirmation seed 9.
-  - 167                                             # Confirmation seed 10.
-
-search:                                             # Restored broad V1 backbone search.
-  strategy: adaptive                                # Allocate epochs/seeds to plausible candidates.
-  trials: 500                                       # Maximum distinct proposals.
-  runs_per_gpu: 50                                   # Pack three measured Runs per H100.
-  max_parallel: 150                                   # Bound three H100s to nine concurrent Runs.
-  min_seeds: 1                                      # Every proposal receives one seed.
-  hidden_dim:                                       # Shared atom/surface latent width.
-    values:                                         # Discrete capacity choices.
-      - 32                                          # Very compact representation.
-      - 64                                          # Compact representation.
-      - 128                                         # Current baseline width.
-      - 256                                         # High-capacity control.
-  embedding_dim:                                    # Atomic-number embedding width.
-    values:                                         # Discrete element-embedding choices.
-      - 8                                           # Minimal embedding.
-      - 16                                          # Compact embedding.
-      - 32                                          # Current baseline embedding.
-      - 64                                          # Wide embedding.
-  residue_embedding_dim:                            # Residue-identity embedding width.
-    values:                                         # Independent residue capacity.
-      - 8                                           # Minimal residue embedding.
-      - 16                                          # Compact residue embedding.
-      - 32                                          # Current baseline residue embedding.
-      - 64                                          # Wide residue embedding.
-  atomic_layers:                                    # Relation-aware atomic depth.
-    values:                                         # Number of message-passing layers.
-      - 1                                           # Shallow atomic encoder.
-      - 2                                           # Current baseline depth.
-      - 3                                           # Medium atomic depth.
-      - 4                                           # Deep atomic control.
-  projection_depth:                                 # Atom/geometry projection MLP depth.
-    values:                                         # Number of projection layers.
-      - 1                                           # Linear-depth baseline.
-      - 2                                           # One additional nonlinear stage.
-      - 3                                           # Deeper projection control.
-  surface_layers:                                   # DiffusionNet propagation depth.
-    values:                                         # Number of intrinsic surface blocks.
-      - 1                                           # Shallow surface encoder.
-      - 2                                           # Current baseline depth.
-      - 3                                           # Medium surface depth.
-      - 4                                           # Deep surface control.
-  atom_spatial_k:                                   # Runtime atomic spatial-neighbour budget.
-    values:                                         # Nested nearest-neighbour prefixes.
-      - 8                                           # Sparse local atom topology.
-      - 16                                          # Baseline topology.
-      - 24                                          # Broader topology.
-      - 32                                          # Largest tested topology.
-  surface_atom_k:                                   # Atoms considered by each surface point.
-    values:                                         # Nested transfer-neighbour prefixes.
-      - 8                                           # Compact transfer context.
-      - 16                                          # Baseline transfer context.
-      - 32                                          # Broad transfer context.
-  diffusion_spectral_modes:                         # Low-frequency intrinsic mode budget.
-    values:                                         # Runtime spectral truncations.
-      - 32                                          # Fast coarse surface spectrum.
-      - 64                                          # Medium spectrum.
-      - 128                                         # Detailed baseline spectrum.
-  surface_atom_radius:                              # Physical atom-to-surface cutoff in ångströms.
-    values:                                         # Candidate transfer radii.
-      - 4.0                                         # Compact chemical neighbourhood.
-      - 5.0                                         # Intermediate neighbourhood.
-      - 6.0                                         # Full stored baseline neighbourhood.
-  dropout: {range: [0.0, 0.5]}                     # Continuous dropout probability.
-  learning_rate: {range: [0.00001, 0.003], scale: log} # Log-uniform AdamW rate.
-  weight_decay: {range: [0.000001, 0.01], scale: log} # Log-uniform AdamW decay.
-  gate_lambda: {range: [0.0001, 0.2], scale: log}   # Log-uniform expected-L0 pressure.
+search:                                             # Convergence-controlled multidimensional HPO.
+  goal: optimize                                    # Prioritize finding the strongest practical candidate.
+  space:                                            # Joint mixed search space; policies remain automatic.
+    hidden_dim:                                       # Shared atom/surface latent width.
+      values:                                         # Discrete capacity choices.
+        - 32                                          # Very compact representation.
+        - 64                                          # Compact representation.
+        - 128                                         # Current baseline width.
+        - 256                                         # High-capacity control.
+    embedding_dim:                                    # Atomic-number embedding width.
+      values:                                         # Discrete element-embedding choices.
+        - 8                                           # Minimal embedding.
+        - 16                                          # Compact embedding.
+        - 32                                          # Current baseline embedding.
+        - 64                                          # Wide embedding.
+    residue_embedding_dim:                            # Residue-identity embedding width.
+      values:                                         # Independent residue capacity.
+        - 8                                           # Minimal residue embedding.
+        - 16                                          # Compact residue embedding.
+        - 32                                          # Current baseline residue embedding.
+        - 64                                          # Wide residue embedding.
+    atomic_layers:                                    # Relation-aware atomic depth.
+      values:                                         # Number of message-passing layers.
+        - 1                                           # Shallow atomic encoder.
+        - 2                                           # Current baseline depth.
+        - 3                                           # Medium atomic depth.
+        - 4                                           # Deep atomic control.
+    projection_depth:                                 # Atom/geometry projection MLP depth.
+      values:                                         # Number of projection layers.
+        - 1                                           # Linear-depth baseline.
+        - 2                                           # One additional nonlinear stage.
+        - 3                                           # Deeper projection control.
+    surface_layers:                                   # DiffusionNet propagation depth.
+      values:                                         # Number of intrinsic surface blocks.
+        - 1                                           # Shallow surface encoder.
+        - 2                                           # Current baseline depth.
+        - 3                                           # Medium surface depth.
+        - 4                                           # Deep surface control.
+    atom_spatial_k:                                   # Runtime atomic spatial-neighbour budget.
+      values:                                         # Nested nearest-neighbour prefixes.
+        - 8                                           # Sparse local atom topology.
+        - 16                                          # Baseline topology.
+        - 24                                          # Broader topology.
+        - 32                                          # Largest tested topology.
+    surface_atom_k:                                   # Atoms considered by each surface point.
+      values:                                         # Nested transfer-neighbour prefixes.
+        - 8                                           # Compact transfer context.
+        - 16                                          # Baseline transfer context.
+        - 32                                          # Broad transfer context.
+    diffusion_spectral_modes:                         # Low-frequency intrinsic mode budget.
+      values:                                         # Runtime spectral truncations.
+        - 32                                          # Fast coarse surface spectrum.
+        - 64                                          # Medium spectrum.
+        - 128                                         # Detailed baseline spectrum.
+    surface_atom_radius:                              # Physical atom-to-surface cutoff in ångströms.
+      values:                                         # Candidate transfer radii.
+        - 4.0                                         # Compact chemical neighbourhood.
+        - 5.0                                         # Intermediate neighbourhood.
+        - 6.0                                         # Full stored baseline neighbourhood.
+    dropout: {range: [0.0, 0.5]}                     # Continuous dropout probability.
+    learning_rate: {range: [0.00001, 0.003], scale: log} # Log-uniform AdamW rate.
+    weight_decay: {range: [0.000001, 0.01], scale: log} # Log-uniform AdamW decay.
+    gate_lambda: {range: [0.0001, 0.2], scale: log}   # Log-uniform expected-L0 pressure.
 
 objective:                                          # Use the already logged joint validation utility.
   metric: val_wisdom_hpo_score                      # Frozen global/surface/coupling score.
-  mode: max                                         # Larger is better.
+  mode: max                                         # Maximize the composite validation utility.
+  range: [0.0, 1.0]                                 # Mathematical bounds of the composite utility.
+  practical_margin: 0.015                           # Differences below 0.015 are scientifically equivalent.
 
-resources:                                          # Complete adaptive-study allocation.
-  gpu: 3                                            # Three available accelerators.
-  gpu_memory: 20GiB                                 # Per-child free-memory admission threshold.
-  cpu: 46                                           # Shared host decoding capacity.
+resources:                                          # Shared allocation for the complete study.
+  gpu: 2                                            # Three available accelerators.
+  cpu: 36                                           # Shared host decoding capacity.
   memory: 100GiB                                    # Shared host-memory ceiling.
   time: 1000h                                       # Long safety ceiling for the broad HPO.
 
-# Training defaults remain available for omitted fields. LambdaForge owns proposal generation,
-# racing, pruning, placement, and result indexing; WISDOM logs val_wisdom_hpo_score.
+# With no candidate, Run, seed, pruning, or execution limits, LambdaForge 0.15 grows this hard HPO
+# until its evidence-based convergence policy stops it. It supplies disjoint confirmation seeds and
+# lets ARI infer safe concurrency and GPU-memory admission from live measurements.

@@ -1,11 +1,9 @@
 """Ground-truth-free deletion and insertion audits for WISDOM surface evidence."""
 
-from typing import Any, cast
-
 import torch
 
 from torch import Tensor
-
+from typing import Any, cast
 from wisdom.models.PoolingType import PoolingType
 
 
@@ -37,20 +35,25 @@ class SurfaceFaithfulnessAudit:
 
         Returns:
             Sum of each per-positive-protein audit metric and the number of positive proteins.
-            Callers aggregate sums across batches before dividing by the count.
+            Callers aggregate sums across batches before dividing by the count. An empty mapping
+            and zero count mark an unavailable audit, which currently occurs for
+            ``local_mean_max`` and ``multiscale_regional_max`` because deleting points would
+            invalidate their diffusion operators.
 
         Raises:
-            ValueError: If the selected pooling requires a diffusion operator that cannot remain
-                valid after deleting points, or if required point arrays are inconsistent.
+            ValueError: If required point arrays are inconsistent.
         """
         pooling_type = PoolingType(
             getattr(getattr(model, "pooling_head", None), "pooling_type", PoolingType.MAX)
         )
-        if pooling_type is PoolingType.LOCAL_MEAN_MAX:
-            raise ValueError(
-                "pooling-boundary deletion is undefined for local_mean_max because removing "
-                "points changes its diffusion operator"
-            )
+        if pooling_type in {PoolingType.LOCAL_MEAN_MAX, PoolingType.MULTISCALE_REGIONAL_MAX}:
+            # Regional pooling diffuses over the complete surface operator before taking MAX.
+            # Removing vertices would require a newly discretized operator and would therefore
+            # change both the intervention and the model. Preserve this mathematically undefined
+            # diagnostic as unavailable instead of turning a valid training candidate into a
+            # failed LambdaForge Run.
+
+            return {}, 0
 
         logits      = output["surface_logits"].reshape(-1)
         embeddings  = output["surface_embeddings"]
@@ -89,16 +92,16 @@ class SurfaceFaithfulnessAudit:
             label = round(100 * fraction)
             for mode in selected:
                 sums[f"faithfulness_deletion_{mode}_{label}"] = float(
-                    deletion[mode][positives].sum()
+                    deletion[mode][positives].sum().detach()
                 )
                 sums[f"faithfulness_insertion_{mode}_{label}"] = float(
-                    insertion[mode][positives].sum()
+                    insertion[mode][positives].sum().detach()
                 )
             sums[f"faithfulness_deletion_top_minus_random_{label}"] = float(
-                (deletion["top"] - deletion["random"])[positives].sum()
+                (deletion["top"] - deletion["random"])[positives].sum().detach()
             )
             sums[f"faithfulness_insertion_top_minus_random_{label}"] = float(
-                (insertion["top"] - insertion["random"])[positives].sum()
+                (insertion["top"] - insertion["random"])[positives].sum().detach()
             )
         return sums, positive_count
 

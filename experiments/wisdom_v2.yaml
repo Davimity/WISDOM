@@ -2,9 +2,8 @@
 # PREREQUISITES: V1a-V1b must establish the baseline variance and dominant RNG source.
 # VARIES: initialization_profile only; every candidate changes one initialization subsystem.
 # FIXED: the two-layer baseline backbone, optimizer, MAX pooling, global BCE, and data.
-# DECISION: select a stable policy from complete four-seed evidence, collapse rate, and diagnostics.
-name: wisdom-v2                                     # Short campaign name for initialization screening.
-run: wisdom.Training.Training                       # Shared LambdaForge training Work.
+# DECISION: select a stable policy from the complete paired sweep, collapse rate, and diagnostics.
+run: wisdom.Training.Training                       # Shared Work; the filename supplies its study name.
 
 with:                                               # Fixed baseline around the initialization selector.
   dataset: {dataset: wisdom-dna-reduced@6}          # Immutable reduced benchmark.
@@ -39,60 +38,45 @@ with:                                               # Fixed baseline around the 
   evaluate_test: false                              # Keep test sealed.
   data_workers: 4                                   # Persistent NPZ workers.
 
-seeds:                                              # Four paired seeds completed for every profile.
-  - 4                                               # Replication seed 1.
-  - 7                                               # Replication seed 2.
-  - 32                                              # Replication seed 3.
-  - 54                                              # Replication seed 4.
-  - 65                                              # Replication seed 5.
-  - 94                                              # Replication seed 6.
-  - 109                                             # Replication seed 7.
-  - 124                                             # Replication seed 8.
-
-search:                                             # Parallel finite initialization sweep without censoring.
-  strategy: adaptive                                # Retain concurrent child Runs, not adaptive elimination.
-  trials: 100                                       # Enumerate every authored profile once.
-  proposal_pool_size: 100                           # Exact categorical-space cardinality.
-  runs_per_gpu: 3                                   # Pack three measured Runs per H100.
-  max_parallel: 9                                   # Bound a three-H100 study to nine Runs.
-  min_seeds: 8                                      # Force all four seeds for every initialization profile.
-  confirmation_seeds: []                            # Full paired evidence needs no extra winner-only seeds.
-  early_stopping:                                   # Disable probability-based curve pruning for this sweep.
-    enabled: false                                  # Every Run reaches WISDOM's own patience or epoch ceiling.
-  initialization_profile:                          # One mutually exclusive initialization change.
-    values:                                         # Closed InitializationProfile vocabulary.
-      - baseline                                    # Historical initialization control.
-      - embedding_fan                               # Scale embeddings from fan-in/fan-out.
-      - embedding_small                             # Start embeddings from a small normal law.
-      - embedding_physical                          # Deterministic chemistry-informed embedding seed.
-      - gate_050                                    # Start semantic gates half active.
-      - gate_099                                    # Start semantic gates almost fully active.
-      - gate_warmup                                 # Delay and then ramp learned gate sparsification.
-      - diffusion_rezero                            # Zero-start DiffusionNet residual contribution.
-      - diffusion_layerscale                        # Small learned DiffusionNet residual scale.
-      - atomic_rezero                               # Zero-start atomic residual contribution.
-      - atomic_layerscale                           # Small learned atomic residual scale.
-      - neutral_edges                               # Start learned edge-attribute residuals neutral.
-      - neutral_transfer                            # Start transfer orientation/content residuals neutral.
-      - local_small                                 # Start the local head with small weights.
-      - local_calibrated                            # Small local weights plus prevalence-calibrated bias.
-      - activation_aware                            # Nonlinear-activation-aware dense initialization.
-      - orthogonal                                  # Orthogonal dense weight initialization.
-      - broader_diffusion                           # Spread initial physical diffusion lengths.
-      - same_diffusion                              # Start all existing blocks at one diffusion scale.
+sweep:                                              # Complete finite comparison with automatic replication.
+  space:                                            # Every authored profile is a required sweep cell.
+    initialization_profile:                        # One mutually exclusive initialization change.
+      values:                                       # Closed InitializationProfile vocabulary.
+        - baseline                                  # Historical initialization control.
+        - embedding_fan                             # Scale embeddings from fan-in/fan-out.
+        - embedding_small                           # Start embeddings from a small normal law.
+        - embedding_physical                        # Deterministic chemistry-informed embedding seed.
+        - gate_050                                  # Start semantic gates half active.
+        - gate_099                                  # Start semantic gates almost fully active.
+        - gate_warmup                               # Delay and then ramp learned gate sparsification.
+        - diffusion_rezero                          # Zero-start DiffusionNet residual contribution.
+        - diffusion_layerscale                      # Small learned DiffusionNet residual scale.
+        - atomic_rezero                             # Zero-start atomic residual contribution.
+        - atomic_layerscale                         # Small learned atomic residual scale.
+        - neutral_edges                             # Start learned edge-attribute residuals neutral.
+        - neutral_transfer                          # Start transfer orientation/content residuals neutral.
+        - local_small                               # Start the local head with small weights.
+        - local_calibrated                          # Small local weights plus prevalence-calibrated bias.
+        - activation_aware                          # Nonlinear-activation-aware dense initialization.
+        - orthogonal                                # Orthogonal dense weight initialization.
+        - broader_diffusion                         # Spread initial physical diffusion lengths.
+        - same_diffusion                            # Start all existing blocks at one diffusion scale.
+  reference: {initialization_profile: baseline}     # Compare every cell with the historical control.
 
 objective:                                          # Rank candidates by WISDOM's complete validation purpose.
   metric: val_wisdom_hpo_score                      # Joint global/surface utility.
-  mode: max                                         # Larger is better.
+  mode: max                                         # Maximize the composite validation utility.
+  range: [0.0, 1.0]                                 # Mathematical bounds of the composite utility.
+  practical_margin: 0.015                           # Smaller paired differences are negligible.
 
-resources:                                          # Complete adaptive-study allocation.
+resources:                                          # Shared allocation for the complete study.
   gpu: 3                                            # Three available accelerators.
-  gpu_memory: 20GiB                                 # Per-child free-memory admission threshold.
   cpu: 36                                           # Shared host decoding capacity.
   memory: 96GiB                                     # Shared host-memory ceiling.
   time: 168h                                        # Seven-day ceiling.
 
 # initialization_profile defaults to custom. baseline changes no detailed parameter. This screen
 # deliberately keeps surface_layers=2; diffusion schedules adapt to the actual backbone depth.
-# min_seeds=4 equals the complete seeds list, early_stopping=false disables curve pruning, and
-# confirmation_seeds=[] avoids appending winner-only evidence to an already complete paired sweep.
+# LambdaForge 0.15 never HPO-prunes or seed-races sweep cells. It opens complete shared-replicate
+# blocks until its anytime-valid paired analysis resolves the authored practical margin. Omitted
+# execution limits let ARI derive safe concurrency from the live CPU and GPU-memory evidence.

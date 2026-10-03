@@ -3,8 +3,7 @@
 # VARIES: only the complete confirmation seed.
 # FIXED: every selected V1 construction decision; no HPO or adaptive pruning remains.
 # DECISION: freeze WISDOM V1 only if variance, failure rate, surface quality, and test evidence pass.
-name: wisdom-v10                                    # Short campaign name for final V1 confirmation.
-run: wisdom.Training.Training                       # Shared LambdaForge training Work.
+run: wisdom.Training.Training                       # Shared Work; the filename supplies its study name.
 
 with:                                               # Replace every marked value before confirmation.
   dataset: {dataset: wisdom-dna-reduced@6}          # Immutable reduced benchmark.
@@ -74,7 +73,8 @@ seeds:                                              # Ten uncensored confirmatio
 
 objective:                                          # Index confirmation evidence without selecting a seed.
   metric: val_wisdom_hpo_score                      # Joint validation utility.
-  mode: max                                         # Larger is better.
+  mode: max                                         # Maximize the composite validation utility.
+  range: [0.0, 1.0]                                 # Mathematical bounds of the composite utility.
 
 resources:                                          # Per-seed allocation because no search packs Runs.
   gpu: 1                                            # One accelerator per confirmation Run.
@@ -82,5 +82,5 @@ resources:                                          # Per-seed allocation becaus
   memory: 24GiB                                     # Host decoding budget.
   time: 168h                                        # Seven-day safety ceiling.
 
-# This stage deliberately has no search section: every seed must complete and contribute to the
-# final variance estimate. The test split is opened here, never during candidate selection.
+# Explicit seeds preserve a fresh confirmation set disjoint from the campaign's automatic
+# replicate stream. Every seed completes, and test opens here rather than during model selection.

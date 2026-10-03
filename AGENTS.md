@@ -89,7 +89,7 @@ project contract, not optional style suggestions.
 - Keep at most one substantive class in each Python file and name that file exactly like its class.
   Several tiny related enums may share one clearly named vocabulary module when separate files
   would add navigation without isolating behavior.
-- Expose exactly the cohesive LambdaForge 0.13 Work classes required by public YAML actions:
+- Expose exactly the cohesive LambdaForge 0.15 Work classes required by public YAML actions:
   `Selection`, `Preprocessing`, `Visualization`, `DNAValidation`, and `Training`. Keep other cohesive
   stateful/scientific concepts as classes; private module helpers are allowed only when they isolate
   a substantial algorithm and cannot be expressed more clearly as a method.
@@ -117,14 +117,22 @@ project contract, not optional style suggestions.
   those operations belong specifically to the preprocessing representation.
 - Use enums instead of magic strings or unscoped numeric categories whenever the values form a
   closed semantic set.
-- Make every YAML-executable action a class derived directly from LambdaForge 0.13 `Work`, with all
+- Make every YAML-executable action a class derived directly from LambdaForge 0.15 `Work`, with all
   scientific parameters on its single public `run()` method. Never use function targets,
   constructor injection, method escape hatches, removed `Task`/`TaskContext`/`PreprocessingTask`
   APIs, or project-owned framework compatibility shims.
-- Author every user-facing LambdaForge 0.13 YAML only with `name`, `run`, `with`, `resources`,
-  `seeds`, `search`, `objective`, and `steps` as applicable. Do not add `output_root`, `kind`,
-  `schema_version`, `inputs`, `outputs`, `trials` outside `search`, `max_parallel`, object graphs,
-  DatasetRecipe stages, or model/loss/optimizer construction trees.
+- Author every user-facing LambdaForge 0.15 YAML only with `name`, `run`, `with`, `resources`,
+  `seeds`, `replicates`, `sweep`, `search`, `execution`, `objective`, and `steps` as applicable.
+  LambdaForge 0.16 also accepts `analysis` on each executable Work, not a composition root.
+  Keep WISDOM metric semantics in `wisdom.analysis.WisdomAnalysisProfile`, attached through
+  `Training.analysis_profile` before planning. Use native metadata, families, optional questions,
+  and YAML overrides; never implement WISDOM discovery/ranking or let analysis change objectives,
+  checkpoint selection, pruning, or held-out-test policy. Describe curve summaries, checkpoint
+  outcomes, schedules, support counts, and costs separately; preserve raw duplicate names while
+  declaring identity lineage and hiding them from default discovery.
+  Do not add `output_root`, `kind`, `schema_version`, `inputs`, `outputs`, `trials` outside
+  `search`, `max_parallel` outside `execution`, object graphs, DatasetRecipe stages, or
+  model/loss/optimizer construction trees.
 - Use `self.resume_map` for bounded intra-Work parallelism when record results are reconstructible
   and should be reused with dependency-aware checkpoints; use `self.map` only when WISDOM owns a
   stricter scientifically validated record-resume boundary;
@@ -138,7 +146,7 @@ project contract, not optional style suggestions.
   groups, physical phenotypes, canonical balancing, fixed splits, nested train dilutions,
   statistics, and reports through its adjacent simple stage modules. `Preprocessing` consumes that exact
   design, generates only universal geometry and DNA sidecars, validates the joined result, and then
-  publishes it through LambdaForge 0.13 `self.outputs.dataset(...)`. It must never rediscover,
+  publishes it through LambdaForge 0.15 `self.outputs.dataset(...)`. It must never rediscover,
   rebalance, recluster, repartition, or dilute proteins.
 - Expose one `experiments/dna_preprocess.yaml` with sequential Selection and Preprocessing steps.
   The first public parameter of each Work is `skip`: a skipped Selection performs no scientific
@@ -198,11 +206,11 @@ project contract, not optional style suggestions.
 - Keep trainable WISDOM code small and conceptual: one dataset for validated `index.jsonl`/NPZ
   ingestion, one graph collator for domain-specific disjoint batching, the two explicitly requested
   model generations, and one `Training` Work.
-- Let LambdaForge 0.13 resolve datasets, expand seeds/search, reserve resources, capture
+- Let LambdaForge 0.15 resolve datasets, expand seeds/search, reserve resources, capture
   metrics/artifacts, and compare objectives. `Training.run()` owns its readable PyTorch loop and
   uses LambdaForge public graph layers, scatter operations, pooling, and metrics; do not reconstruct
   framework scheduling, Registry, results, or HPO infrastructure.
-- Prefer LambdaForge result indexing and plotting for run-level evidence. LambdaForge 0.13 does not
+- Prefer LambdaForge result indexing and plotting for run-level evidence. LambdaForge 0.15 does not
   expose the former generic artifact-inspection command family, so retain WISDOM tools that enforce
   protein topology, signed surface gaps, normal orientation, curvature identities, and visual NPZ
   inspection.

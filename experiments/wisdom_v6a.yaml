@@ -3,8 +3,7 @@
 # VARIES: negative_surface_lambda in the prescribed baseline/0.1/0.3/1.0 screen.
 # FIXED: every V2-V5 winner, all other weak-loss terms, architecture, and data.
 # DECISION: continue to V6b only if negative supervision adds credible surface signal.
-name: wisdom-v6a                                    # Short campaign name for negative weak loss.
-run: wisdom.Training.Training                       # Shared LambdaForge training Work.
+run: wisdom.Training.Training                       # Shared Work; the filename supplies its study name.
 
 with:                                               # Explicit carry-forward ledger.
   dataset: {dataset: wisdom-dna-reduced@6}          # Immutable reduced benchmark.
@@ -19,18 +18,18 @@ with:                                               # Explicit carry-forward led
   optimization_profile: baseline                    # REPLACE with the V3 winner.
   hidden_dim: 128                                   # REPLACE with the V4 winner.
   embedding_dim: 32                                 # REPLACE with the V4 winner.
-  residue_embedding_dim: 32                         # REPLACE with the V4 winner.
+  residue_embedding_dim: 64                         # REPLACE with the V4 winner.
   atomic_layers: 2                                  # REPLACE with the V4 winner.
-  projection_depth: 1                               # REPLACE with the V4 winner.
-  surface_layers: 2                                 # REPLACE with the V4 winner.
-  atom_spatial_k: 16                                # REPLACE with the V4 winner.
+  projection_depth: 3                               # REPLACE with the V4 winner.
+  surface_layers: 4                                 # REPLACE with the V4 winner.
+  atom_spatial_k: 8                                 # REPLACE with the V4 winner.
   surface_atom_k: 16                                # REPLACE with the V4 winner.
-  diffusion_spectral_modes: 128                     # REPLACE with the V4 winner.
-  surface_atom_radius: 6.0                          # REPLACE with the V4 winner.
+  diffusion_spectral_modes: 32                      # REPLACE with the V4 winner.
+  surface_atom_radius: 4.0                          # REPLACE with the V4 winner.
   dropout: 0.2                                      # REPLACE with the V4 winner.
-  learning_rate: 0.0003                             # REPLACE with the V4 winner.
-  weight_decay: 0.0001                              # REPLACE with the V4 winner.
-  gate_lambda: 0.001                                # REPLACE with the V4 winner.
+  learning_rate: 0.001                              # REPLACE with the V4 winner.
+  weight_decay: 0.0005                              # REPLACE with the V4 winner.
+  gate_lambda: 0.04                                 # REPLACE with the V4 winner.
   weak_loss_profile: custom                         # Direct coefficients below remain authoritative.
   architecture_spike: baseline                      # No architecture change.
   head_type: single                                 # Fixed head relationship.
@@ -46,44 +45,33 @@ with:                                               # Explicit carry-forward led
   evaluate_test: false                              # Keep test sealed.
   data_workers: 4                                   # Persistent NPZ workers.
 
-seeds:                                              # Four paired seeds completed for every coefficient.
-  - 4                                               # Replication seed 1.
-  - 7                                               # Replication seed 2.
-  - 32                                              # Replication seed 3.
-  - 54                                              # Replication seed 4.
-
-search:                                             # Parallel coefficient sweep without censoring.
-  strategy: adaptive                                # Retain concurrent child Runs, not adaptive elimination.
-  trials: 4                                         # Exactly four authored coefficients.
-  proposal_pool_size: 4                             # Enumerate the finite grid.
-  runs_per_gpu: 3                                   # Three measured Runs per H100.
-  max_parallel: 9                                   # Nine Runs over three H100s.
-  min_seeds: 4                                      # Force all four seeds for every coefficient.
-  confirmation_seeds: []                            # Do not add unequal winner-only seeds.
-  early_stopping:                                   # Disable probability-based curve pruning for this sweep.
-    enabled: false                                  # Every Run reaches WISDOM's own stopping rule.
-  negative_surface_lambda:                          # Area-weighted negative-bag local penalty.
-    values:                                         # Prescribed non-factorial screen.
-      - 0.0                                         # Global-BCE baseline with no local penalty.
-      - 0.05                                        # Weak negative-surface constraint.
-      - 0.1                                         # Weak negative-surface constraint.
-      - 0.2                                         # Moderate negative-surface constraint.
-      - 0.3                                         # Moderate negative-surface constraint.
-      - 0.6                                         # Strong negative-surface constraint.
-      - 0.8                                         # Strong negative-surface constraint.
-      - 1.0                                         # Strong negative-surface constraint.
+sweep:                                              # Complete coefficient comparison with paired evidence.
+  space:                                            # Every coefficient is a required sweep cell.
+    negative_surface_lambda:                        # Area-weighted negative-bag local penalty.
+      values:                                       # Prescribed non-factorial screen.
+        - 0.0                                       # Global-BCE baseline with no local penalty.
+        - 0.05                                      # Weak negative-surface constraint.
+        - 0.1                                       # Weak negative-surface constraint.
+        - 0.2                                       # Moderate negative-surface constraint.
+        - 0.3                                       # Moderate negative-surface constraint.
+        - 0.6                                       # Strong negative-surface constraint.
+        - 0.8                                       # Strong negative-surface constraint.
+        - 1.0                                       # Strong negative-surface constraint.
+  reference: {negative_surface_lambda: 0.0}          # Compare every weight with global BCE alone.
 
 objective:                                          # Rank by joint validation evidence.
   metric: val_wisdom_hpo_score                      # Global/surface/coupling utility.
-  mode: max                                         # Larger is better.
+  mode: max                                         # Maximize the composite validation utility.
+  range: [0.0, 1.0]                                 # Mathematical bounds of the composite utility.
+  practical_margin: 0.015                           # Smaller paired differences are negligible.
 
-resources:                                          # Complete adaptive-study allocation.
-  gpu: 3                                            # Three available accelerators.
-  gpu_memory: 20GiB                                 # Per-child admission threshold.
+resources:                                          # Shared allocation for the complete study.
+  gpu: 2                                            # Three available accelerators.
   cpu: 36                                           # Shared host decoding capacity.
   memory: 96GiB                                     # Shared host-memory ceiling.
   time: 168h                                        # Seven-day ceiling.
 
 # All omitted weak coefficients default to zero. Surface ground truth remains evaluation-only and
 # never enters the loss or checkpoint selector.
-# min_seeds=4, early_stopping=false, and confirmation_seeds=[] produce a complete paired sweep.
+# LambdaForge 0.15 evaluates every coefficient, opens complete shared-replicate blocks, and applies
+# no HPO pruning or seed racing. Omitted execution limits let ARI choose safe parallel packing.

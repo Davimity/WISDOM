@@ -3,8 +3,7 @@
 # VARIES: dropout, learning_rate, weight_decay, and gate_lambda in a compact local search.
 # FIXED: selected initialization, optimizer, core topology, pooling, loss, head, and architecture.
 # DECISION: select one final configuration for unbiased multi-seed confirmation.
-name: wisdom-v9                                     # Short campaign name for final numerical retuning.
-run: wisdom.Training.Training                       # Shared LambdaForge training Work.
+run: wisdom.Training.Training                       # Shared Work; the filename supplies its study name.
 
 with:                                               # Replace every marked value from the winner ledger.
   dataset: {dataset: wisdom-dna-reduced@6}          # Immutable reduced benchmark.
@@ -55,34 +54,26 @@ with:                                               # Replace every marked value
   evaluate_test: false                              # Keep test sealed.
   data_workers: 4                                   # Persistent NPZ workers.
 
-seeds:                                              # Adaptive confirmation budget.
-  - 4                                               # Initial candidate seed.
-  - 7                                               # Confirmation seed 2.
-  - 32                                              # Confirmation seed 3.
-  - 54                                              # Confirmation seed 4.
-  - 65                                              # Confirmation seed 5.
-
-search:                                             # Compact local numerical search.
-  strategy: adaptive                                # Allocate effort to plausible retunes.
-  trials: 60                                        # Smaller than the 500-trial core HPO.
-  runs_per_gpu: 3                                   # Three measured Runs per H100.
-  max_parallel: 9                                   # Nine Runs over three H100s.
-  min_seeds: 1                                      # Every proposal receives one seed.
-  dropout: {range: [0.05, 0.35]}                   # Local regularization retune.
-  learning_rate: {range: [0.00003, 0.001], scale: log} # Local log-uniform AdamW-rate retune.
-  weight_decay: {range: [0.000003, 0.003], scale: log} # Local log-uniform decay retune.
-  gate_lambda: {range: [0.0001, 0.02], scale: log}  # Local gate-pressure retune.
+search:                                             # Convergence-controlled local numerical HPO.
+  goal: optimize                                    # Prioritize the strongest practical final candidate.
+  space:                                            # Only sensitive numerical choices reopen here.
+    dropout: {range: [0.05, 0.35]}                 # Local regularization retune.
+    learning_rate: {range: [0.00003, 0.001], scale: log} # AdamW-rate retune.
+    weight_decay: {range: [0.000003, 0.003], scale: log} # AdamW-decay retune.
+    gate_lambda: {range: [0.0001, 0.02], scale: log} # Local gate-pressure retune.
 
 objective:                                          # Rank by the same frozen utility as earlier stages.
   metric: val_wisdom_hpo_score                      # Global/surface/coupling score.
-  mode: max                                         # Larger is better.
+  mode: max                                         # Maximize the composite validation utility.
+  range: [0.0, 1.0]                                 # Mathematical bounds of the composite utility.
+  practical_margin: 0.015                           # Differences below 0.015 are scientifically equivalent.
 
-resources:                                          # Complete adaptive-study allocation.
+resources:                                          # Shared allocation for the complete study.
   gpu: 3                                            # Three available accelerators.
-  gpu_memory: 20GiB                                 # Per-child admission threshold.
   cpu: 36                                           # Shared host capacity.
   memory: 96GiB                                     # Shared host-memory ceiling.
   time: 336h                                        # Two-week ceiling for final retuning.
 
 # This stage must not reopen widths, depths, pooling, loss families, heads, or spikes. Doing so
-# would erase the causal interpretation established by V2-V8.
+# would erase the causal interpretation established by V2-V8. LambdaForge 0.15 supplies automatic
+# proposals, replication, pruning, fresh confirmation, convergence, and ARI resource admission.

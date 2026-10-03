@@ -2,11 +2,10 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
-
 import torch
-from torch import Tensor, nn
 
+from torch import Tensor, nn
+from collections.abc import Mapping, Sequence
 from wisdom.models.DiffusionBlock import DiffusionBlock
 
 
@@ -115,7 +114,7 @@ class DiffusionSurfaceEncoder(nn.Module):
         values     : Tensor,
         operators  : Sequence[Mapping[str, Tensor]],
         surface_ptr: Tensor,
-        length     : float,
+        length     : float | Tensor,
     ) -> Tensor:
         """Diffuse scalar or channelwise surface fields at one fixed physical length.
 
@@ -129,8 +128,8 @@ class DiffusionSurfaceEncoder(nn.Module):
             values: Concatenated scalar values ``[M_total]`` or channels ``[M_total,D]``.
             operators: Ordered per-protein mass and low eigenpairs.
             surface_ptr: Prefix point boundaries ``long [B+1]``.
-            length: Non-negative characteristic diffusion length in ångströms; heat time is
-                ``t=length²`` rather than a hard Euclidean neighborhood radius.
+            length: Non-negative float or differentiable scalar tensor, in ångströms; heat time
+                is ``t=length²``. A float zero is exact identity even with truncated eigenpairs.
 
         Returns:
             Spectrally smoothed values with the same shape/dtype and unchanged point order.
@@ -138,7 +137,7 @@ class DiffusionSurfaceEncoder(nn.Module):
         Raises:
             ValueError: If shapes, ownership boundaries, or ``length`` are invalid.
         """
-        if length < 0.0:
+        if not isinstance(length, Tensor) and length < 0.0:
             raise ValueError("surface diffusion length cannot be negative")
         if values.ndim not in {1, 2} or not len(values):
             raise ValueError("surface diffusion values must have shape [M] or [M,D]")
@@ -146,12 +145,14 @@ class DiffusionSurfaceEncoder(nn.Module):
             raise ValueError("surface_ptr must have shape [B+1] aligned with operator packs")
         if int(surface_ptr[0]) != 0 or int(surface_ptr[-1]) != len(values):
             raise ValueError("surface_ptr boundaries disagree with diffusion values")
-        if length == 0.0:
+        if not isinstance(length, Tensor) and length == 0.0:
             return values
 
         outputs: list[Tensor] = []
         scalar_input = values.ndim == 1
-        time         = float(length) ** 2
+        # Do not convert a learned length to float: attenuation must backpropagate to its scale.
+
+        time         = length.square() if isinstance(length, Tensor) else length ** 2
         for protein_index, operator in enumerate(operators):
             start = int(surface_ptr[protein_index])
             stop  = int(surface_ptr[protein_index + 1])

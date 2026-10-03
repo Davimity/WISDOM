@@ -3,8 +3,7 @@
 # VARIES: architecture_spike only, including an added-depth control for feedback.
 # FIXED: every V2-V7 winner, loss, pooling, core hyperparameters, and data.
 # DECISION: retain a spike only if it beats its relevant control across utility and faithfulness.
-name: wisdom-v8                                     # Short campaign name for architecture spikes.
-run: wisdom.Training.Training                       # Shared LambdaForge training Work.
+run: wisdom.Training.Training                       # Shared Work; the filename supplies its study name.
 
 with:                                               # Explicit carry-forward ledger.
   dataset: {dataset: wisdom-dna-reduced@6}          # Immutable reduced benchmark.
@@ -58,44 +57,31 @@ with:                                               # Explicit carry-forward led
   evaluate_test: false                              # Keep test sealed.
   data_workers: 2                                   # Bound host load across packed Runs.
 
-seeds:                                              # Five seeds for expensive structural changes.
-  - 4                                               # Initial comparison seed.
-  - 7                                               # Confirmation seed 2.
-  - 32                                              # Confirmation seed 3.
-  - 48                                              # Confirmation seed 4.
-  - 92                                              # Confirmation seed 5.
-
-search:                                             # Finite one-factor spike comparison.
-  strategy: adaptive                                # Retain concurrent child Runs without elimination.
-  trials: 6                                         # Enumerate every authored profile.
-  proposal_pool_size: 6                             # Exact categorical-space cardinality.
-  runs_per_gpu: 3                                   # Three measured Runs per H100.
-  max_parallel: 9                                   # Nine Runs over three H100s.
-  min_seeds: 5                                      # Force all five seeds for every architecture spike.
-  confirmation_seeds: []                            # Do not add unequal winner-only seeds.
-  early_stopping:                                   # Disable probability-based curve pruning.
-    enabled: false                                  # Every Run reaches WISDOM's own stopping rule.
-  architecture_spike:                              # Mutually exclusive architectural hypothesis.
-    values:                                         # Closed ArchitectureSpike vocabulary.
-      - baseline                                    # Scalar one-pass atom-to-surface control.
-      - point_geometry                              # Condition transfer scoring on point geometry.
-      - depth_control                               # Add depth without surface-to-atom feedback.
-      - bidirectional                               # Add one surface-to-atom-to-surface refinement round.
-      - vector_8                                    # Add eight equivariant atomic vector channels.
-      - vector_16                                   # Add sixteen equivariant atomic vector channels.
+sweep:                                              # Complete architecture-spike comparison.
+  space:                                            # Every isolated spike is a required sweep cell.
+    architecture_spike:                            # Mutually exclusive architectural hypothesis.
+      values:                                       # Closed ArchitectureSpike vocabulary.
+        - baseline                                  # Scalar one-pass atom-to-surface control.
+        - point_geometry                            # Condition transfer scoring on point geometry.
+        - depth_control                             # Add depth without surface-to-atom feedback.
+        - bidirectional                             # Add one surface-to-atom-to-surface refinement round.
+        - vector_8                                  # Add eight equivariant atomic vector channels.
+        - vector_16                                 # Add sixteen equivariant atomic vector channels.
+  reference: {architecture_spike: baseline}         # Compare every spike with the unchanged architecture.
 
 objective:                                          # Rank by joint validation evidence.
   metric: val_wisdom_hpo_score                      # Global/surface/coupling utility.
-  mode: max                                         # Larger is better.
+  mode: max                                         # Maximize the composite validation utility.
+  range: [0.0, 1.0]                                 # Mathematical bounds of the composite utility.
+  practical_margin: 0.015                           # Smaller paired differences are negligible.
 
-resources:                                          # Complete adaptive-study allocation.
+resources:                                          # Shared allocation for the complete study.
   gpu: 3                                            # Three available accelerators.
-  gpu_memory: 20GiB                                 # Per-child admission threshold.
   cpu: 36                                           # Shared host capacity.
   memory: 96GiB                                     # Shared host-memory ceiling.
   time: 168h                                        # Seven-day ceiling.
 
 # The bidirectional candidate must exceed depth_control, not merely baseline, before feedback can
 # be credited. No spike combination is searched in this stage.
-# min_seeds=5 equals the seeds list; early_stopping=false and confirmation_seeds=[] prevent
-# candidate-dependent censoring while retaining concurrent child scheduling.
+# LambdaForge 0.15 evaluates every spike and grows complete shared-replicate blocks without HPO
+# pruning or seed racing. Omitted execution limits let ARI derive safe parallel packing.

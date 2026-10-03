@@ -1,10 +1,10 @@
-"""Version-resolved trainable WISDOM Work for LambdaForge 0.14."""
+"""Version-resolved trainable WISDOM Work using LambdaForge's public run services."""
 
 from __future__ import annotations
 
-import time
 import json
 import math
+import time
 import torch
 import inspect
 import importlib
@@ -16,27 +16,28 @@ from typing import Any, cast
 from scipy.stats import spearmanr
 from torch.nn import functional as F
 from torch.utils.data import DataLoader
-from collections.abc import Mapping, Sequence
-
 from wisdom.models.WisdomV1 import WisdomV1
-from wisdom.models.DiffusionBlock import DiffusionBlock
-from wisdom.models.WeakSurfaceLoss import WeakSurfaceLoss
-from wisdom.models.ModelWeightAverage import ModelWeightAverage
-from wisdom.models.ArchitectureSpike import ArchitectureSpike
-from wisdom.models.WeakLossProfile import WeakLossProfile
-from wisdom.models.StabilityProfile import StabilityProfile
-from wisdom.models.InitializationProfile import InitializationProfile
-from wisdom.models.OptimizationProfile import OptimizationProfile
-from wisdom.models.WeightAveragingMode import WeightAveragingMode
+from collections.abc import Mapping, Sequence
+from wisdom.models.PoolingType import PoolingType
 from wisdom.data.WisdomDataset import WisdomDataset
 from wisdom.data.WisdomCollator import WisdomCollator
+from wisdom.models.DiffusionBlock import DiffusionBlock
+from wisdom.models.WeakLossProfile import WeakLossProfile
+from wisdom.models.WeakSurfaceLoss import WeakSurfaceLoss
+from wisdom.models.StabilityProfile import StabilityProfile
+from wisdom.models.ArchitectureSpike import ArchitectureSpike
+from wisdom.models.ModelWeightAverage import ModelWeightAverage
 from wisdom.evaluation.BinaryMetricSuite import BinaryMetricSuite
+from wisdom.models.OptimizationProfile import OptimizationProfile
+from wisdom.models.WeightAveragingMode import WeightAveragingMode
 from wisdom.evaluation.SurfaceMetricSuite import SurfaceMetricSuite
 from wisdom.evaluation.SubgroupMetricSuite import SubgroupMetricSuite
-from wisdom.evaluation.OptimizationDiagnostics import OptimizationDiagnostics
-from wisdom.evaluation.SurfaceFaithfulnessAudit import SurfaceFaithfulnessAudit
+from wisdom.models.InitializationProfile import InitializationProfile
+from wisdom.analysis.WisdomAnalysisProfile import WisdomAnalysisProfile
 from wisdom.models.DiffusionSurfaceEncoder import DiffusionSurfaceEncoder
+from wisdom.evaluation.OptimizationDiagnostics import OptimizationDiagnostics
 from wisdom.evaluation.SurfacePredictionReport import SurfacePredictionReport
+from wisdom.evaluation.SurfaceFaithfulnessAudit import SurfaceFaithfulnessAudit
 from wisdom.evaluation.SurfaceVisualizationMode import SurfaceVisualizationMode
 
 
@@ -84,6 +85,11 @@ _VECTOR_INPUT_NAMES = ("atom_positions",)
 class Training(lf.Work):
     """Train and evaluate one WISDOM model with framework-owned run services."""
 
+    # LambdaForge resolves and freezes this native declaration before dispatching Runs.
+    # Metric computation, checkpoint selection, and HPO remain independent of this catalog.
+
+    analysis_profile = WisdomAnalysisProfile().build()
+
     def run(
         self,
         dataset              : Path,
@@ -113,6 +119,21 @@ class Training(lf.Work):
         attention_hidden_dim : int = 32,
         regional_diffusion_scale: float = 2.5,
         log_sum_exp_beta     : float = 5.0,
+        pooling_area_mode            : str = "legacy",
+        attention_variant            : str = "simple",
+        regional_scale_mode          : str = "fixed",
+        regional_diffusion_scale_init: float = 1.5,
+        log_sum_exp_mode             : str = "fixed",
+        log_sum_exp_beta_init        : float = 5.0,
+        autopool_alpha               : float = 1.0,
+        autopool_alpha_mode          : str = "fixed",
+        autopool_alpha_init          : float = 1.0,
+        gem_power                    : float = 1.0,
+        gem_power_mode               : str = "fixed",
+        gem_power_init               : float = 4.0,
+        max_mean_lambda              : float = 0.5,
+        max_mean_lambda_mode         : str = "fixed",
+        max_mean_lambda_init         : float = 0.5,
         head_type            : str = "single",
         global_context_dim   : int = 16,
         detach_global_context: bool = True,
@@ -212,6 +233,21 @@ class Training(lf.Work):
             attention_hidden_dim: V2 attention score-network hidden width.
             regional_diffusion_scale: V2 physical smoothing length before regional MAX, in Å.
             log_sum_exp_beta: V2 normalized log-sum-exp inverse temperature.
+            pooling_area_mode: point, area, or legacy (area mean and point other families).
+            attention_variant: simple tanh or gated attention; weights are not local positivity.
+            regional_scale_mode: fixed or learned regional heat length.
+            regional_diffusion_scale_init: Learned length initialization inside (0.05, 12) Å.
+            log_sum_exp_mode: fixed, learned, or curriculum LSE temperature.
+            log_sum_exp_beta_init: Learned beta initialization inside (0.25, 200).
+            autopool_alpha: Fixed non-negative probability sharpness.
+            autopool_alpha_mode: fixed or learned AutoPool alpha.
+            autopool_alpha_init: Learned alpha initialization inside (0, 50).
+            gem_power: Fixed probability power >= 1.
+            gem_power_mode: fixed or learned GeM power.
+            gem_power_init: Learned power initialization inside (1, 32).
+            max_mean_lambda: Fixed MAX coefficient in [0, 1].
+            max_mean_lambda_mode: fixed or learned MAX-MEAN mixture.
+            max_mean_lambda_init: Learned mixture initialization inside (0, 1).
             head_type: V2+ ``single``, ``dual``, ``global_context``, or ``film`` hypothesis.
             global_context_dim: D2/D2b global context bottleneck width.
             detach_global_context: Stop local gradients through the global context path.
@@ -348,6 +384,21 @@ class Training(lf.Work):
             attention_hidden_dim=attention_hidden_dim,
             regional_diffusion_scale=regional_diffusion_scale,
             log_sum_exp_beta=log_sum_exp_beta,
+            pooling_area_mode=pooling_area_mode,
+            attention_variant=attention_variant,
+            regional_scale_mode=regional_scale_mode,
+            regional_diffusion_scale_init=regional_diffusion_scale_init,
+            log_sum_exp_mode=log_sum_exp_mode,
+            log_sum_exp_beta_init=log_sum_exp_beta_init,
+            autopool_alpha=autopool_alpha,
+            autopool_alpha_mode=autopool_alpha_mode,
+            autopool_alpha_init=autopool_alpha_init,
+            gem_power=gem_power,
+            gem_power_mode=gem_power_mode,
+            gem_power_init=gem_power_init,
+            max_mean_lambda=max_mean_lambda,
+            max_mean_lambda_mode=max_mean_lambda_mode,
+            max_mean_lambda_init=max_mean_lambda_init,
             head_type=head_type,
             global_context_dim=global_context_dim,
             detach_global_context=detach_global_context,
@@ -443,6 +494,21 @@ def _train_wisdom(
     attention_hidden_dim : int = 32,
     regional_diffusion_scale: float = 2.5,
     log_sum_exp_beta     : float = 5.0,
+    pooling_area_mode            : str = "legacy",
+    attention_variant            : str = "simple",
+    regional_scale_mode          : str = "fixed",
+    regional_diffusion_scale_init: float = 1.5,
+    log_sum_exp_mode             : str = "fixed",
+    log_sum_exp_beta_init        : float = 5.0,
+    autopool_alpha               : float = 1.0,
+    autopool_alpha_mode          : str = "fixed",
+    autopool_alpha_init          : float = 1.0,
+    gem_power                    : float = 1.0,
+    gem_power_mode               : str = "fixed",
+    gem_power_init               : float = 4.0,
+    max_mean_lambda              : float = 0.5,
+    max_mean_lambda_mode         : str = "fixed",
+    max_mean_lambda_init         : float = 0.5,
     head_type            : str = "single",
     global_context_dim   : int = 16,
     detach_global_context: bool = True,
@@ -543,6 +609,21 @@ def _train_wisdom(
         attention_hidden_dim: V2 attention score-network hidden width.
         regional_diffusion_scale: V2 regional diffusion length in Å.
         log_sum_exp_beta: V2 normalized log-sum-exp inverse temperature.
+        pooling_area_mode: point, area, or legacy (area mean and point other families).
+        attention_variant: simple tanh or gated attention; weights are not local positivity.
+        regional_scale_mode: fixed or learned regional heat length.
+        regional_diffusion_scale_init: Learned length initialization inside (0.05, 12) angstroms.
+        log_sum_exp_mode: fixed, learned, or curriculum LSE temperature.
+        log_sum_exp_beta_init: Learned beta initialization inside (0.25, 200).
+        autopool_alpha: Fixed non-negative probability sharpness.
+        autopool_alpha_mode: fixed or learned AutoPool alpha.
+        autopool_alpha_init: Learned alpha initialization inside (0, 50).
+        gem_power: Fixed probability power >= 1.
+        gem_power_mode: fixed or learned GeM power.
+        gem_power_init: Learned power initialization inside (1, 32).
+        max_mean_lambda: Fixed MAX coefficient in [0, 1].
+        max_mean_lambda_mode: fixed or learned MAX-MEAN mixture.
+        max_mean_lambda_init: Learned mixture initialization inside (0, 1).
         head_type: V2+ global/local head relationship.
         global_context_dim: D2/D2b context bottleneck width.
         detach_global_context: Whether local gradients stop at global context.
@@ -790,6 +871,12 @@ def _train_wisdom(
         or pooling_type != "log_sum_exp"
     ):
         raise ValueError("pooling beta curriculum requires v2+ LogSumExp and a positive final beta")
+    if pooling_curriculum_end_beta is not None:
+        if log_sum_exp_mode == "learned":
+            raise ValueError("a beta curriculum cannot overwrite a learned beta")
+        log_sum_exp_mode = "curriculum"
+    elif log_sum_exp_mode == "curriculum":
+        raise ValueError("curriculum mode requires pooling_curriculum_end_beta")
     if (
         learning_rate <= 0.0
         or weight_decay < 0.0
@@ -1066,6 +1153,21 @@ def _train_wisdom(
         "attention_hidden_dim": attention_hidden_dim,
         "regional_diffusion_scale": regional_diffusion_scale,
         "log_sum_exp_beta":     log_sum_exp_beta,
+        "pooling_area_mode": pooling_area_mode,
+        "attention_variant": attention_variant,
+        "regional_scale_mode": regional_scale_mode,
+        "regional_diffusion_scale_init": regional_diffusion_scale_init,
+        "log_sum_exp_mode": log_sum_exp_mode,
+        "log_sum_exp_beta_init": log_sum_exp_beta_init,
+        "autopool_alpha": autopool_alpha,
+        "autopool_alpha_mode": autopool_alpha_mode,
+        "autopool_alpha_init": autopool_alpha_init,
+        "gem_power": gem_power,
+        "gem_power_mode": gem_power_mode,
+        "gem_power_init": gem_power_init,
+        "max_mean_lambda": max_mean_lambda,
+        "max_mean_lambda_mode": max_mean_lambda_mode,
+        "max_mean_lambda_init": max_mean_lambda_init,
         "head_type":            head_type,
         "global_context_dim":   global_context_dim,
         "detach_global_context": detach_global_context,
@@ -1227,6 +1329,7 @@ def _train_wisdom(
     peak_reserved_gib          = 0.0
     surface_curve              : list[dict[str, float]] = []
     subgroup_curves            : dict[str, list[dict[str, float]]] = {}
+    pooling_trajectory         : list[dict[str, float]] = []
 
     stop_reason: str | None = None
 
@@ -1296,6 +1399,8 @@ def _train_wisdom(
         surface_task_loss_sum   = torch.zeros((), device=device)
         gate_regularization_sum = torch.zeros((), device=device)
         total_loss_sum          = torch.zeros((), device=device)
+        surface_logit_moments   = torch.zeros(3, device=device, dtype=torch.float64)
+        surface_logit_count     = 0
         weak_loss_sums = {
             name: torch.zeros((), device=device)
             for name in (
@@ -1419,6 +1524,16 @@ def _train_wisdom(
                 weak_loss_sums[name] += weak_value.detach() * count
             examples += count
 
+            # Logit magnitudes contextualize beta/power sharpness. Aggregate on device, without
+            # holding the autograd graph or synchronizing the GPU for every batch.
+
+            local_logits = output["surface_logits"].detach().double()
+            surface_logit_moments += torch.stack((
+                local_logits.abs().sum(), local_logits.sum(), local_logits.square().sum(),
+            ))
+            surface_logit_count += local_logits.numel()
+            del local_logits
+
             # The model returns point-level diagnostics in addition to protein logits. Explicitly
             # release the completed batch so it cannot overlap the next batch or validation pass.
 
@@ -1516,8 +1631,20 @@ def _train_wisdom(
         work.metrics.log("total_loss", train_total_loss, step=epoch, split="train")
         work.metrics.log("learning_rate", learning_rate * learning_rate_scale, step=epoch)
         work.metrics.log("effective_gate_lambda", effective_gate_lambda, step=epoch)
-        if current_pooling_beta is not None:
-            work.metrics.log("pooling_beta", current_pooling_beta, step=epoch)
+        pooling_head = getattr(model, "pooling_head", None)
+        pooling_values = pooling_head.parameter_values() if pooling_head is not None else {}
+        for name, value in pooling_values.items():
+            work.metrics.log(name, value, step=epoch)
+        pooling_trajectory.append({"epoch": float(epoch), **pooling_values})
+
+        moments = surface_logit_moments.cpu().tolist()
+        logit_mean = moments[1] / max(1, surface_logit_count)
+        logit_std = math.sqrt(max(0.0, moments[2] / max(1, surface_logit_count) - logit_mean ** 2))
+        work.metrics.log(
+            "surface_logit_mean_abs", moments[0] / max(1, surface_logit_count),
+            step=epoch, split="train",
+        )
+        work.metrics.log("surface_logit_std", logit_std, step=epoch, split="train")
         if optimization_monitor is not None:
             for name, diagnostic_value in optimization_monitor.metrics().items():
                 work.metrics.log(name, diagnostic_value, step=epoch, split="train")
@@ -1848,10 +1975,10 @@ def _train_wisdom(
     # Candidate ranking must use the best validation checkpoint rather than the final plateau
     # observation. This unstepped summary does not alter LambdaForge's per-epoch pruning history.
 
-    for name in ("auprc", "auroc", "balanced_accuracy", "mcc"):
-        value = best_validation_metrics.get(name)
+    for name, value in best_validation_metrics.items():
         if value is not None:
             work.metrics.log(name, value, split="val")
+    work.metrics.log("selection_utility", best_selection_utility, split="val")
     work.metrics.log(
         "mcc_defined",
         float(best_validation_metrics.get("mcc") is not None),
@@ -2034,6 +2161,13 @@ def _train_wisdom(
                 work.metrics.log(name, optional_metric, split="val")
 
     final_diffusion_times = _diffusion_time_summary(model)
+    pooling_head = getattr(model, "pooling_head", None)
+    final_pooling_values = (
+        pooling_head.parameter_values()
+        if pooling_head is not None and stop_reason != "adaptive-hpo" else {}
+    )
+    for name, value in final_pooling_values.items():
+        work.metrics.log(f"final_{name}", value)
     for statistic in ("minimum", "mean", "median", "maximum"):
         value = final_diffusion_times.get(statistic)
         if isinstance(value, float):
@@ -2043,6 +2177,9 @@ def _train_wisdom(
         "model_version":                  model_version,
         "architecture":                   architecture_name,
         "pooling_type":                   pooling_type,
+        "pooling_area_mode":              pooling_area_mode,
+        "pooling_parameter_trajectory":   pooling_trajectory,
+        "selected_pooling_parameters":    final_pooling_values,
         "head_type":                      head_type,
         "direct_head_weight":             direct_head_weight,
         "surface_head_weight":            surface_head_weight,
@@ -2187,8 +2324,8 @@ def _calibrate_local_head_bias(
 ) -> float:
     """Match initial pooled prevalence by shifting the shared local-head bias.
 
-    Every current WISDOM pooling is equivariant to adding the same scalar to all local logits in
-    one protein. The method temporarily sets the local-head bias to zero, observes representative
+    Logit-linear pooling controls are equivariant to a shared local-logit shift. The method
+    temporarily sets the local-head bias to zero, observes representative
     training logits, and solves ``mean(sigmoid(logit+b)) = train_prevalence`` by bisection. Local
     weights remain small but nonzero, avoiding MAX ties while removing the random-extreme positive
     bias induced by thousands of surface points.
@@ -2204,11 +2341,16 @@ def _calibrate_local_head_bias(
         Calibrated scalar bias assigned to ``model.local_head.bias``.
 
     Raises:
-        ValueError: If the model lacks a compatible head or the calibration subset has one class.
+        ValueError: If the model lacks a compatible head, uses a probability-space pooling, or the
+            calibration subset has one class. Probability families are not shift-equivariant.
     """
     local_head = getattr(model, "local_head", None)
     if not isinstance(local_head, torch.nn.Linear) or local_head.bias is None:
         raise ValueError("local-head calibration requires one biased linear local_head")
+    if getattr(model, "pooling_type", None) in {
+        PoolingType.LINEAR_SOFTMAX, PoolingType.AUTOPOOL, PoolingType.GEM,
+    }:
+        raise ValueError("local-head shift calibration is undefined for probability-space pooling")
 
     local_head.bias.data.zero_()
     logits : list[Tensor] = []

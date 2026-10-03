@@ -223,7 +223,7 @@ steps:                                                          # LambdaForge ru
     # The mesh is a non-authoritative alpha-complex reconstruction;
     # positive mesh_alpha values change only its visual topology, never NPZ bytes or model inputs.
 
-# LambdaForge 0.14 step options: steps is a non-empty sequential list; each step accepts name, run,
+# LambdaForge 0.15 step options: steps is a non-empty sequential list; each step accepts name, run,
 # with, resources, seeds, search, and objective. `{from: STEP.OUTPUT}` fingerprints and resolves a
 # prior named artifact. The three skip booleans choose Selection, Preprocessing, and Visualization.
 # The active Visualization input consumes `preprocess.dataset`, so it is resolved only after that

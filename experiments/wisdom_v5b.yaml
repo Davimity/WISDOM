@@ -1,0 +1,157 @@
+# OBJECTIVE: compare adaptive pooling and additional controls in one paired Study.
+# PREREQUISITES: use the same reviewed V5 backbone and benchmark as V5a.
+# VARIES: family, point/area measure, and active fixed/learned/curriculum parameters.
+# FIXED: backbone, four paired seeds, protein BCE, validation objective, sealed test.
+# DECISION: nominate representatives for the joint shortlist; review V6 separately.
+name: wisdom-v5b-pooling-refinement  # One native Study, not a family-step composition.
+run: wisdom.Training.Training  # Existing model, training loop, and central analysis profile.
+
+with:  # Exact reviewed V5 backbone; only the sweep below varies.
+  dataset: {dataset: wisdom-dna-reduced@6}             # Immutable benchmark; validation and test are not diluted.
+  model_version: 2                                     # Existing generation exposing pooling alternatives.
+  subset: "full"                                       # Use the complete reduced training population.
+  initialization_profile: "baseline"                   # Reviewed initialization, unchanged across families.
+  optimization_profile: "baseline"                     # Reviewed optimization, unchanged across families.
+  hidden_dim: 128                                      # Shared atom/surface latent width.
+  embedding_dim: 32                                    # Element embedding width.
+  residue_embedding_dim: 64                            # Residue embedding width.
+  atomic_layers: 2                                     # Atomic propagation depth.
+  projection_depth: 3                                  # Atom-to-surface MLP depth.
+  surface_layers: 4                                    # DiffusionNet depth.
+  atom_spatial_k: 8                                    # Active spatial atom neighbors.
+  surface_atom_k: 16                                   # Nearest transfer atoms per point.
+  diffusion_spectral_modes: 32                         # Retained surface spectral modes.
+  surface_atom_radius: 4                               # Transfer cutoff in angstroms.
+  dropout: 0.2                                         # Training dropout probability.
+  learning_rate: 0.001                                 # AdamW learning rate.
+  weight_decay: 0.0005                                 # AdamW decoupled decay.
+  gate_lambda: 0.04                                    # Expected L0 semantic-gate penalty.
+  weak_loss_profile: "baseline"                        # Protein BCE only; no local-GT training.
+  architecture_spike: "baseline"                       # Do not change the backbone.
+  head_type: "single"                                  # One surface-to-protein head.
+  batch_size: 16                                       # Proteins per update.
+  epochs: 500                                          # Epoch ceiling; validation patience may stop earlier.
+  patience: 30                                         # Stop after 30 non-improving validation epochs.
+  minimum_delta: 0.001                                 # Minimum validation-utility improvement.
+  precision: "auto"                                    # Use supported mixed precision.
+  surface_metrics: true                                # Evaluation-only local ground truth.
+  surface_metrics_interval: 1                          # Record local metrics each validation epoch.
+  surface_visualization: "none"                        # Avoid galleries for every sweep candidate.
+  faithfulness_audit: true                             # Deletion/insertion controls; regional audits remain unavailable.
+  evaluate_test: false                                 # Keep held-out test sealed.
+  data_workers: 4                                      # Persistent NPZ-decoding workers per Run.
+
+# Training defaults differ from this reviewed ledger; see Training.run and README section 5.3.
+# Pooling defaults: type=max, area=legacy, attention width=32/variant=simple, topk=0.05,
+# regional length=2.5 angstroms/mode=fixed/init=1.5, LSE beta=5/mode=fixed/init=5,
+# AutoPool alpha=1/mode=fixed/init=1, GeM power=1/mode=fixed/init=4,
+# MAX-MEAN weight=0.5/mode=fixed/init=0.5. Curriculum end=null, hold=0.30.
+# Lengths/beta/powers are positive (regional zero is identity); fractions/weights are in
+# (0,1] / [0,1], alpha is non-negative. Learned bounds are documented in README 5.3.
+# An inactive child is absent from the Trial; its Python default is not an active factor.
+
+seeds: [4, 7, 32, 54]  # Four paired repetitions for every finite candidate; no seed racing.
+
+sweep:  # A separate scientific question from V5a's fixed-function characterization.
+  space:  # Preserve all 79 reviewed cells; no duplicated inactive parameters.
+    pooling_type:  # Adaptive families and additional probability-space controls.
+      values: [attention, log_sum_exp, local_mean_max, linear_softmax, autopool, gem, max_mean, multiscale_regional_max]  # Eight branches.
+    pooling_area_mode:  # Point-count or represented-area weighting.
+      values: [point, area]  # Compare both measures for the six applicable families.
+      when: {pooling_type: {in: [attention, log_sum_exp, linear_softmax, autopool, gem, max_mean]}}  # Native membership.
+    attention_variant:  # Gated attention complements V5a's simple scorer.
+      values: [gated]  # Existing gated scorer; no encoder change.
+      when: {pooling_type: attention}  # Selector belongs only to attention.
+    attention_hidden_dim:  # Gated scorer width.
+      values: [16, 32, 64, 128]  # Four capacities, each with two area measures.
+      when: {pooling_type: attention}  # Eight attention candidates.
+    log_sum_exp_mode:  # Learned sharpness or a prescribed epoch schedule.
+      values: [learned, curriculum]  # Distinct parameter-learning protocols.
+      when: {pooling_type: log_sum_exp}  # Parent of the conditional LSE settings.
+    log_sum_exp_beta_init:  # Initial bounded trainable LSE beta.
+      values: [1.0, 5.0, 20.0, 80.0]  # Four learned initializations.
+      when: {log_sum_exp_mode: learned}  # Parent activation also requires LSE.
+    pooling_curriculum_end_beta:  # Target beta at the end of the linear schedule.
+      values: [10.0, 20.0, 40.0, 80.0, 160.0]  # Five prescribed targets.
+      when: {log_sum_exp_mode: curriculum}  # Not supplied to learned LSE.
+    pooling_curriculum_hold_fraction:  # Fraction of the epoch ceiling held at beta=1.
+      values: [0.0]  # Start changing at epoch 2, before patience=30 can stop the Run.
+      when: {log_sum_exp_mode: curriculum}  # No curriculum setting outside this branch.
+    regional_scale_mode:  # Adapt the existing physical smoothing length.
+      values: [learned]  # V5a already characterizes fixed lengths.
+      when: {pooling_type: local_mean_max}  # Only the regional branch.
+    regional_diffusion_scale_init:  # Initial trainable length in angstroms.
+      values: [0.5, 1.5, 3.0, 6.0]  # Four physical initializations.
+      when: {regional_scale_mode: learned}  # Absent outside learned regional pooling.
+    autopool_alpha_mode:  # Fixed or learned probability-weighting sharpness.
+      values: [fixed, learned]  # Both reviewed protocols.
+      when: {pooling_type: autopool}  # Parent selector belongs only to AutoPool.
+    autopool_alpha:  # Fixed probability-space exponential sharpness.
+      values: [0.0, 1.0, 5.0, 10.0, 20.0]  # Zero is the weighted probability mean.
+      when: {autopool_alpha_mode: fixed}  # Absent from learned AutoPool.
+    autopool_alpha_init:  # Initial bounded trainable sharpness.
+      values: [0.1, 1.0, 5.0]  # Three learned initializations.
+      when: {autopool_alpha_mode: learned}  # Absent from fixed AutoPool.
+    gem_power_mode:  # Fixed or learned generalized-mean exponent.
+      values: [fixed, learned]  # Both reviewed protocols.
+      when: {pooling_type: gem}  # Parent selector belongs only to GeM.
+    gem_power:  # Fixed probability-space generalized-mean exponent.
+      values: [1.0, 2.0, 4.0, 8.0, 16.0, 32.0]  # Mean-like to selective.
+      when: {gem_power_mode: fixed}  # Absent from learned GeM.
+    gem_power_init:  # Initial bounded trainable exponent.
+      values: [1.25, 4.0, 16.0]  # Three learned initializations.
+      when: {gem_power_mode: learned}  # Absent from fixed GeM.
+    max_mean_lambda_mode:  # Fixed or learned MAX contribution.
+      values: [fixed, learned]  # Both reviewed protocols.
+      when: {pooling_type: max_mean}  # Parent selector belongs only to MAX-MEAN.
+    max_mean_lambda:  # Fixed MAX weight; remaining weight belongs to MEAN.
+      values: [0.25, 0.5, 0.75]  # Three mixtures.
+      when: {max_mean_lambda_mode: fixed}  # Absent from learned MAX-MEAN.
+    max_mean_lambda_init:  # Initial trainable MAX contribution.
+      values: [0.25, 0.5, 0.75]  # Three learned initializations.
+      when: {max_mean_lambda_mode: learned}  # Absent from fixed MAX-MEAN.
+
+# Native sweep defaults and condition semantics are the same as in V5a; no reference is imposed:
+# this distinct adaptive/control Study has no MAX cell, so a MAX reference would be invalid.
+# Branch counts: gated attention=8, adaptive LSE=18, learned regional=4, linear softmax=2,
+# AutoPool=16, GeM=18, MAX-MEAN=12, multiscale regional MAX=1.
+# Total: 79 candidates x 4 seeds = 316 required Runs in one Study.
+# Curriculum retains epochs=500/patience=30. End beta is a schedule target, not a promise that
+# early-stopped Runs reach it; inspect recorded pooling_beta and the selected checkpoint.
+
+objective:  # Unchanged development utility, never held-out test performance.
+  metric: val_wisdom_hpo_score  # Existing protein/surface/coupling utility.
+  mode: max  # Larger utility is better.
+  range: [0.0, 1.0]  # Known bounded scale.
+  practical_margin: 0.015  # Smaller differences are practically negligible.
+
+# Objective requires metric; mode defaults to max; range/practical_margin are optional.
+# Keep the existing utility and 0.015 margin; analysis never changes selection/pruning.
+
+resources:  # One enclosing allocation for this complete Study, not one per family.
+  gpu: 2  # Match the two-GPU ctgpgpu12 target.
+  cpu: 36  # Shared host decoding/orchestration budget.
+  memory: 96GiB  # Shared host-memory ceiling.
+  time: 168h  # Scheduler wall-time ceiling for the enclosing allocation.
+
+# Resource defaults: cpu=1, gpu=0, processes=1; memory/gpu_memory/storage=0, time=null.
+# Counts are non-negative (cpu/processes >= 1, processes <= cpu); time must be positive. GPU packing is native
+# automatic planning; no runs_per_gpu, max_parallel, or hard-coded VRAM reservations.
+
+execution:  # Explicit logical budget, independently of the scheduler's allocation ceiling.
+  max_time: 168h  # Stop dispatching new Runs after seven days; coverage may be incomplete.
+
+# Execution defaults: max_time/max_runs/max_parallel/runs_per_gpu=null, failure_retries=1.
+# A time budget does not grant extra scheduler time or guarantee full sweep completion.
+# Omit max_time for an unbounded logical budget; resources.time still limits the allocation.
+
+analysis:  # Small native overrides of Training.analysis_profile for this entire Study.
+  metrics:  # Priorities order research interest only; objectives remain unchanged.
+    val_surface_attention_positive_macro_auprc: {priority: 75}  # Attention versus local evidence.
+    val_faithfulness_deletion_top_minus_random_10: {priority: 65}  # Equal-area deletion control.
+    val_faithfulness_insertion_top_minus_random_10: {priority: 65}  # Equal-area insertion control.
+    train_cuda_peak_gib: {priority: 35}  # Epoch memory, not the whole-Run maximum.
+
+# Analysis defaults to {}; metrics merge with the class profile. Priority defaults to 0 in LF;
+# the central WISDOM profile defines 40/55/55/15 for these four metrics. Families, optional
+# questions, discovery, and curve/outcome semantics remain owned by the shared native profile.

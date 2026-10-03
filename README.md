@@ -47,11 +47,12 @@ gradient or checkpoint choice.
 - [5. Trainable WISDOM models](#5-trainable-wisdom-models)
   - [5.1. Dataset index and graph batching](#51-dataset-index-and-graph-batching)
   - [5.2. Semantic adaptive architecture and WISDOMv1](#52-semantic-adaptive-architecture-and-wisdomv1)
-  - [5.3. Pre-freeze pooling sanity check and localization diagnostics](#53-pre-freeze-pooling-sanity-check-and-localization-diagnostics)
+  - [5.3. Pooling characterization: fixed curves and adaptive families](#53-pooling-characterization-fixed-curves-and-adaptive-families)
   - [5.4. Deferred surface-encoder screen](#54-deferred-surface-encoder-screen)
   - [5.5. Training, evaluation, and artifacts](#55-training-evaluation-and-artifacts)
   - [5.6. Post-HPO sparse concept discovery](#56-post-hpo-sparse-concept-discovery)
   - [5.7. Formal roadmap and decision gates](#57-formal-roadmap-and-decision-gates)
+  - [5.8. Research analysis: finding useful evidence](#58-research-analysis-finding-useful-evidence)
 - [6. Bibliography](#6-bibliography)
 
 ## 1. Quick start
@@ -182,12 +183,19 @@ The `[tool.lambdaforge.environment]` table in [pyproject.toml](pyproject.toml) d
 means a command-line program installed outside Python's wheel mechanism. The declaration is part of
 the managed-environment identity; it is not repeated in each experiment YAML.
 
-WISDOM requires LambdaForge `>=0.14.0` and deliberately sets no upper version bound while the
+WISDOM requires LambdaForge `>=0.16.0` and deliberately sets no upper version bound while the
 project follows the current framework release. Every executable action is a direct `Work` subclass with one
 `run()` method. LambdaForge is the source of truth for typed file/dataset resolution, bounded maps,
 safe JSON checkpoints, progress, immutable dataset publication, the placement Registry, logs,
 resources, seeds, search, and run management. WISDOM remains responsible for protein
 interpretation, scientific geometry, exact NPZ/sidecar validation, and protein visualization.
+
+Both WISDOM's protein viewer and LambdaForge's `analysis-report` extra use Plotly `>=7,<8`.
+An older WISDOM requirement of `plotly<7` cannot coexist with that extra's `plotly>=7` requirement;
+this is a package-dependency conflict, not a cluster or training failure. After updating the
+checkout, rerun `./install.sh` and then `lf clusters bootstrap <cluster> --project .` to rebuild
+the managed environment from the corrected requirements. Do not bypass the resolver with
+`--no-deps` or edit cached wheels/metadata; those actions would hide the incompatible environment.
 
 ### 2.2. Automated Conda installation
 
@@ -206,7 +214,7 @@ unexpected LambdaForge directory. In order, it:
 2. creates the `wisdom` environment, or offers to update an existing one with `--prune`;
 3. reuses `./LambdaForge` or `../LambdaForge`, asks for another checkout, or clones the official
    repository;
-4. verifies that LambdaForge satisfies the minimum version `>=0.14.0`;
+4. verifies that LambdaForge satisfies the minimum version `>=0.16.0`;
 5. removes obsolete editable `wisdom-protein` metadata from older releases, then installs
    LambdaForge and `wisdom[dev]` in editable mode inside the Conda environment;
 6. optionally checks Python, dependency consistency, LambdaForge, MMseqs2, Foldseek, Biopython, and
@@ -273,7 +281,7 @@ failing executable and prints the exact local and managed-cluster remediation co
 `Preprocessing` Work does not require MMseqs2 or Foldseek: it consumes the three already fixed
 manifests and uses Python/Gemmi for geometry, so native tools are checked only before selection.
 
-LambdaForge 0.14 imports only classes derived from `Work`; function targets and the former
+LambdaForge 0.15 imports only classes derived from `Work`; function targets and the former
 `Task`/`TaskContext`/`PreprocessingTask` stack no longer exist. `Selection` uses
 `self.resume_map` for dependency-aware record reuse, and `Preprocessing` uses the same service with
 WISDOM validators for universal NPZs and DNA sidecars. Both use managed cache files for coordinates,
@@ -464,7 +472,7 @@ content; a **placement** is a verified physical copy of that version on one mach
 tracks those placements. The YAML requests resources, while `workers` limits concurrent records;
 reserving 36 CPUs does not by itself create 36 workers.
 
-LambdaForge 0.14 has no `lf run --step` option. Edit the first `skip` parameter of each step in the
+LambdaForge 0.15 has no `lf run --step` option. Edit the first `skip` parameter of each step in the
 single YAML. The checked-in configuration has `true/false/true`: Selection forwards the declared
 `data/dna/design` directory, Preprocessing builds and publishes version 6, and Visualization does
 nothing. To render immediately after a successful publication, set only `visualize.skip: false`;
@@ -1185,7 +1193,7 @@ with np.load("protein.npz", allow_pickle=False) as archive:
     print(json.loads(str(archive["metadata_json"].item())))
 ```
 
-LambdaForge 0.14 deliberately concentrates on Work execution and immutable DatasetVersions; it has
+LambdaForge 0.15 deliberately concentrates on Work execution and immutable DatasetVersions; it has
 no built-in molecular point-cloud/mesh viewer. The commands above inspect the dataset contract and
 bytes, while WISDOM's third Work performs the domain-specific 3D interpretation.
 
@@ -2087,7 +2095,7 @@ Workers still take records dynamically; this order merely avoids leaving one exc
 protein as a serial tail after the other workers have become idle. It does not change member order
 in the report or any scientific array.
 
-In LambdaForge 0.14, each sequence step's resource block determines its absolute reservation:
+In LambdaForge 0.15, each sequence step's resource block determines its absolute reservation:
 
 ```bash
 lf run experiments/dna_preprocess.yaml --on citius-ctgpgpu12
@@ -2237,7 +2245,7 @@ known contacts after prediction, but they are not experimentally validated sites
 ### 5.1. Dataset index and graph batching
 
 Universal geometry itself has no experimental label. The design/annotation flow adds those
-meanings when it publishes the managed dataset. In LambdaForge 0.14, `WisdomDataset` reads the
+meanings when it publishes the managed dataset. In LambdaForge 0.15, `WisdomDataset` reads the
 canonical `index.jsonl`: each member supplies an explicit `split` partition, a binary
 `dna_binding` target, `universal_npz` and `dna_annotation` assets, and optional dilution names such
 as `replicate-00/train-25`. No filename is interpreted as a label and no random split is invented. The older
@@ -2778,89 +2786,187 @@ diagnostic, not an HPO objective. LambdaForge also records the total parameter c
 parameter count and the number of semantic gates; the latter two should remain tiny compared with
 the predictor.
 
-### 5.3. Pre-freeze pooling sanity check and localization diagnostics
+### 5.3. Pooling characterization: fixed curves and adaptive families
 
-**Pooling** is the operation that combines all point-level values belonging to one protein into one
-protein-level value. The sanity check asks whether a pooling rule other than MAX can preserve
-classification while depending less on one accidental extreme point. Atomic features, the
-two-branch graph encoder,
-learned atom transfer, projection, DiffusionNet, and the local output layer remain fixed; only pooling changes.
+**Pooling** turns the local evidence at all surface points of one protein into one protein score.
+An isolated high value can make MAX classify a protein correctly while locating its binding region
+poorly. V5 therefore asks which aggregation families classify **and** localize well, not just which
+one obtains the largest global score.
 
-The check fixes every baseline capacity, physical-budget, optimizer and `gate_lambda` value. It creates
-fresh gates for each candidate, so the semantic selection can adapt to the aggregation rule, and
-varies only the pooling family and parameters intrinsic to that family. `local_mean_max` first
-diffuses scalar local logits and then takes MAX; this is a pooling hypothesis, not another learned
-surface encoder.
+V5a and V5b keep the existing V5 backbone ledger unchanged: atomic encoder, atom-to-surface
+transfer, DiffusionNet, local output layer, initialization/optimizer profiles, data and gate penalty.
+Each candidate trains fresh weights and gates with the same four seeds **4, 7, 32, 54**. Only its
+pooling rule and applicable pooling parameters vary. Training still uses protein BCE and the existing
+gate penalty; surface labels are evaluation-only, the head stays `single`, and test stays sealed.
+These are complete finite sweeps: no competitive curve pruning or seed racing. The ordinary
+30-epoch validation patience remains active; completing a candidate does not mean forcing 500 epochs.
 
-MAX and attention use LambdaForge's sparse indexed poolers; the area-weighted mean uses its sparse
-`Scatter` reduction. Top-k and log-sum-exp compact only scalar logits into `X[B,N_max,1]`, where
-`N_max` is the largest point count in that batch, and a Boolean mask excludes padding. Atomic
-topology stays sparse; no surface adjacency or fake padded edges are created.
-
-Global attention uses LambdaForge `SparseAttentionPooling`. Let `h_p∈R^D` be the learned
-representation of point `p`, and let `l_p` be its separate positivity logit. Attention computes
+**Point measure versus represented area.** Let `P_b` be protein `b`'s points, `N_b` their number,
+`l_p` a point's positivity logit, and `A_p>0` its represented area in Å². A logit is an unrestricted
+real score; its sigmoid `p_p=1/(1+exp(-l_p))` is a probability. Define the normalized measure
+`m_p` used by a pooler:
 
 ```math
-s_p=\mathbf v^\top\tanh(\mathbf V h_p),
-\qquad
-\alpha_p=\frac{e^{s_p}}{\sum_{q\in P_b}e^{s_q}},
-\qquad
-L_b=\sum_{p\in P_b}\alpha_p l_p.
+m_p=\begin{cases}
+1/N_b & \text{point},\\
+A_p/\sum_{q\in P_b}A_q & \text{area}.
+\end{cases}
 ```
 
-Matrix `V` projects the representation and vector `v` produces one score. Weights `α_p` are
-positive and sum to one within a protein. They
-mean “importance for this bag decision”; they are not the same quantity as local positivity `l_p`
-and must not be presented automatically as a functional-site explanation.
+Both measures sum to one per protein. Point pooling gives every sample equal influence; area pooling
+gives equal influence to equal surface area even when sampling density varies. Neither is assumed
+better: `pooling_area_mode: point | area` is an explicit ablation. The compatibility default
+`legacy` keeps area-weighted mean and point-based attention, Top-K and LSE. MAX has no meaningful
+area variant. Regional diffusion already uses geometric mass, so it also has no duplicate area flag.
 
-The controlled V5 interface compares these rules:
+**Fixed logit-based rules (V5a).**
 
-| YAML value | Implementation | Protein logit and intended behavior |
+| Family | Calculation | What the parameter controls |
 |---|---|---|
-| `max` | `SparseMaxPooling` | Exact v1 existential control: `L_b=max_p l_p`. |
-| `mean` | `Scatter.sum` from LambdaForge | Area-weighted mean: `L_b=sum_p w_p l_p/sum_p w_p`. |
-| `attention` | `SparseAttentionPooling` | Learned normalized importance from `h_p`, applied to positivity logits. |
-| `topk` | `FractionalTopKMeanPooling` | Mean of the largest `ceil(f|P_b|)` logits, with `f` from 1% to 20%. |
-| `local_mean_max` | Fixed spectral diffusion plus `SparseMaxPooling` | Diffuse scalar logits over a physical length scale, then take global MAX. |
-| `log_sum_exp` | normalized `LogSumExpPooling` | `L_b=β^-1 log(|P_b|^-1 sum_p exp(βl_p))`, a smooth-max control. |
+| MAX | `L_b=max_p l_p` | Any one strong point can determine the protein decision. |
+| Mean | `L_b=sum_p m_p l_p` | Uses the entire surface, with point or area measure. |
+| Attention | `L_b=sum_p alpha_p l_p` | Learns which point embeddings matter to the protein decision. |
+| Top-K | Mean evidence in the highest-scoring fraction | `topk_fraction=f` controls how much surface is retained. |
+| Local-mean-MAX | Heat diffusion followed by MAX | `regional_diffusion_scale=ell` is a physical length in Å. |
+| LSE | Normalized log-sum-exp | `log_sum_exp_beta=beta>0` controls concentration near the maximum. |
 
-For the regional hypothesis, let `ell` be a physical diffusion length in ångströms and set
-`t=ell^2`. Using the same mass `A`, eigenvectors `Phi`, and eigenvalues `lambda_q` as v1 gives
+For attention, `h_p` is a point embedding. The simple score uses an affine projection `V`, tanh
+(a bounded activation), and a learned projection vector `w`. The gated variant also uses an affine
+projection `U` and multiplies by sigmoid gates component by component, denoted `⊙`:
 
 ```math
-\widetilde{\mathbf l}=\Phi
-\operatorname{diag}(e^{-\ell^2\lambda_q})
-\Phi^\top A\mathbf l,
-\qquad
-L_b=\max_{p\in P_b}\widetilde l_p.
+s_p^{simple}=w^\top\tanh(Vh_p),\qquad
+s_p^{gated}=w^\top[\tanh(Vh_p)\odot\sigma(Uh_p)],\qquad
+\alpha_p=\frac{m_p e^{s_p}}{\sum_{q\in P_b}m_qe^{s_q}}.
 ```
 
-This is heat diffusion with a physically interpretable scale rather than an arbitrary number of
-graph hops. An isolated high-frequency spike is attenuated, while a broad coherent region survives.
-The operator is fixed and introduces no extra learned encoder, so pooling remains the only V5 factor.
-Tests cover constant preservation, the near-zero-time limit, smoothing, and batch isolation.
+The affine maps include biases and retain the configured attention dropout. Area enters as a
+measure prior, equivalently adding `log(m_p)` before softmax. The attention weights describe
+**importance for classification**, not local binding probabilities; `surface_logits` remain the
+local prediction. Simple attention preserves LambdaForge's scorer and checkpoint keys. Gated
+attention is the controlled additional hypothesis inspired by [Ilse et al.](https://proceedings.mlr.press/v80/ilse18a.html).
 
-Log-sum-exp subtracts its maximum internally for numerical stability and normalizes by point count.
-Fractional top-k always selects at least one point. Noisy-OR remains absent because treating thousands
-of points as independent Bernoulli variables makes `1-product(1-p)` saturate near one without a
-justified physical independence model.
+Point Top-K keeps the largest `ceil(f*N_b)` logits and takes their arithmetic mean, preserving
+the old rounding behavior. Area Top-K instead sorts logits descending and accumulates normalized
+area until exactly `f` is covered. If the preceding area is `C`, the boundary point contributes
+only `min(m_p,max(f-C,0))`. The retained-area-weighted logit sum is divided by `f`. Splitting a
+point into identical copies with half the area leaves this result unchanged. With uniform areas,
+point and area Top-K agree when `f*N_b` is integral; otherwise exact-area coverage necessarily
+differs from the legacy ceiling. This is an intentional discretization difference, not a bug.
 
-The pooling-capable internal model implementation exposes maps in the original NPZ point order:
+LSE uses the same measure:
 
-- `surface_logits[M]` and `surface_probabilities[M]=sigmoid(surface_logits)`;
-- `localization_scores[M]`, an area-aware distribution
-  `q_p = w_p exp(l_p) / sum_q(w_q exp(l_q))` normalized separately per protein;
-- `positive_area_fraction[B]`, the normalized represented area with local probability at least 0.5;
-- `maximum_surface_probability[B]`;
-- `localization_entropy[B]`, equal to `-sum(q_p log q_p)/log(|P_b|)` for bags with more than one
-  point. Values near zero indicate concentration and values near one indicate a diffuse map.
+```math
+L_b=\frac{1}{\beta}\log\!\left(\sum_{p\in P_b}m_p e^{\beta l_p}\right).
+```
 
-These diagnostics describe the model's own map; they are not local labels and are not added to the
-loss. In particular, `localization_scores` are a common comparison scale, not necessarily the exact
-internal weight of every pooler. These training-time diagnostics do not consume point labels. The
-validation evaluator compares the map with immutable DNA sidecars. That comparison never changes
-the loss or the checkpoint chosen inside a Run, but its aggregate results do contribute to the
-architecture-level HPO score described in Section 5.5.
+Small beta approaches the corresponding mean; large beta approaches MAX. WISDOM subtracts the
+maximum before exponentiation and keeps beta as a tensor when learned. Area and point LSE agree
+for uniform areas. Temperature is not a physical length: its effect depends on the magnitude of
+the logits, so training records their mean absolute value and standard deviation.
+
+Regional pooling uses the existing mass matrix `A`, mass-orthonormal eigenvectors `Phi`, and
+Laplacian eigenvalues `lambda_q` (Å⁻²). At length `ell`, heat time is `ell²`:
+
+```math
+\widetilde{\mathbf l}=\Phi\operatorname{diag}(e^{-\ell^2\lambda_q})\Phi^\top A\mathbf l,
+\qquad L_b=\max_p\widetilde l_p.
+```
+
+This attenuates spatially rapid changes before choosing a region. Positive lengths use the stored
+truncated spectral approximation; **float length zero bypasses it and reproduces MAX exactly**.
+A learned length retains autograd through the exponential. This changes aggregation, not DiffusionNet.
+
+**Adaptive and additional families (V5b).** Probability-space poolers below first compute `p_p`
+from the local logits, then convert the aggregate probability `P_b` back to a safely clipped logit
+`log(P_b/(1-P_b))`. BCEWithLogits therefore keeps its existing interface. Mean of probabilities
+is not mean of logits: sigmoid is nonlinear, and the distinction is intentional.
+
+| Family | Rule | Fixed / learned parameter |
+|---|---|---|
+| Gated attention | Attention formula above | Width, point/area measure; scorer weights learned as usual. |
+| Adaptive LSE | Same normalized LSE | Beta learned or scheduled from 1 to a fixed endpoint. |
+| Learned regional | Same diffusion plus MAX | One learned physical heat length. |
+| Linear softmax | `P_b=sum(m*p²)/sum(m*p)` | No scalar parameter; denominator protected numerically. |
+| AutoPool | `w_p ∝ m_p exp(alpha*p_p); P_b=sum(w*p)` | Nonnegative alpha: zero is probability mean, increasing alpha emphasizes peaks. |
+| GeM | `P_b=(sum(m*p^r))^(1/r)` | Power r ≥ 1: one is probability mean, increasing r approaches probability MAX. |
+| MAX–MEAN | `L_b=lambda*max(l)+(1-lambda)*sum(m*l)` | A convex logit-space mixture; endpoints recover the controls. |
+| Multiscale regional | Convex mixture of regional protein logits | Only global softmax weights on fixed lengths 0, 1.5, 3, 6, 12 Å. |
+
+AutoPool follows the aggregation idea of [McFee et al.](https://arxiv.org/abs/1804.10070), restricted
+here to nonnegative alpha. GeM adapts the generalized mean used by
+[Radenović et al.](https://arxiv.org/abs/1711.02512) to probabilities. These are WISDOM hypotheses,
+not exact reproductions of the original full models. GeM evaluates in log-probability space to avoid
+underflow of `p^r`. Float32 reductions and machine-epsilon probability clipping prevent infinite
+global logits; gradients can legitimately vanish at saturation.
+
+Learned scalars use an unconstrained parameter `theta` passed through sigmoid. Beta, heat length
+and GeM power interpolate in log coordinates between their bounds; alpha and the mixture coefficient
+interpolate in ordinary coordinates. They never leave their allowed intervals, use the ordinary
+AdamW optimizer, and serialize in `state_dict`.
+
+| Public settings | Learned domain | Initializations compared |
+|---|---|---|
+| `log_sum_exp_mode=learned`, `log_sum_exp_beta_init` | beta ∈ [0.25, 200] | 1, 5, 20, 80 |
+| `regional_scale_mode=learned`, `regional_diffusion_scale_init` | ell ∈ [0.05, 12] Å | 0.5, 1.5, 3, 6 Å |
+| `autopool_alpha_mode=learned`, `autopool_alpha_init` | alpha ∈ [0, 50] | 0.1, 1, 5 |
+| `gem_power_mode=learned`, `gem_power_init` | r ∈ [1, 32] | 1.25, 4, 16 |
+| `max_mean_lambda_mode=learned`, `max_mean_lambda_init` | lambda ∈ [0, 1] | 0.25, 0.5, 0.75 |
+
+Initial values lie strictly inside the interval. Fixed modes use `log_sum_exp_beta`,
+`regional_diffusion_scale`, `autopool_alpha`, `gem_power`, or `max_mean_lambda`.
+`log_sum_exp_mode=curriculum` starts beta at 1, then increases it linearly toward
+`pooling_curriculum_end_beta`. The Python hold default is 30% of the epoch ceiling; with
+500 epochs this would delay the first change until epoch 152, beyond patience 30. V5b therefore
+sets `pooling_curriculum_hold_fraction=0`: beta first changes at epoch 2. Ordinary patience may
+still stop before the endpoint. The scheduled beta is checkpointed, so restoring the best epoch restores its
+actual pooling behavior as well. Learned scalar values, fixed values and scale-bank weights are
+logged each epoch and written to `evaluation.json` as `pooling_parameter_trajectory` and
+`selected_pooling_parameters`. The constructor settings remain in `model_parameters`.
+
+**Coverage and decision.** V5a has 56 candidates: MAX 1, mean 2, attention 10, Top-K 16,
+regional 9 and LSE 18. Four seeds give **224 Runs**. V5b has **79 candidates / 316 Runs**:
+gated attention 8, adaptive LSE 18, learned regional 4, linear softmax 2, AutoPool 16, GeM 18,
+MAX–MEAN 12 and multiscale regional 1. Each YAML is **one Study**, not sequential family steps.
+Native `when: {pooling_type: {in: [...]}}` activates the area measure only for applicable families;
+equality conditions activate individual family parameters and fixed/learned/curriculum children.
+Inactive parameters are absent from the candidate, not filled with Python defaults. V5a uses
+the unique MAX cell as its paired reference; V5b has no MAX cell and imposes no reference.
+Both retain seeds `[4, 7, 32, 54]` and the same frozen backbone/objective. LambdaForge fixed sweeps reject adaptive
+`trials`/`proposal_pool_size` controls, so counts are verified by its planner rather than
+invented search budgets. The old `wisdom_v5.yaml` is historical, not authoritative.
+
+V5a asks how fixed aggregation rules behave; V5b asks how adaptive rules and additional controls
+behave. They remain distinct Studies with no automatic winner handoff. Their common native
+`Training.analysis_profile` supplies metric meanings and questions; YAML only adjusts four metric
+priorities. Each requests two GPUs, 36 CPUs, 96 GiB RAM and `resources.time: 168h` for the entire
+Study. Automatic GPU packing remains LambdaForge's responsibility. Previously six/eight sequential
+168-hour allocations meant ceilings of 42/56 days, not predicted runtimes. Each unified allocation
+now has a seven-day scheduler ceiling. Separately, `execution.max_time: 168h` stops new Run dispatch
+after seven days; it does not extend scheduler time or guarantee that all 224/316 Runs finish.
+A budget-exhausted sweep is incomplete evidence, not complete coverage.
+
+For each family, review the best fixed and learned representatives, point/area differences, paired
+seed variation, G, S, coupling, regret, faithfulness and runtime (Section 5.5 defines these metrics).
+A family is dominated only when another is meaningfully no worse on the reviewed dimensions and
+better on at least one, with uncertainty considered. Keep roughly **2–4 nondominated families**;
+do not collapse the result into a single winner. Four seeds are a controlled comparison, not a
+guarantee of statistical certainty. V6's loss spaces are unchanged; adapting V6 to that shortlist
+is a subsequent task. If beta 160 still improves over 80, report that the plateau remains unresolved
+rather than extending the grid mid-study.
+
+Deletion/insertion faithfulness is unavailable for both regional families because removing points
+would invalidate their fixed operator. Missing values are not zeros and are not evidence of failure.
+No learned Top-K relaxation or naive Noisy-OR is introduced. The latter would saturate with thousands
+of supposedly independent points; the former would introduce another temperature and question.
+
+Poolers operate independently per protein with indexed LambdaForge scatter reductions.
+Top-K sorts in O(M log M); other scalar reductions are linear in point count, and regional diffusion
+uses the existing bounded spectral basis. No M×M distance matrix or padded embedding tensor is
+created. Local maps retain the original NPZ point order. `localization_scores` remain a common
+area-aware diagnostic distribution, not every family's internal weight; `positive_area_fraction`,
+`maximum_surface_probability` and `localization_entropy` summarize the map without providing
+training targets. Validation compares that map with immutable DNA sidecars only for development.
 
 ### 5.4. Deferred surface-encoder screen
 
@@ -2896,7 +3002,7 @@ controls rather than replacements for the invariant default.
 
 ### 5.5. Training, evaluation, and artifacts
 
-LambdaForge 0.14 resolves the immutable dataset, expands HPO values and seeds, assigns independent
+LambdaForge 0.15 resolves the immutable dataset, expands HPO values and seeds, assigns independent
 Runs to GPU slots, captures metrics/artifacts, and ranks Runs by the declared validation objective. The public
 `Training.run()` method owns the transparent PyTorch loop: it creates explicit train/validation/test
 loaders, applies `WisdomCollator`, trains with AdamW and binary cross-entropy, and preserves the
@@ -2926,7 +3032,7 @@ explicitly; automatic compatibility would hide a scientific change.
 | `V1a`–`V1b` | Measure baseline variance and separate its two random sources without HPO. |
 | `V2`–`V3` | Select initialization and optimizer stability independently so both winners compose. |
 | `wisdom_v4.yaml` | Search the complete fixed-MAX core widths, depths, neighbourhoods and regularization. |
-| `wisdom_v5.yaml` | Check conditional pooling families before weak local supervision. |
+| `wisdom_v5a.yaml`, `wisdom_v5b.yaml` | Characterize fixed/adaptive pooling families and retain a shortlist before weak local supervision. |
 | `V6a`–`V6c` | Add weak-loss families sequentially and only when the previous decision justifies them. |
 | `wisdom_v6d.yaml` | Tune the joint contribution of credible negative, regional, and smoothing losses. |
 | `V7`–`V8` | Compare head relationships and then isolated architecture spikes. |
@@ -2944,13 +3050,24 @@ V3 tests `ema_0999`. The older combined `stability_profile` is accepted only to 
 archived YAMLs and cannot be mixed with either new selector.
 
 The baseline uses all ten ordered seeds `[4,7,32,54,65,94,109,124,142,167]`; none may be pruned.
-Finite one-factor sweeps (V2, V3, V5, V6a–V6c, V7, and V8) also disable curve pruning and set
-`min_seeds` equal to their complete four- or five-seed list. LambdaForge therefore executes every
-candidate on the same paired seeds. They retain `strategy: adaptive` only because its child scheduler
-can run trials concurrently; LambdaForge's literal `strategy: exhaustive` executes members serially.
-The multidimensional searches V4, V6d, and V9 keep probability-based pruning and seed racing because
-their purpose is efficient hyperparameter optimization. Their finalists are re-evaluated on fresh
-confirmation seeds that did not guide the search.
+Finite one-factor comparisons (V2, V3, V5, V6a–V6c, V7, and V8) use LambdaForge 0.15's explicit
+`sweep.space`. Every authored cell is mandatory. The controller starts every cell with the same
+project seed, opens another complete shared-seed block only after the previous block finishes, and
+stops through an anytime-valid paired analysis of the authored `objective.practical_margin`. V5a/V5b
+instead fix exactly four historical paired seeds per candidate, without automatic extension. Fixed
+sweeps never use HPO curve pruning, per-cell seed racing, or winner-only confirmation. V4, V6d, and
+V9 instead use `search.goal: optimize`: LambdaForge automatically chooses proposals, replication,
+curve pruning, convergence, and disjoint confirmation seeds because their purpose is efficient
+multidimensional optimization. In both modes, omitted execution caps let the adaptive resource
+intelligence (ARI) place Runs from the allocated CPUs, GPUs, live free memory, and measured peaks.
+
+The YAMLs omit framework fields whose LambdaForge 0.15 defaults already express that policy:
+filenames provide study names, while execution concurrency, GPU-memory admission, search seeds,
+and controller stopping remain automatic. The custom mapped objective keeps `mode: max` because
+the current execution path requires it. Run
+`lf config resolve FILE` to see those concrete resolved values. V1a/V1b keep historical explicit
+seeds, and V10 keeps a deliberately fresh confirmation set, because those identities are part of
+their scientific question rather than scheduling detail.
 
 The baseline sets `negative_surface_lambda: 0.0`. A later weak-loss screen may make it positive.
 For each globally negative training protein `i`, let `l_ip` be the local logit and `a_ip` its
@@ -2981,11 +3098,12 @@ L_{V6d}=L_{BCE}+\lambda_{neg}L_{neg}+\lambda_{reg}L_{reg}
          +\lambda_D L_D+\lambda_{gate}L_{gate}.
 ```
 
-The 27 combinations are the Cartesian product of three values for each of `lambda_neg`,
-`lambda_reg`, and `lambda_D`. This is an interaction HPO rather than a one-factor sweep, so it keeps
-probabilistic pruning and seed racing, then re-evaluates the three best mixtures on four untouched
-seeds. If V6b or V6c selects a different family, its existing `*_lambda` key replaces the regional
-or Dirichlet key in `wisdom_v6d.yaml`; TV and Dirichlet are never enabled together.
+The candidate generator draws from the Cartesian product of three values for each of `lambda_neg`,
+`lambda_reg`, and `lambda_D`. This is an interaction HPO rather than a one-factor sweep, so
+LambdaForge allocates evidence adaptively, stops uncompetitive learning curves, and confirms the
+best supported mixtures on its disjoint confirmation-seed stream. If V6b or V6c selects another
+family, its existing `*_lambda` key replaces the regional or Dirichlet key in
+`wisdom_v6d.yaml`; TV and Dirichlet are never enabled together.
 
 WISDOM is intended to produce a meaningful surface map, not merely a correct protein label. The
 development protocol therefore records three distinct quantities. `G` measures protein
@@ -3251,9 +3369,8 @@ not produce this final report because their checkpoint is not an eligible comple
 Within one training, `epochs: 500` is a safety ceiling: the best validation checkpoint is retained,
 and `patience: 30` stops after 30 validation epochs without a `G` gain of at least
 `minimum_delta: 0.001`. This ordinary plateau rule remains active in the seed baseline, but there is
-no cross-candidate HPO pruning because the file has no `search` section. The separate pooling sanity
-YAML does use probability racing and cooperative early stopping; those policies reduce screening
-cost but must not be used to estimate the unfiltered baseline seed distribution.
+no cross-candidate HPO pruning because the file has no `search` section. The V5a/V5b pooling sweeps
+also disable competitive pruning and seed racing; ordinary within-Run patience remains active.
 
 Every Run publishes structured metrics each epoch and emits one compact live line prefixed with its
 trial index and seed. The line includes training and validation loss, validation AUPRC, AUROC,
@@ -3292,13 +3409,10 @@ block. A heat time `t` is measured in square ångströms and corresponds to a ch
 of roughly `sqrt(t)` ångströms; comparing both distributions shows whether different initial
 multiscale schedules converge to similar physical scales.
 
-The pooling sanity check enumerates MAX, mean, attention, top-k mean, diffusion/global-MAX, and normalized log-sum-exp.
-Every pooling receives the same first seed, and adaptive racing assigns further seeds according to
-the shared evidence rule above. Its frozen small grid uses top-k fractions 1%, 5%, and 10%; one attention
-width of 32; regional lengths 1.5, 2.5, and 5 Å; and log-sum-exp beta 1, 5, and 10. LambdaForge
-activates each parameter only for its corresponding pooling, so the study contains 12 meaningful configurations rather than meaningless Cartesian-product
-duplicates. This pooling study is now the immediate priority because MAX can classify a positive
-protein from one extreme point even when the surrounding functional region is poorly localized.
+The authoritative pooling studies are V5a (56 fixed candidates) and V5b (79 adaptive/additional
+candidates), defined in Section 5.3. Every candidate receives the same four seeds. Review the
+family curves and learned-scalar trajectories alongside localization and global metrics; these
+studies nominate a shortlist, not a universal pooling winner.
 
 The training callable receives `{dataset: wisdom-dna-reduced@6}`, not a machine-specific absolute
 path. LambdaForge
@@ -3332,9 +3446,9 @@ lf clusters set citius-ctgpgpu12 gpu_access.mode shared
 lf clusters show citius-ctgpgpu12
 ```
 
-`shared` does not change the scientific YAML or remove `resources.gpu: 2`: that field still tells
-the adaptive controller how many GPU slots to create. It only allows those slots on devices already
-used by non-LambdaForge processes. LambdaForge continues coordinating its own Jobs. Use this mode
+`shared` does not change the scientific YAML or remove `resources.gpu`: that field is the outer GPU
+reservation. It only permits admission on devices already used by non-LambdaForge processes.
+LambdaForge 0.15 then derives child-Run packing from live capacity. Use this mode
 only when sharing is intentional and GPU memory is sufficient; `auto` restores conservative
 exclusive admission on this non-SLURM host.
 
@@ -3350,6 +3464,7 @@ lf run experiments/wisdom_v1a.yaml --dry-run
 
 lf validate experiments/wisdom_v4.yaml
 lf explain experiments/wisdom_v4.yaml
+lf config resolve experiments/wisdom_v4.yaml
 lf run experiments/wisdom_v4.yaml --dry-run
 ```
 
@@ -3372,7 +3487,8 @@ lf run experiments/wisdom_v1b.yaml
 lf run experiments/wisdom_v2.yaml
 lf run experiments/wisdom_v3.yaml
 lf run experiments/wisdom_v4.yaml
-lf run experiments/wisdom_v5.yaml
+lf run experiments/wisdom_v5a.yaml
+lf run experiments/wisdom_v5b.yaml
 lf results analyze EXECUTION_ID
 ```
 
@@ -3569,7 +3685,7 @@ not demonstrated biological concepts. Later studies may compare them with physic
 external contact ground truth, perturbations, patches, or prototypes, but this implementation does
 not use those signals to create or select them.
 
-LambdaForge 0.14 requires a named downstream output to come from exactly one Run. An adaptive V1
+LambdaForge 0.15 requires a named downstream output to come from exactly one Run. An adaptive V1
 HPO expands to many Runs, so there is intentionally no ambiguous `{from: hpo.best-model}` shortcut.
 First inspect the terminal study, identify its officially selected Run, and inspect that Run's
 output metadata:
@@ -3634,7 +3750,7 @@ post-freeze data contract.
 |---|---|---|
 | V2 | Do physically equivalent views contain complementary or reliability information? | Correspondence/consistency primitives exist; view generation, shortcut/identifiability checks, and discretization-invariance tests wait for frozen V1. |
 | V3 | Can view sampling during training absorb the useful V2 invariance? | Run only if V2 shows oracle headroom, useful aggregation, or error-predictive disagreement. |
-| V4 | Which conditional pooling family is best on the frozen backbone? | `wisdom_v5.yaml` exercises the interface only; formal comparison must repeat it after freezing V1 and add the future area-aware probabilistic link. |
+| V4 | Which pooling families remain competitive on the frozen backbone? | `wisdom_v5a.yaml`/`wisdom_v5b.yaml` characterize families before freezing V1; formal follow-up can repeat that comparison after the freeze. |
 | V5 | Which surface encoder improves quality at acceptable compute? | Encoder classes exist, but no current YAML exercises them; formal comparison waits for the frozen prior backbone. |
 | V6 | Does validated self-supervision support safe protein-specific test-time training? | Not enabled until an SSL loss predicts surface quality or view consistency and a probability-change guardrail is calibrated. |
 | V7 | Does shared-weight recurrent refinement help? | Not enabled until one useful refinement operation exists and is stable across trained unroll counts. |
@@ -3643,6 +3759,108 @@ The final leave-one-phenomenon-out experiment also remains a real data requireme
 software switch. DNA binding supplies only one phenomenon; testing transfer requires several
 separately curated phenomena with hidden local GT. Implementing a random substitute would not test
 the claim in the master plan.
+
+### 5.8. Research analysis: finding useful evidence
+
+A study can record hundreds of values. A high protein score does not necessarily mean that its
+surface highlights the DNA-contact region, and a memory measurement is not an accuracy measure.
+WISDOM therefore describes the meaning of its metrics to **LambdaForge Research Analysis**: the
+framework organizes observations, detects missing or constant measurements, compares candidates,
+and proposes relationships worth inspecting. WISDOM does not implement a second discovery engine.
+
+`Training.analysis_profile`, built by `WisdomAnalysisProfile`, supplies one central declaration
+for every training experiment. It changes interpretation and browsing, not the loss, checkpoint
+rule, search space, seeds, pruning, or objective weights. LambdaForge 0.16 is required for this
+integration. The profile is resolved before execution and stored in `analysis-semantics.json`;
+changing a class or YAML later does not reinterpret an already recorded study silently.
+
+| Evidence | Main recorded names | What to look for |
+|---|---|---|
+| Protein quality | `val_auprc`, `val_auroc`, `val_mcc`, `val_balanced_accuracy` | Ranking quality and thresholded decisions on validation proteins. MCC is unavailable when its denominator is zero. |
+| Localization | `val_surface_positive_macro_auprc`, `val_surface_positive_macro_auroc` | Whether local scores recover the interface, averaging equally over evaluable positive proteins. `surface_micro_*` instead pools points and gives larger clouds more influence. |
+| Global/local agreement | `val_global_surface_spearman`, `val_surface_selection_regret` | Whether global and local quality improve together over epochs, and how much localization is lost by global-only checkpoint selection. |
+| Selection decomposition | `val_wisdom_hpo_global`, `val_wisdom_hpo_surface`, `val_wisdom_hpo_coupling`, `val_wisdom_hpo_score` | The existing G, S, C, W quantities defined in §5.5. Their formulas are dependencies, not independent scientific discoveries. |
+| Negative controls | `val_surface_negative_positive_mass`, `val_surface_negative_peak` | False activation spread across a negative surface or concentrated in its strongest hotspot; smaller is preferable. |
+| Faithfulness | `val_faithfulness_deletion_top_minus_random_10`, corresponding insertion metrics | Whether changing a high-evidence region affects the model more than an equal-area random region. This is model behavior, not proof of a biological mechanism. |
+| Robustness | `val_subgroup_*`, optional `val_view_*` | Performance within supported strata or agreement across physically matched views. Agreement alone cannot establish correctness. |
+| Resources | `train_epoch_seconds`, `train_cuda_peak_gib`, `resource.gpu_seconds`, `resource.peak_vram` | Cost versus quality. Epoch samples and framework whole-Run costs are explicitly distinct. |
+| Support and controls | Point/protein counts, patience, topology echoes, learning rate | How much evidence supports a result and what was executed. These are hidden from ordinary discovery, not deleted. |
+
+Here, *regret* means the best observed surface AUPRC minus its value at the epoch selected by
+protein quality G. Zero means selection retained the best observed localization; a positive gap
+indicates a missed surface optimum. Spearman correlation compares the ordering of paired G/S
+values, not their absolute magnitude. Its primary version omits the first 30% of observed epochs;
+constant or short curves can make it undefined. Neither a low regret nor a high correlation alone
+guarantees a useful surface: a consistently poor map can have both. Inspect absolute S as well.
+
+**Families, aliases, and missing evidence.** A metric family groups measurements of the same
+quantity under different conditions. For example, top-fraction recall has coordinates 5%, 10%,
+25%; deletion/insertion combines region-selection strategy with fractions 1%, 2%, 5%, 10%, 20%.
+Quartile and difficulty-tier families preserve their stratum labels and sample counts. Phenotype
+labels depend on the dataset, so unknown labels receive meaningful pattern descriptions without
+inventing clusters; an explicit native family may be added once the actual labels are known.
+
+Search uses stable names, descriptions, human labels and aliases: `surface correlation` finds
+`val_global_surface_spearman`, and `gpu memory` finds `train_cuda_peak_gib`. Existing logged
+duplicates such as `val_protein_global_score` remain recorded but are marked as identity-derived
+from the canonical quantity. `derived_from` also describes W's dependence on G/S/C and the
+identity `view_map_l1 = 2 * view_map_total_variation`. This prevents treating a formula or renamed
+measurement as unrelated evidence.
+
+Attention, faithfulness and view questions are optional. A pooling without attention does not
+acquire an artificial attention score. Current Training does not produce multi-view observations;
+their catalog entries describe the existing evaluator without scheduling extra evaluation.
+Regional diffusion poolings omit point-removal faithfulness because removing vertices would
+invalidate their stored operator. Zero support means unavailable evidence, not a zero-quality map.
+
+**Open the evidence.** Use the real execution identifier shown by LambdaForge:
+
+```bash
+lf results analyze EXECUTION --recompute --json
+lf results report EXECUTION --output research.html
+lf export STUDY --output ./exports
+```
+
+The HTML report is an offline snapshot: regenerate it to include later Runs. Research shows
+prioritized findings; Metrics & health searches the catalog and exposes coverage and spread.
+Enable **Show constants / missing / hidden** to inspect counts, controls or unavailable metrics.
+Use **Inspect** to read a finding's support, method and limitations, and **Explore these
+observations** to examine the contributing candidates. Ctrl/⌘ K searches metrics, parameters,
+families and findings. Local analysis of remote results first requires exporting the study;
+export is not a new training execution.
+
+Configured questions compare G/S, coupling and regret, localization and negative controls,
+localization and faithfulness, attention and local evidence, subgroup robustness, and quality
+versus memory/time. Pooling parameter screens use LambdaForge's actual active parameter space;
+WISDOM does not reinterpret conditional `when` rules. Categories and priorities focus a bounded
+analysis, not an exhaustive guarantee that every pair will be tested. Seed support, comparable
+fidelity, sparsity, redundancy, statistical diagnostics and finding ranking remain framework-owned.
+An exploratory association is a lead for a controlled experiment, not a causal conclusion.
+
+**Overrides and safety.** Every experiment inherits the class profile. V5a/V5b add small native
+`analysis.metrics` priority overrides to emphasize attention and intervention controls; they do
+not repeat the catalog. A single-Work YAML places `analysis` beside `run`; a composed YAML places
+it on each step, not the root. Metric overrides merge fields, families replace by name, and
+`questions`/`defaults` replace whole lists. Do not use a fictitious `analysis.profile: wisdom` key.
+The profile distinguishes validation from test, including transitive test-derived metrics.
+LambdaForge rejects test metrics in objectives/constraints and excludes them from provisional
+discovery. Final post-hoc test inspection still does not authorize using test to choose a model.
+
+At completion, all available binary validation metrics, including loss and F1, are republished
+from the G-selected checkpoint; surface metrics are recomputed on those restored weights.
+Curve summaries remain labeled separately. Resource trajectories retain their actual aggregation:
+`train_cuda_peak_gib` is the last recorded epoch peak, whereas `resource.peak_vram` is the
+framework's median whole-Run peak over comparable screening Runs.
+
+There is one unresolved framework limitation: numeric logging cannot replace an earlier finite
+metric with an explicit missing terminal value. If selected-checkpoint MCC becomes undefined,
+WISDOM's JSON retains `null` and `val_mcc_defined=0`, but a generic terminal table can retain an
+earlier finite MCC. Do not use that stale number as selected-checkpoint evidence. WISDOM does not
+fabricate a zero or modify LambdaForge to hide this case. Native support for a missing terminal
+observation is required. Likewise, independent metric groups,
+support-conditioned rules and automatic dataset-dependent family coordinates are not exposed by
+the current public schema. Categories, metadata and supported optional questions cover the usable
+parts; [the integration report](docs/WISDOM_RESEARCH_ANALYSIS.md) lists the exact remaining limits.
 
 ## 6. Bibliography
 
@@ -3750,6 +3968,10 @@ the claim in the master plan.
 38. Louizos, C., Welling, M. & Kingma, D. P. (2018). “Learning Sparse Neural Networks through
     L0 Regularization.” *ICLR 2018*.
     [OpenReview paper](https://openreview.net/forum?id=H1Y8hhg0b).
+39. McFee, B., Salamon, J. & Bello, J. P. (2018). “Adaptive pooling operators for weakly labeled
+    sound event detection.” [Author preprint](https://arxiv.org/abs/1804.10070).
+40. Radenović, F., Tolias, G. & Chum, O. “Fine-tuning CNN Image Retrieval with No Human
+    Annotation.” [Author preprint](https://arxiv.org/abs/1711.02512).
 
 WISDOM's surface implementations were written independently. The v3 encoders test compact versions
 of mechanisms motivated by dMaSIF, DeltaConv, PTv3, and PointMamba; WISDOM neither copies their code

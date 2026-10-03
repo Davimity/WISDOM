@@ -89,6 +89,14 @@ def test_max_pooling_is_exactly_the_v1_control() -> None:
         (PoolingType.TOPK, {"topk_fraction": 0.5}),
         (PoolingType.LOCAL_MEAN_MAX, {"regional_diffusion_scale": 2.0}),
         (PoolingType.LOG_SUM_EXP, {"log_sum_exp_beta": 3.0}),
+        (PoolingType.ATTENTION, {"attention_variant": "gated", "pooling_area_mode": "area"}),
+        (PoolingType.LINEAR_SOFTMAX, {"pooling_area_mode": "area"}),
+        (PoolingType.AUTOPOOL, {"autopool_alpha_mode": "learned"}),
+        (PoolingType.GEM, {"gem_power_mode": "learned"}),
+        (PoolingType.MAX_MEAN, {"max_mean_lambda_mode": "learned"}),
+        (PoolingType.MULTISCALE_REGIONAL_MAX, {}),
+        (PoolingType.LOCAL_MEAN_MAX, {"regional_scale_mode": "learned"}),
+        (PoolingType.LOG_SUM_EXP, {"log_sum_exp_mode": "learned", "pooling_area_mode": "area"}),
     ],
 )
 def test_pooling_variants_produce_finite_maps_diagnostics_and_gradients(
