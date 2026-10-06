@@ -31,6 +31,7 @@ from wisdom.evaluation.BinaryMetricSuite import BinaryMetricSuite
 from wisdom.models.OptimizationProfile import OptimizationProfile
 from wisdom.models.WeightAveragingMode import WeightAveragingMode
 from wisdom.evaluation.SurfaceMetricSuite import SurfaceMetricSuite
+from wisdom.visualization.ProteinReportPage import ProteinReportPage
 from wisdom.evaluation.SubgroupMetricSuite import SubgroupMetricSuite
 from wisdom.models.InitializationProfile import InitializationProfile
 from wisdom.analysis.WisdomAnalysisProfile import WisdomAnalysisProfile
@@ -39,6 +40,7 @@ from wisdom.evaluation.OptimizationDiagnostics import OptimizationDiagnostics
 from wisdom.evaluation.SurfacePredictionReport import SurfacePredictionReport
 from wisdom.evaluation.SurfaceFaithfulnessAudit import SurfaceFaithfulnessAudit
 from wisdom.evaluation.SurfaceVisualizationMode import SurfaceVisualizationMode
+from wisdom.preprocessing.structure.VisualizationContent import VisualizationContent
 
 
 _MODEL_INPUT_NAMES = (
@@ -187,9 +189,13 @@ class Training(lf.Work):
         precision                     : str   = "auto",
         surface_metrics               : bool  = True,
         surface_metrics_interval      : int   = 0,
-        surface_visualization         : str   = "viewer",
+        visualization                 : Mapping[str, Any] | None = None,
+        surface_visualization         : str   = "none",
         surface_prediction_threshold  : float = 0.5,
         surface_visualization_maximum : int   = 12,
+        surface_visualization_identifiers : Sequence[str] = (),
+        surface_report                : bool  = True,
+        surface_report_maximum_mib    : float = 4.0,
         faithfulness_audit            : bool  = False,
         evaluate_test                 : bool  = True,
         data_workers                  : int   = 4,
@@ -324,14 +330,27 @@ class Training(lf.Work):
             surface_metrics_interval: Validation-epoch interval for local metrics. Zero evaluates
                 them only once after restoring the best checkpoint; a positive value also evaluates
                 them every N epochs. The final held-out test evaluation remains unchanged.
-            surface_visualization: Final artifact level: ``none`` writes no local map, ``viewer``
-                writes compact HTML/PLY reports, and ``full`` additionally writes point-aligned NPZ
-                prediction data. This setting never changes metrics, loss, or checkpoint choice.
+            surface_visualization: Final artifact level: ``none`` writes no local map, ``report``
+                embeds inspectors only in LF, ``viewer`` writes HTML/PLY, and ``full`` also writes
+                NPZ prediction data. Never changes metrics, loss, or checkpoint choice.
+            visualization: Preferred presentation mapping: mode=none (none/report/viewer/full),
+                content=predictions (predictions/full), maximum_points=2000 (>0),
+                maximum_proteins=12 (0 means all), report_budget_mib=4.0 in (0,16],
+                identifiers=(), threshold=0.5 in [0,1], embed_report=true. Supplied entries override
+                corresponding legacy surface_* arguments. Generation occurs only at the end of
+                this completed Run on its restored best checkpoint, never every epoch. This
+                per-Run API cannot select one seed after the outer Study completes.
             surface_prediction_threshold: Initial cutoff in ``[0,1]`` for stored and interactive
                 hard surface predictions. HTML viewers can change it without rerunning the model.
             surface_visualization_maximum: Maximum class-balanced HTML/PLY proteins per evaluated
                 split. Zero renders all. Prediction NPZ files cover every protein only when
                 ``surface_visualization`` is ``full``.
+            surface_visualization_identifiers: Exact viewer IDs instead of automatic sampling.
+                Only IDs belonging to evaluated validation/test splits are displayed.
+            surface_report: Embed an offline Proteins tab when visualization is enabled. NONE
+                disables both viewers and this tab, regardless of this flag. Never changes training.
+            surface_report_maximum_mib: Per-Run report byte budget in (0,16] MiB. Omitted viewers
+                are listed explicitly; LambdaForge also caps the complete report at 64 MiB.
             faithfulness_audit: On the restored best checkpoint, measure prediction changes after
                 equal-area top/random/bottom surface deletion and insertion without using local GT.
             evaluate_test: Evaluate the held-out test split once after selecting the validation
@@ -348,13 +367,37 @@ class Training(lf.Work):
         Returns:
             Best validation epoch/metrics, stopping reason, optional surface-report summary, and
             held-out test metrics. Adaptively pruned Runs return ``test=None`` and no final
-            surface report because they are excluded from HPO ranking.
+            surface maps because they are excluded from HPO ranking; an enabled HTML tab instead
+            explains the pruning decision.
 
         Raises:
             ValueError: If a model, data view, parameter, or metric contract is invalid.
-            RuntimeError: If the protein-level validation score is undefined for every epoch.
+            RuntimeError: If the protein-level validation score is undefined for every epoch,
+                or the installed framework/shared viewer lacks the requested rendering API.
             OSError: If managed arrays or checkpoint/report artifacts cannot be accessed.
         """
+        # Keep presentation options together in YAML while preserving older callable consumers.
+        # These options never enter scientific model parameters or change checkpoint selection.
+
+        options = dict(visualization or {})
+        surface_visualization = options.get("mode", surface_visualization)
+        surface_visualization_maximum = options.get(
+            "maximum_proteins", surface_visualization_maximum,
+        )
+        surface_visualization_identifiers = options.get(
+            "identifiers", surface_visualization_identifiers,
+        )
+        surface_prediction_threshold = options.get("threshold", surface_prediction_threshold)
+        surface_report = options.get("embed_report", surface_report)
+        surface_report_maximum_mib = options.get("report_budget_mib", surface_report_maximum_mib)
+        content = VisualizationContent(options.get("content", "predictions"))
+
+        # Check the final viewer dependency before accessing runtime services or allocating data.
+        # A mixed wheel must not consume GPU hours before failing at report publication.
+
+        if SurfaceVisualizationMode(surface_visualization) is not SurfaceVisualizationMode.NONE:
+            SurfacePredictionReport.require_renderer()
+
         return _train_wisdom(
             self,
             dataset=dataset,
@@ -455,6 +498,11 @@ class Training(lf.Work):
             surface_visualization=surface_visualization,
             surface_prediction_threshold=surface_prediction_threshold,
             surface_visualization_maximum=surface_visualization_maximum,
+            surface_visualization_identifiers=surface_visualization_identifiers,
+            surface_report=surface_report,
+            surface_report_maximum_mib=surface_report_maximum_mib,
+            surface_visualization_content=content.value,
+            surface_visualization_points=options.get("maximum_points", 2000),
             faithfulness_audit=faithfulness_audit,
             evaluate_test=evaluate_test,
             data_workers=data_workers,
@@ -562,9 +610,14 @@ def _train_wisdom(
     precision                     : str   = "auto",
     surface_metrics               : bool  = True,
     surface_metrics_interval      : int   = 0,
-    surface_visualization         : str   = "viewer",
+    surface_visualization         : str   = "none",
     surface_prediction_threshold  : float = 0.5,
     surface_visualization_maximum : int   = 12,
+    surface_visualization_identifiers : Sequence[str] = (),
+    surface_report                : bool  = True,
+    surface_report_maximum_mib    : float = 4.0,
+    surface_visualization_content : str = "predictions",
+    surface_visualization_points  : int = 2000,
     faithfulness_audit            : bool  = False,
     evaluate_test                 : bool  = True,
     data_workers                  : int   = 4,
@@ -685,12 +738,20 @@ def _train_wisdom(
         surface_metrics_interval: Validation-epoch interval for local metrics. Zero evaluates them
             only on the restored best checkpoint; a positive integer additionally evaluates every
             N epochs. Ignored when ``surface_metrics`` is false.
-        surface_visualization: ``none``, ``viewer``, or ``full`` final surface artifact level.
-            Viewer mode emits HTML/PLY only; full mode also emits point-aligned prediction NPZ.
+        surface_visualization: ``none``, ``report``, ``viewer``, or ``full`` final artifact level.
+        surface_visualization_content: predictions embeds only probability/logits/GT; full uses
+            the structural inspector. Neither alters scientific metrics or the forward pass.
+        surface_visualization_points: Positive maximum displayed points; scientific evaluation
+            and optional NPZ/PLY exports retain all points and their original precision.
+            Report embeds inspectors only; viewer emits HTML/PLY; full also writes prediction NPZ.
         surface_prediction_threshold: Initial probability cutoff in ``[0,1]`` for hard maps.
         surface_visualization_maximum: Maximum balanced HTML/PLY sample per evaluated split. Zero
             renders all proteins. Numerical NPZ predictions retain full split coverage only in
             ``full`` visualization mode.
+        surface_visualization_identifiers: Exact viewer IDs instead of automatic sampling.
+        surface_report: Embed the offline Proteins section when visualization is enabled. NONE
+            suppresses the tab; an enabled pruned Run may publish an explanation.
+        surface_report_maximum_mib: Presentation byte ceiling in (0,16] MiB, not a metric filter.
         faithfulness_audit: Whether final best-checkpoint evaluation performs V8 surface deletion
             and insertion controls without accessing local ground truth.
         evaluate_test: Evaluate held-out test exactly once after validation selection. False keeps
@@ -990,7 +1051,23 @@ def _train_wisdom(
     }
 
     visualization_mode = SurfaceVisualizationMode(surface_visualization)
+    if visualization_mode is SurfaceVisualizationMode.REPORT and not surface_report:
+        raise ValueError("surface_visualization='report' requires surface_report=true")
     surface_predictions = visualization_mode is not SurfaceVisualizationMode.NONE
+    if (surface_predictions and surface_report
+            and not callable(getattr(work.outputs, "html_section", None))):
+        raise RuntimeError(
+            "This LambdaForge installation lacks outputs.html_section. Install the current "
+            "LambdaForge source, then run ./install.sh locally or "
+            "lf clusters bootstrap <cluster> --project . for managed execution."
+        )
+    # NONE suppresses presentation completely, including an otherwise enabled report tab.
+    # Post-study ModelValidation reuses the saved checkpoint without generating per-seed copies.
+
+    report_page = (
+        ProteinReportPage(surface_report_maximum_mib)
+        if surface_predictions and surface_report else None
+    )
     surface_prediction_npz = visualization_mode is SurfaceVisualizationMode.FULL
 
     effective_initialization_seed = seed if initialization_seed is None else initialization_seed
@@ -1818,6 +1895,9 @@ def _train_wisdom(
                     "initialization_seed": effective_initialization_seed,
                     "training_seed":       effective_training_seed,
                     "epoch":            epoch,
+                    "inference_state": {
+                        "gate_override": "all_on" if gate_phase == "all_on" else "learned",
+                    },
                     "val_auprc":        objective,
                     "val_loss":         best_val_loss,
                     "validation_metrics": best_validation_metrics,
@@ -1994,6 +2074,8 @@ def _train_wisdom(
     test_metrics              : dict[str, float | None] | None = None
     test_surface_metrics      : dict[str, float | None] | None = None
     surface_prediction_reports: list[dict[str, Any]] = []
+    surface_report_documents  : list[dict[str, Any]] = []
+    surface_report_summary    : dict[str, Any] | None = None
     prediction_root           : Path | None = None
 
     # Pruned HPO Runs are excluded from candidate scores and need no held-out test evaluation.
@@ -2003,6 +2085,7 @@ def _train_wisdom(
     if stop_reason != "adaptive-hpo":
         saved = torch.load(checkpoint, map_location=device, weights_only=True)
         model.load_state_dict(saved["state_dict"])
+        model.semantic_gates.set_override(saved["inference_state"]["gate_override"])
 
         if surface_predictions:
             prediction_root = Path(
@@ -2027,6 +2110,10 @@ def _train_wisdom(
                     surface_prediction_threshold,
                     surface_visualization_maximum,
                     surface_prediction_npz,
+                    report_only=visualization_mode is SurfaceVisualizationMode.REPORT,
+                    identifiers=surface_visualization_identifiers,
+                    content=surface_visualization_content,
+                    maximum_surface_points=surface_visualization_points,
                 )
                 if prediction_root is not None
                 else None
@@ -2051,6 +2138,8 @@ def _train_wisdom(
                     best_epoch,
                 )
                 surface_prediction_reports.append(prediction_report)
+                if surface_report:
+                    surface_report_documents.extend(validation_predictions.report_documents)
                 work.metrics.log(
                     "surface_prediction_proteins",
                     prediction_report["predicted_proteins"],
@@ -2077,6 +2166,10 @@ def _train_wisdom(
                     surface_prediction_threshold,
                     surface_visualization_maximum,
                     surface_prediction_npz,
+                    report_only=visualization_mode is SurfaceVisualizationMode.REPORT,
+                    identifiers=surface_visualization_identifiers,
+                    content=surface_visualization_content,
+                    maximum_surface_points=surface_visualization_points,
                 )
                 if prediction_root is not None
                 else None
@@ -2106,6 +2199,8 @@ def _train_wisdom(
                     best_epoch,
                 )
                 surface_prediction_reports.append(prediction_report)
+                if surface_report:
+                    surface_report_documents.extend(test_predictions.report_documents)
                 work.metrics.log(
                     "surface_prediction_proteins",
                     prediction_report["predicted_proteins"],
@@ -2127,6 +2222,45 @@ def _train_wisdom(
                 prediction_root,
                 surface_prediction_reports,
             )
+
+    # Native LF selection retains every Trial/seed instead of cherry-picking the best seed.
+    # The report is presentation only; disabled or pruned Runs expose a small empty-state page.
+
+    if report_page is not None:
+        for document in surface_report_documents:
+            document["seed"] = seed
+            document["details"] = {"best_epoch": best_epoch, "run": run_label}
+        empty_reason = (
+            "This Run was competitively pruned; best-checkpoint protein viewers were not generated."
+            if stop_reason == "adaptive-hpo"
+            else (
+                "No protein viewers were generated. Set visualization.mode to report, viewer "
+                "or full, and check visualization.identifiers against the evaluated splits."
+            )
+        )
+        page, surface_report_summary = report_page.render(
+            surface_report_documents,
+            {
+                "seed":                  seed,
+                "run":                   run_label,
+                "best_epoch":            best_epoch,
+                "visualization_mode":    visualization_mode.value,
+                "content":               surface_visualization_content,
+                "maximum_display_points": surface_visualization_points,
+                "requested_identifiers": list(surface_visualization_identifiers),
+                "test_evaluated":        evaluate_test and stop_reason != "adaptive-hpo",
+                "checkpoint_policy":    "Protein-level selection; local GT is evaluation-only.",
+            },
+            reason=empty_reason,
+        )
+        work.outputs.html_section(
+            "protein-report", section="wisdom-proteins", title="WISDOM proteins",
+        ).write_text(page)
+        work.log(
+            f"[Training {run_label}] LF protein report: "
+            f"{surface_report_summary['included_proteins']} viewers, "
+            f"{len(surface_report_summary['omitted_proteins'])} omitted by byte budget"
+        )
 
     # Complete Runs expose one unstepped HPO result. If surface metrics were deferred during
     # training, the restored global checkpoint supplies its single surface observation; regret and
@@ -2206,8 +2340,22 @@ def _train_wisdom(
         "surface_metrics_enabled":         surface_metrics,
         "surface_metrics_interval":        surface_metrics_interval,
         "surface_visualization":           visualization_mode.value,
+        "visualization": {
+            "mode":             visualization_mode.value,
+            "content":          surface_visualization_content,
+            "maximum_points":   surface_visualization_points,
+            "maximum_proteins": surface_visualization_maximum,
+            "report_budget_mib": surface_report_maximum_mib,
+            "identifiers":      list(surface_visualization_identifiers),
+            "threshold":        surface_prediction_threshold,
+            "embed_report":     surface_report,
+        },
         "surface_prediction_threshold":    surface_prediction_threshold,
         "surface_visualization_maximum":   surface_visualization_maximum,
+        "surface_visualization_identifiers": list(surface_visualization_identifiers),
+        "surface_report":                  surface_report,
+        "surface_report_maximum_mib":      surface_report_maximum_mib,
+        "surface_report_summary":          surface_report_summary,
         "faithfulness_audit":              faithfulness_audit,
         "surface_prediction_reports":      surface_prediction_reports,
         "surface_coupling":                final_coupling,

@@ -738,6 +738,7 @@ def test_experiment_campaign_uses_ordered_names_and_traceability_headers() -> No
     stage_names = (
         "wisdom_v1a.yaml",
         "wisdom_v1b.yaml",
+        "wisdom_v1c.yaml",
         "wisdom_v2.yaml",
         "wisdom_v3.yaml",
         "wisdom_v4.yaml",
@@ -746,7 +747,11 @@ def test_experiment_campaign_uses_ordered_names_and_traceability_headers() -> No
         "wisdom_v5b.yaml",
         "wisdom_v6a.yaml",
         "wisdom_v6b.yaml",
+        "wisdom_v6b2.yaml",
+        "wisdom_v6b3.yaml",
         "wisdom_v6c.yaml",
+        "wisdom_v6c2.yaml",
+        "wisdom_v6c3.yaml",
         "wisdom_v6d.yaml",
         "wisdom_v7.yaml",
         "wisdom_v8.yaml",
@@ -760,6 +765,7 @@ def test_experiment_campaign_uses_ordered_names_and_traceability_headers() -> No
         first_lines = "\n".join(text.splitlines()[:5])
 
         assert all(header in first_lines for header in required_headers)
+        assert "steps" not in safe_load(text)
 
     assert tuple(sorted(path.name for path in experiment_root.glob("wisdom_v*.yaml"))) == tuple(
         sorted(stage_names)
@@ -774,10 +780,15 @@ def test_one_factor_comparisons_use_automatic_fixed_sweeps() -> None:
         "wisdom_v3.yaml",
         "wisdom_v5.yaml",
         "wisdom_v6a.yaml",
+        "wisdom_v6b.yaml",
+        "wisdom_v6b2.yaml",
+        "wisdom_v6b3.yaml",
+        "wisdom_v6c.yaml",
+        "wisdom_v6c2.yaml",
+        "wisdom_v6c3.yaml",
         "wisdom_v7.yaml",
         "wisdom_v8.yaml",
     )
-    stepped_studies = ("wisdom_v6b.yaml", "wisdom_v6c.yaml")
 
     for name in single_studies:
         study = safe_load((experiment_root / name).read_text(encoding="utf-8"))
@@ -790,20 +801,6 @@ def test_one_factor_comparisons_use_automatic_fixed_sweeps() -> None:
         assert "replicates" not in study
         assert study["objective"]["range"] == [0.0, 1.0]
         assert study["objective"]["practical_margin"] == pytest.approx(0.015)
-
-    for name in stepped_studies:
-        study = safe_load((experiment_root / name).read_text(encoding="utf-8"))
-        for step in study["steps"]:
-            sweep = step["sweep"]
-
-            assert "space" in sweep
-            assert "reference" in sweep
-            assert "search" not in step
-            assert "seeds" not in step
-            assert "replicates" not in step
-            assert step["objective"]["range"] == [0.0, 1.0]
-            assert step["objective"]["practical_margin"] == pytest.approx(0.015)
-
 
 def test_loss_combination_keeps_adaptive_interaction_search() -> None:
     """The three-loss mixture should use automatic optimize-mode HPO, not a fixed sweep."""

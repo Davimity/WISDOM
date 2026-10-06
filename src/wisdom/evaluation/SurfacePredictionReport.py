@@ -14,9 +14,8 @@ import numpy as np
 from typing import Any
 from pathlib import Path
 from torch import Tensor
-from collections.abc import Mapping
 from plotly.offline import get_plotlyjs
-
+from collections.abc import Mapping, Sequence
 from wisdom.data.WisdomDataset import WisdomDataset
 from wisdom.evaluation.PointCloudExporter import PointCloudExporter
 from wisdom.preprocessing.structure.ProteinArchive import ProteinArchive
@@ -26,6 +25,27 @@ from wisdom.preprocessing.structure.ProteinVisualizer import ProteinVisualizer
 class SurfacePredictionReport:
     """Collect one evaluated split and publish point-aligned predictions and shared viewers."""
 
+    @staticmethod
+    def require_renderer() -> None:
+        """Reject a mixed installed package before collecting predictions or training.
+
+        Setuptools can otherwise retain an older viewer in ``build/lib`` whose timestamp
+        exceeds its source file's timestamp. The report needs the shared in-memory renderer;
+        silently dropping visualization or substituting another renderer would hide that defect.
+
+        Raises:
+            RuntimeError: If the installed viewer lacks the required public ``render`` method.
+                Rebuild and submit a new bundle; existing immutable bundles cannot be repaired
+                by reinstalling the local editable package alone.
+        """
+        if not callable(getattr(ProteinVisualizer, "render", None)):
+            raise RuntimeError(
+                "Inconsistent WISDOM installation: ProteinVisualizer.render is missing. "
+                "Rebuild WISDOM from the current checkout with ./install.sh, then run "
+                "lf clusters bootstrap <cluster> --project . and submit a new Work. "
+                "Retrying the old immutable bundle would reuse the incompatible viewer."
+            )
+
     def __init__(
         self,
         dataset               : WisdomDataset,
@@ -34,6 +54,10 @@ class SurfacePredictionReport:
         prediction_threshold  : float = 0.5,
         maximum_visualizations: int = 12,
         save_predictions      : bool = False,
+        report_only           : bool = False,
+        identifiers           : Sequence[str] = (),
+        content               : str = "predictions",
+        maximum_surface_points: int = 2000,
     ) -> None:
         """Bind predictions to the exact ordered proteins used by one evaluation loader.
 
@@ -46,10 +70,20 @@ class SurfacePredictionReport:
                 prediction arrays remain in memory long enough to build those viewers.
             save_predictions: Also write one compact point-aligned NPZ per protein. False avoids
                 duplicating values already embedded in selected HTML viewers.
+            report_only: Render in-memory inspectors for the LF report, without standalone
+                HTML, Plotly or PLY files. Numerical evaluation coverage stays unchanged.
+            identifiers: Exact viewer IDs, overriding the automatic balanced sample and its cap.
+                IDs absent from this evaluated split are ignored, allowing a shared val/test list.
+            content: predictions embeds only prediction/logit/GT channels; full retains the
+                structural inspector. Numerical metrics and exported PLY points are not sampled.
+            maximum_surface_points: Positive display-only point ceiling per protein.
 
         Raises:
             ValueError: If the threshold, limit, split, or dataset records are invalid.
+            RuntimeError: If the installed shared viewer is incompatible with this report.
         """
+        self.require_renderer()
+
         if not 0.0 <= prediction_threshold <= 1.0:
             raise ValueError("surface prediction threshold must lie in [0,1]")
         if maximum_visualizations < 0:
@@ -74,7 +108,14 @@ class SurfacePredictionReport:
         self.prediction_threshold   = prediction_threshold
         self.maximum_visualizations = maximum_visualizations
         self.save_predictions       = save_predictions
+        self.report_only            = report_only
+        self.identifiers            = tuple(identifiers)
+        self.content                = content
+        self.maximum_surface_points = maximum_surface_points
         self.predictions            : dict[str, np.ndarray] = {}
+        self.logits                 : dict[str, np.ndarray] = {}
+        self.protein_probabilities  : dict[str, float] = {}
+        self.report_documents       : list[dict[str, Any]] = []
 
     def collect(
         self,
@@ -85,7 +126,9 @@ class SurfacePredictionReport:
 
         Args:
             batch: Collated evaluation batch containing identifiers and ``surface_ptr[B+1]``.
-            output: Model outputs containing unnormalized ``surface_logits[M]``.
+            output: Model outputs containing unnormalized ``surface_logits[M]`` and optional
+                global ``logits[B]``. Their sigmoid values are retained separately for paired
+                protein/surface diagnostics; targets never enter the forward pass.
 
         Raises:
             ValueError: If identifiers, boundaries, logits, or repeated records are inconsistent.
@@ -100,6 +143,15 @@ class SurfacePredictionReport:
 
         pointers      = boundaries.detach().cpu().tolist()
         probabilities = torch.sigmoid(logits.detach()).float().cpu().numpy()
+        raw_logits    = logits.detach().float().cpu().numpy()
+        global_logits = output.get("logits")
+        global_scores = (
+            torch.sigmoid(global_logits.detach()).float().cpu().reshape(-1).tolist()
+            if isinstance(global_logits, Tensor)
+            else None
+        )
+        if global_scores is not None and len(global_scores) != len(identifiers):
+            raise ValueError("protein logits disagree with the evaluated protein identifiers")
         if len(pointers) != len(identifiers) + 1 or pointers[0] != 0 or pointers[-1] != len(logits):
             raise ValueError("surface prediction boundaries disagree with the evaluated batch")
 
@@ -113,6 +165,9 @@ class SurfacePredictionReport:
             start = int(pointers[index])
             stop  = int(pointers[index + 1])
             self.predictions[name] = probabilities[start:stop].copy()
+            self.logits[name]      = raw_logits[start:stop].copy()
+            if global_scores is not None:
+                self.protein_probabilities[name] = float(global_scores[index])
 
     def publish(
         self,
@@ -144,13 +199,13 @@ class SurfacePredictionReport:
         split_root   = self.output_root / self.split
         protein_root = split_root / "proteins"
         selected     = set(self._selected_identifiers())
-        visualizer   = ProteinVisualizer()
+        visualizer   = ProteinVisualizer(max_surface_points=self.maximum_surface_points)
         exporter     = PointCloudExporter()
         reports      : list[dict[str, Any]] = []
 
         self.output_root.mkdir(parents=True, exist_ok=True)
         plotly = self.output_root / "plotly.min.js"
-        if not plotly.is_file():
+        if not self.report_only and not plotly.is_file():
             ProteinArchive.write_text(plotly, get_plotlyjs())
 
         # Viewer mode writes only the selected HTML/PLY files. Full mode additionally retains one
@@ -197,29 +252,48 @@ class SurfacePredictionReport:
                 channels = {
                     "model_prediction_probability": probabilities,
                     "model_prediction_hard":        hard_prediction.astype(np.uint8),
+                    "model_prediction_logit":       self.logits[identifier],
                 }
                 html_path = protein_root / f"{safe_name}.html"
                 ply_path  = protein_root / f"{safe_name}.ply"
-                diagnostics = visualizer.visualize(
+                page, diagnostics = visualizer.render(
                     base,
-                    html_path,
                     identifier,
                     annotation           = annotation,
                     protein_label        = int(label),
                     partitions           = {"split": self.split},
-                    plotly_script        = "../../plotly.min.js",
+                    plotly_script        = False,
                     additional_channels  = channels,
                     prediction_threshold = self.prediction_threshold,
+                    content              = self.content,
                 )
-                surface_channels = visualizer.surface_channels(
-                    base,
-                    annotation,
-                    channels,
-                )
-                exporter.export(ply_path, positions, surface_channels)
+                self.report_documents.append({
+                    "identifier": identifier,
+                    "split":      self.split,
+                    "label":      int(label),
+                    "html":       page,
+                })
+
+                # The LF report receives the same inspector in memory. Standalone mode adds
+                # its existing shared library link; report-only mode persists no duplicate page.
+
+                if not self.report_only:
+                    standalone = page.replace(
+                        "<head>", '<head><script src="../../plotly.min.js"></script>', 1,
+                    )
+                    ProteinArchive.write_text(html_path, standalone)
+                    surface_channels = visualizer.surface_channels(base, annotation, channels)
+                    if self.content == "predictions":
+                        surface_channels = {
+                            name: values for name, values in surface_channels.items()
+                            if name.startswith("model_prediction_")
+                            or name in ("dna_target_hard", "dna_target_soft", "dna_target_valid")
+                        }
+                    exporter.export(ply_path, positions, surface_channels)
                 report.update(
-                    html        = html_path.relative_to(self.output_root).as_posix(),
-                    ply         = ply_path.relative_to(self.output_root).as_posix(),
+                    html        = None if self.report_only else html_path.relative_to(self.output_root).as_posix(),
+                    ply         = None if self.report_only else ply_path.relative_to(self.output_root).as_posix(),
+                    embedded    = self.report_only,
                     diagnostics = dict(diagnostics),
                 )
             reports.append(report)
@@ -229,6 +303,9 @@ class SurfacePredictionReport:
             "best_epoch":              best_epoch,
             "prediction_threshold":    self.prediction_threshold,
             "prediction_npz_enabled":  self.save_predictions,
+            "report_only":             self.report_only,
+            "content":                 self.content,
+            "maximum_display_points":  self.maximum_surface_points,
             "predicted_proteins":      len(reports),
             "visualized_proteins":     len(selected),
             "surface_metrics":         dict(metrics),
@@ -255,6 +332,8 @@ class SurfacePredictionReport:
         Returns:
             Ordered protein identifiers alternating between available global target classes.
         """
+        if self.identifiers:
+            return tuple(dict.fromkeys(name for name in self.identifiers if name in self.records))
         buckets = {
             label: sorted(
                 identifier
@@ -393,7 +472,7 @@ class SurfacePredictionReport:
                     report["label"],
                     f"<a href='{html.escape(html_path)}'>Interactive HTML</a>"
                     if html_path is not None
-                    else "Numerical map only",
+                    else "Embedded in LambdaForge report" if report.get("embedded") else "No viewer selected",
                     f"<a href='{html.escape(prediction_path)}'>Prediction NPZ</a>"
                     if prediction_path is not None
                     else "NPZ disabled",

@@ -1,107 +1,89 @@
-# OBJECTIVE: test positive existence, regional existence, and regional ranking one family at a time.
-# PREREQUISITES: run only if V6a found useful negative-surface supervision.
-# VARIES: one additional regional/existence coefficient within each independent step.
-# FIXED: the V6a negative_surface_lambda winner and every earlier campaign winner.
-# DECISION: choose at most one added regional prior; do not combine the three families here.
-steps:                                              # Each step adds one family to the same V6a winner.
-  - name: positive-existence                       # Require some positive point in positive bags.
-    run: wisdom.Training.Training                   # Shared LambdaForge Work.
-    with: &loss_region_base                         # Common frozen backbone for all three steps.
-      dataset: {dataset: wisdom-dna-reduced@6}      # Immutable reduced benchmark.
-      model_version: 2                              # Pooling-capable internal generation.
-      subset: full                                  # Complete reduced training population.
-      pooling_type: max                             # REPLACE with the V5 winner.
-      topk_fraction: 0.05                           # REPLACE if V5 selects top-k.
-      attention_hidden_dim: 32                      # REPLACE if V5 selects attention.
-      regional_diffusion_scale: 2.5                 # REPLACE if V5 selects local-mean-max.
-      log_sum_exp_beta: 5.0                         # REPLACE if V5 selects LogSumExp.
-      initialization_profile: baseline              # REPLACE with the V2 winner.
-      optimization_profile: baseline                # REPLACE with the V3 winner.
-      hidden_dim: 128                               # REPLACE with the V4 winner.
-      embedding_dim: 32                             # REPLACE with the V4 winner.
-      residue_embedding_dim: 32                     # REPLACE with the V4 winner.
-      atomic_layers: 2                              # REPLACE with the V4 winner.
-      projection_depth: 1                           # REPLACE with the V4 winner.
-      surface_layers: 2                             # REPLACE with the V4 winner.
-      atom_spatial_k: 16                            # REPLACE with the V4 winner.
-      surface_atom_k: 16                            # REPLACE with the V4 winner.
-      diffusion_spectral_modes: 128                 # REPLACE with the V4 winner.
-      surface_atom_radius: 6.0                      # REPLACE with the V4 winner.
-      dropout: 0.2                                  # REPLACE with the V4 winner.
-      learning_rate: 0.0003                         # REPLACE with the V4 winner.
-      weight_decay: 0.0001                          # REPLACE with the V4 winner.
-      gate_lambda: 0.001                            # REPLACE with the V4 winner.
-      negative_surface_lambda: 0.3                  # REPLACE with the V6a winner.
-      positive_existence_lambda: 0.0                # Its sweep overrides this only in its own step.
-      regional_positive_lambda: 0.0                 # Its sweep overrides this only in its own step.
-      regional_ranking_lambda: 0.0                  # Its sweep overrides this only in its own step.
-      weak_loss_profile: custom                     # Preserve explicit composable coefficients.
-      architecture_spike: baseline                  # No architecture change.
-      head_type: single                             # Fixed head relationship.
-      regional_loss_length: 2.5                     # Intrinsic smoothing length in ångströms.
-      regional_ranking_margin: 0.5                  # Positive-versus-negative regional margin.
-      batch_size: 16                                # Proteins per optimizer update.
-      epochs: 500                                   # Safety ceiling.
-      patience: 30                                  # Global validation patience.
-      precision: auto                               # Hardware-safe mixed precision.
-      surface_metrics: true                         # Evaluation-only local metrics.
-      surface_metrics_interval: 1                   # Required G/S/regret curves.
-      surface_visualization: none                   # Avoid candidate galleries.
-      evaluate_test: false                          # Keep test sealed.
-      data_workers: 4                               # Persistent NPZ workers.
-    sweep:                                          # Complete positive-existence comparison.
-      space:                                        # Every coefficient is a required sweep cell.
-        positive_existence_lambda:                  # Positive-bag existential prior.
-          values:                                   # One-dimensional screen.
-            - 0.0                                   # V6a parent control.
-            - 0.05                                  # Weak existence constraint.
-            - 0.1                                   # Weak existence constraint.
-            - 0.2                                   # Moderate existence constraint.
-            - 0.3                                   # Moderate existence constraint.
-            - 0.6                                   # Strong existence constraint.
-            - 0.8                                   # Strong existence constraint.
-            - 1.0                                   # Strong existence constraint.
-      reference: {positive_existence_lambda: 0.0}    # Compare against the V6a parent.
-    objective: &loss_region_objective               # Shared joint validation decision.
-      metric: val_wisdom_hpo_score                  # Global/surface/coupling utility.
-      mode: max                                     # Maximize the composite validation utility.
-      range: [0.0, 1.0]                             # Mathematical bounds of the composite utility.
-      practical_margin: 0.015                       # Smaller paired differences are negligible.
-    resources: &loss_region_resources               # Shared study allocation.
-      gpu: 3                                        # Three accelerators.
-      cpu: 36                                       # Shared host capacity.
-      memory: 96GiB                                 # Shared host-memory ceiling.
-      time: 168h                                    # Seven-day ceiling.
+# OBJECTIVE: isolate the positive existence family against its reviewed parent.
+# PREREQUISITES: freeze prior winners and diagnose the need for this additional constraint.
+# VARIES: only the positive existence coefficient or its active area target.
+# FIXED: data, backbone, head, pooling and all other weak-loss coefficients.
+# DECISION: retain this family only if paired validation evidence justifies its bias and cost.
+run: wisdom.Training.Training                   # Shared LambdaForge Work.
+with:                         # Common frozen backbone for all independent Studies.
+  dataset: {dataset: wisdom-dna-reduced@6}      # Immutable reduced benchmark.
+  model_version: 2                              # Pooling-capable internal generation.
+  subset: full                                  # Complete reduced training population.
+  pooling_type: max                             # REPLACE with the V5 winner.
+  topk_fraction: 0.05                           # REPLACE if V5 selects top-k.
+  attention_hidden_dim: 32                      # REPLACE if V5 selects attention.
+  regional_diffusion_scale: 2.5                 # REPLACE if V5 selects local-mean-max.
+  log_sum_exp_beta: 5.0                         # REPLACE if V5 selects LogSumExp.
+  initialization_profile: baseline              # REPLACE with the V2 winner.
+  optimization_profile: baseline                # REPLACE with the V3 winner.
+  hidden_dim: 128                               # REPLACE with the V4 winner.
+  embedding_dim: 32                             # REPLACE with the V4 winner.
+  residue_embedding_dim: 32                     # REPLACE with the V4 winner.
+  atomic_layers: 2                              # REPLACE with the V4 winner.
+  projection_depth: 1                           # REPLACE with the V4 winner.
+  surface_layers: 2                             # REPLACE with the V4 winner.
+  atom_spatial_k: 16                            # REPLACE with the V4 winner.
+  surface_atom_k: 16                            # REPLACE with the V4 winner.
+  diffusion_spectral_modes: 128                 # REPLACE with the V4 winner.
+  surface_atom_radius: 6.0                      # REPLACE with the V4 winner.
+  dropout: 0.2                                  # REPLACE with the V4 winner.
+  learning_rate: 0.0003                         # REPLACE with the V4 winner.
+  weight_decay: 0.0001                          # REPLACE with the V4 winner.
+  gate_lambda: 0.001                            # REPLACE with the V4 winner.
+  negative_surface_lambda: 0.3                  # REPLACE with the V6a winner.
+  positive_existence_lambda: 0.0                # Its sweep overrides this only in its own Study.
+  regional_positive_lambda: 0.0                 # Its sweep overrides this only in its own Study.
+  regional_ranking_lambda: 0.0                  # Its sweep overrides this only in its own Study.
+  weak_loss_profile: custom                     # Preserve explicit composable coefficients.
+  architecture_spike: baseline                  # No architecture change.
+  head_type: single                             # Fixed head relationship.
+  regional_loss_length: 2.5                     # Intrinsic smoothing length in ångströms.
+  regional_ranking_margin: 0.5                  # Positive-versus-negative regional margin.
+  batch_size: 16                                # Proteins per optimizer update.
+  epochs: 500                                   # Safety ceiling.
+  patience: 30                                  # Global validation patience.
+  precision: auto                               # Hardware-safe mixed precision.
+  surface_metrics: true                         # Evaluation-only local metrics.
+  surface_metrics_interval: 1                   # Required G/S/regret curves.
+  visualization:                                    # Presentation only; generated once at this Run's best checkpoint.
+    mode: none                                      # none disables all viewers; report embeds HTML without duplicate files.
+    content: predictions                            # Probability, original logits and soft/hard GT only; full adds structural layers.
+    maximum_points: 2000                            # Deterministic display-only sample; metrics retain every point.
+    maximum_proteins: 4                             # Balanced proteins per evaluated split; zero displays all.
+    report_budget_mib: 4.0                          # Maximum embedded document size, not evaluation coverage.
+    # identifiers: [1ABC_A]                         # Optional exact evaluated IDs instead of automatic balanced sampling.
 
-  - name: regional-existence                       # Require positive evidence after fixed diffusion.
-    run: wisdom.Training.Training                   # Same LambdaForge Work.
-    with: *loss_region_base                         # Exact same frozen parent configuration.
-    sweep:                                          # Complete regional-existence comparison.
-      space:                                        # Every coefficient is a required sweep cell.
-        regional_positive_lambda:                   # Diffused positive-bag prior.
-          values:                                   # One-dimensional screen.
-            - 0.0                                   # V6a parent control.
-            - 0.1                                   # Weak regional constraint.
-            - 0.3                                   # Moderate regional constraint.
-      reference: {regional_positive_lambda: 0.0}     # Compare against the V6a parent.
-    objective: *loss_region_objective               # Same joint decision metric.
-    resources: *loss_region_resources               # Same allocation.
+  # Visualization defaults: mode=none (none/report/viewer/full), content=predictions
+  # (predictions/full), maximum_points=2000 (>0), maximum_proteins=12 (>=0),
+  # report_budget_mib=4.0 in (0,16], identifiers=(), threshold=0.5 in [0,1],
+  # embed_report=true. report writes embedded pages only; viewer adds HTML/PLY;
+  # full additionally saves prediction NPZ. none overrides embed_report completely.
+  # This is per completed Run, not per epoch or a post-Study best-seed callback.
+  # LF has a 64 MiB combined report limit: keep mode=none for large sweeps/HPO.
+  evaluate_test: false                          # Keep test sealed.
+  data_workers: 4                               # Persistent NPZ workers.
+sweep:                                          # Complete positive-existence comparison.
+  space:                                        # Every coefficient is a required sweep cell.
+    positive_existence_lambda:                  # Positive-bag existential prior.
+      values:                                   # One-dimensional screen.
+        - 0.0                                   # V6a parent control.
+        - 0.05                                  # Weak existence constraint.
+        - 0.1                                   # Weak existence constraint.
+        - 0.2                                   # Moderate existence constraint.
+        - 0.3                                   # Moderate existence constraint.
+        - 0.6                                   # Strong existence constraint.
+        - 0.8                                   # Strong existence constraint.
+        - 1.0                                   # Strong existence constraint.
+  reference: {positive_existence_lambda: 0.0}    # Compare against the V6a parent.
+objective:               # Shared joint validation decision.
+  metric: val_wisdom_hpo_score                  # Global/surface/coupling utility.
+  mode: max                                     # Maximize the composite validation utility.
+  range: [0.0, 1.0]                             # Mathematical bounds of the composite utility.
+  practical_margin: 0.015                       # Smaller paired differences are negligible.
+resources:               # Shared study allocation.
+  gpu: 3                                        # Three accelerators.
+  cpu: 36                                       # Shared host capacity.
+  memory: 96GiB                                 # Shared host-memory ceiling.
+  time: 168h                                    # Seven-day ceiling.
 
-  - name: regional-ranking                         # Rank positive regional evidence above negatives.
-    run: wisdom.Training.Training                   # Same LambdaForge Work.
-    with: *loss_region_base                         # Exact same frozen parent configuration.
-    sweep:                                          # Complete regional-ranking comparison.
-      space:                                        # Every coefficient is a required sweep cell.
-        regional_ranking_lambda:                    # Mixed-batch regional ranking prior.
-          values:                                   # One-dimensional screen.
-            - 0.0                                   # V6a parent control.
-            - 0.1                                   # Weak ranking constraint.
-            - 0.3                                   # Moderate ranking constraint.
-      reference: {regional_ranking_lambda: 0.0}      # Compare against the V6a parent.
-    objective: *loss_region_objective               # Same joint decision metric.
-    resources: *loss_region_resources               # Same allocation.
-
-# YAML anchors duplicate only configuration text; LambdaForge still expands three independent
-# studies. No Run combines existence, regional, and ranking coefficients.
-# LambdaForge 0.15 evaluates every cell and adds complete shared-replicate blocks until the paired
-# conclusion is stable. Sweeps disable HPO pruning and seed racing by contract; ARI owns packing.
+# One native paired sweep, no steps, HPO pruning or per-cell seed racing.
+# All coefficient values, parent controls and resource budgets are preserved from the former step.

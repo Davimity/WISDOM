@@ -21,7 +21,21 @@ with:                                               # Exact baseline passed to T
   precision: auto                                   # BF16 where supported, otherwise FP32.
   surface_metrics: true                             # Evaluation-only localization diagnostics.
   surface_metrics_interval: 1                       # Measure global/surface coupling every epoch.
-  surface_visualization: none                       # Avoid ten duplicate viewer galleries.
+  visualization:                                    # Presentation only; generated once at this Run's best checkpoint.
+    mode: report                                    # none disables all viewers; report embeds HTML without duplicate files.
+    content: predictions                            # Probability, original logits and soft/hard GT only; full adds structural layers.
+    maximum_points: 2000                            # Deterministic display-only sample; metrics retain every point.
+    maximum_proteins: 4                             # Balanced proteins per evaluated split; zero displays all.
+    report_budget_mib: 4.0                          # Maximum embedded document size, not evaluation coverage.
+    # identifiers: [1ABC_A]                         # Optional exact evaluated IDs instead of automatic balanced sampling.
+
+  # Visualization defaults: mode=none (none/report/viewer/full), content=predictions
+  # (predictions/full), maximum_points=2000 (>0), maximum_proteins=12 (>=0),
+  # report_budget_mib=4.0 in (0,16], identifiers=(), threshold=0.5 in [0,1],
+  # embed_report=true. report writes embedded pages only; viewer adds HTML/PLY;
+  # full additionally saves prediction NPZ. none overrides embed_report completely.
+  # This is per completed Run, not per epoch or a post-Study best-seed callback.
+  # LF has a 64 MiB combined report limit: keep mode=none for large sweeps/HPO.
   optimization_diagnostics: true                    # Record gradients, activations, and gate saturation.
   evaluate_test: false                              # Keep the held-out test partition sealed.
   data_workers: 4                                   # Persistent NPZ decoding workers per Run.
@@ -47,10 +61,10 @@ objective:                                          # Index the diagnostic runs 
   range: [0.0, 1.0]                                 # Mathematical bounds of the composite utility.
 
 resources:                                          # Per-seed allocation because no search packs child Runs.
-  gpu: 3                                            # One accelerator per replication.
-  cpu: 46                                           # Trainer and four data workers.
+  gpu: 2                                            # One accelerator per replication.
+  cpu: 24                                           # Trainer and four data workers.
   memory: 20GiB                                     # Host graph-decoding budget.
-  time: 16800h                                      # Seven-day safety ceiling.
+  time: 16800h                                      # Researcher-selected scheduler wall-time ceiling.
 
 # Explicit seeds are retained because this diagnostic must reproduce the historical baseline
 # sample exactly. With no search or sweep, every listed replication remains mandatory.

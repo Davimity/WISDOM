@@ -14,7 +14,6 @@ from typing import Any, cast
 from itertools import pairwise
 from collections.abc import Mapping
 from scipy.spatial import Delaunay, ConvexHull, QhullError
-
 from wisdom.preprocessing.structure.ProteinArchive import ProteinArchive
 
 
@@ -136,6 +135,44 @@ class ProteinVisualizer:
             ValueError: If geometry, metadata, or annotation alignment is malformed.
             OSError: If NPZ inputs or the HTML cannot be read or written.
         """
+        page, diagnostics = self.render(
+            path, identifier, annotation, protein_label, partitions, plotly_script,
+            additional_channels, prediction_threshold,
+        )
+        ProteinArchive.write_text(output, page)
+        return diagnostics
+
+    def render(
+        self,
+        path                 : Path,
+        identifier           : str,
+        annotation           : Path | None              = None,
+        protein_label        : int | None               = None,
+        partitions           : Mapping[str, Any] | None = None,
+        plotly_script        : str | bool               = False,
+        additional_channels  : Mapping[str, np.ndarray] | None = None,
+        prediction_threshold : float = 0.5,
+    ) -> tuple[str, Mapping[str, Any]]:
+        """Render the shared inspector in memory for standalone or embedded presentation.
+
+        Args:
+            path: Pickle-free structural NPZ with positions in angstroms.
+            identifier: Dataset member ID displayed after HTML escaping.
+            annotation: Optional fingerprint-aligned DNA sidecar.
+            protein_label: Optional global binary target, not a model input.
+            partitions: Explicit split/group metadata shown in provenance.
+            plotly_script: False uses a library supplied by the containing gallery; True embeds
+                Plotly, and a string references the existing standalone gallery's local library.
+            additional_channels: Numeric scalar arrays of shape [M], in base surface point order.
+            prediction_threshold: Initial interactive hard-prediction cutoff in [0,1].
+
+        Returns:
+            Complete HTML and numerical geometry diagnostics, without writing either to disk.
+
+        Raises:
+            ValueError: If geometry, annotation alignment or prediction threshold is invalid.
+            OSError: If an input archive cannot be read.
+        """
         if not 0.0 <= prediction_threshold <= 1.0:
             raise ValueError("prediction_threshold must lie in [0,1]")
 
@@ -155,6 +192,10 @@ class ProteinVisualizer:
             div_id           = "wisdom-plot",
             config           = {"displaylogo": False, "responsive": True, "scrollZoom": True},
         )
+        # The shared report shell waits for WebGL initialization before attaching inspector
+        # controls. This also makes switching proteins release the previous scene safely.
+
+        plot = plot.replace("Plotly.newPlot(", "window.wisdomPlotReady = Plotly.newPlot(")
         inventory_rows = "".join(
             f"<tr><td><code>{self._escape(item['name'])}</code></td>"
             f"<td>{item['shape']}</td><td>{item['dtype']}</td>"
@@ -196,8 +237,7 @@ class ProteinVisualizer:
             plot            = plot,
             controls        = control_data,
         )
-        ProteinArchive.write_text(output, html)
-        return diagnostics
+        return html, diagnostics
 
     @staticmethod
     def _extend_surface_channels(
@@ -1059,6 +1099,8 @@ table{border-collapse:collapse;width:100%;font-size:12px}th,td{border-bottom:1px
   <details class="section"><summary>Dataset and provenance</summary><div class="section-body"><pre>@@PROVENANCE@@</pre></div></details>
 </div></aside>
 <script>
+window.wisdomViewerReady=(async()=>{
+await window.wisdomPlotReady;
 const C=@@CONTROLS@@;
 const gd=document.getElementById('wisdom-plot');
 const state={surface:C.defaultSurface,atom:C.defaultAtom,predictionThreshold:Number(C.predictionThreshold),measure:false,measurePoints:[],selected:null,pending:0,queue:Promise.resolve()};
@@ -1100,9 +1142,12 @@ byId('surface-auto').addEventListener('click',()=>{setRange('surface',surfaceCha
 byId('measure-toggle').addEventListener('click',event=>{state.measure=!state.measure;event.currentTarget.classList.toggle('active',state.measure);event.currentTarget.textContent=state.measure?'Stop measuring':'Start measuring';byId('viewer-state').textContent=state.measure?'Measurement mode':'Ready'});byId('measure-clear').addEventListener('click',()=>{state.measurePoints=[];byId('measure-result').textContent='Select measurement mode, then click two atoms or surface points.';schedule(updateMeasurementTrace,'Clearing measurement')});
 byId('projection').addEventListener('change',event=>schedule(()=>Plotly.relayout(gd,{'scene.camera.projection.type':event.target.value}),'Changing projection'));byId('show-axes').addEventListener('change',event=>{const visible=event.target.checked;const update={};for(const axis of ['xaxis','yaxis','zaxis']){update[`scene.${axis}.visible`]=visible}schedule(()=>Plotly.relayout(gd,update),'Updating axes')});
 const cameras={front:{x:0,y:2.2,z:0},side:{x:2.2,y:0,z:0},top:{x:0,y:0.01,z:2.2},reset:{x:1.5,y:1.5,z:1.1}};document.querySelectorAll('[data-camera]').forEach(button=>button.addEventListener('click',()=>schedule(()=>Plotly.relayout(gd,{'scene.camera.eye':cameras[button.dataset.camera]}),'Moving camera')));byId('fit-view').addEventListener('click',()=>schedule(()=>Plotly.relayout(gd,{'scene.aspectmode':'data','scene.camera.eye':cameras.reset,'scene.camera.center':{x:0,y:0,z:0}}),'Fitting scene'));byId('reset-scene').addEventListener('click',()=>{byId('projection').value='perspective';byId('show-axes').checked=true;schedule(()=>Plotly.relayout(gd,{'scene.camera.projection.type':'perspective','scene.camera.eye':cameras.reset,'scene.xaxis.visible':true,'scene.yaxis.visible':true,'scene.zaxis.visible':true}),'Resetting scene')});
-document.querySelectorAll('[data-panel]').forEach(button=>button.addEventListener('click',()=>{const side=button.dataset.panel,action=button.dataset.action;if(action==='close')document.body.classList.add(`${side}-closed`);if(action==='open')document.body.classList.remove(`${side}-closed`);if(action==='wide')document.body.classList.toggle(`${side}-wide`);requestAnimationFrame(()=>Plotly.Plots.resize(gd));setTimeout(()=>Plotly.Plots.resize(gd),240)}));
+document.querySelectorAll('[data-panel]').forEach(button=>button.addEventListener('click',()=>{const side=button.dataset.panel,action=button.dataset.action;if(action==='close')document.body.classList.add(`${side}-closed`);if(action==='open')document.body.classList.remove(`${side}-closed`);if(action==='wide')document.body.classList.toggle(`${side}-wide`);const resizePanel=()=>{if(gd.isConnected)Plotly.Plots.resize(gd)};requestAnimationFrame(resizePanel);setTimeout(resizePanel,240)}));
 if(window.innerWidth<1100){document.body.classList.add('left-closed','right-closed')}
-window.addEventListener('resize',()=>Plotly.Plots.resize(gd));
+const resize=()=>{if(gd.isConnected)Plotly.Plots.resize(gd)};
+window.addEventListener('resize',resize);
+window.wisdomDispose=async()=>{await state.queue;window.removeEventListener('resize',resize);Plotly.purge(gd)};
+})();
 </script></body></html>"""
         replacements = {
             "@@IDENTIFIER@@":   identifier,

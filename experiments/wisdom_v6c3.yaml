@@ -1,6 +1,6 @@
-# OBJECTIVE: isolate the cardinality family against its reviewed parent.
+# OBJECTIVE: isolate the Dirichlet energy family against its reviewed parent.
 # PREREQUISITES: freeze prior winners and diagnose the need for this additional constraint.
-# VARIES: only the cardinality coefficient or its active area target.
+# VARIES: only the Dirichlet energy coefficient or its active area target.
 # FIXED: data, backbone, head, pooling and all other weak-loss coefficients.
 # DECISION: retain this family only if paired validation evidence justifies its bias and cost.
 run: wisdom.Training.Training                   # Shared LambdaForge Work.
@@ -38,7 +38,7 @@ with:                 # Common frozen parent configuration.
   weak_loss_profile: custom                     # Preserve explicit composable coefficients.
   architecture_spike: baseline                  # No architecture change.
   head_type: single                             # Fixed head relationship.
-  cardinality_lambda: 0.1                       # Fixed cardinality penalty strength.
+  cardinality_lambda: 0.0                       # Disable cardinality in this alternative.
   batch_size: 16                                # Proteins per optimizer update.
   epochs: 500                                   # Safety ceiling.
   patience: 30                                  # Global validation patience.
@@ -62,17 +62,15 @@ with:                 # Common frozen parent configuration.
   # LF has a 64 MiB combined report limit: keep mode=none for large sweeps/HPO.
   evaluate_test: false                          # Keep test sealed.
   data_workers: 4                               # Persistent NPZ workers.
-sweep:                                          # Complete cardinality-family comparison.
-  space:                                        # One parent control plus three active area floors.
-    cardinality_lambda:                         # Enable or disable the family.
-      values: [0.0, 0.1]                       # Parent control and fixed active strength.
-    minimum_positive_area:                      # Positive-bag probability-area floor.
-      values:                                   # Tested fractions when cardinality is active.
-        - 0.005                                 # Half-percent surface floor.
-        - 0.010                                 # One-percent surface floor.
-        - 0.020                                 # Two-percent surface floor.
-      when: {cardinality_lambda: 0.1}           # Avoid irrelevant control duplicates.
-  reference: {cardinality_lambda: 0.0}           # Compare active floors with the parent model.
+  total_variation_lambda: 0.0                   # Explicitly disable TV in the Dirichlet comparison.
+sweep:                                          # Complete Dirichlet coefficient comparison.
+  space:                                        # Every coefficient is a required sweep cell.
+    dirichlet_lambda:                           # Intrinsic spectral-energy penalty.
+      values:                                   # One-dimensional screen.
+        - 0.0                                   # Unregularized parent control.
+        - 0.001                                 # Weak Dirichlet smoothing.
+        - 0.01                                  # Moderate Dirichlet smoothing.
+  reference: {dirichlet_lambda: 0.0}             # Compare with the unregularized parent.
 objective:       # Shared joint validation decision.
   metric: val_wisdom_hpo_score                  # Global/surface/coupling utility.
   mode: max                                     # Maximize the composite validation utility.

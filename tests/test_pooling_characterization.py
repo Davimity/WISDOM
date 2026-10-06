@@ -1,6 +1,7 @@
 """Mathematical contracts for the controlled V5 pooling characterization."""
 
 import copy
+import inspect
 from pathlib import Path
 
 import pytest
@@ -277,28 +278,30 @@ def test_v5_grids_use_exact_frozen_values_and_four_seeds():
     root = Path(__file__).parents[1] / "experiments"
     legacy = safe_load((root / "wisdom_v5.yaml").read_text())["with"]
     expected = {
-        "wisdom_v5a.yaml": [1, 2, 10, 16, 9, 18],
-        "wisdom_v5b.yaml": [8, 18, 4, 2, 16, 18, 12, 1],
+        "wisdom_v5a.yaml": [1, 2, 32, 26, 16, 54, 2, 26, 24, 22, 1],
+        "wisdom_v5b.yaml": [16, 9, 16, 16, 18],
     }
     for name, counts in expected.items():
         raw = safe_load((root / name).read_text())
         assert "steps" not in raw and "search" not in raw
         assert raw["seeds"] == [4, 7, 32, 54]
-        assert raw["resources"] == {"gpu": 2, "cpu": 36, "memory": "96GiB", "time": "168h"}
-        assert raw["execution"] == {"max_time": "168h"}
+        # Host allocations are operational choices, not frozen scientific hyperparameters.
+        config = WorkConfig.from_yaml(root / name)
+        resources = config.resources
+        assert resources.gpu_count >= 1 and resources.cpu_cores >= 1
         for key, value in legacy.items():
             assert raw["with"][key] == value, (name, key)
         # Planning invokes the installed public LF expander but executes no scientific Work.
-        plan = WorkRunner().plan(WorkConfig.from_yaml(root / name))
+        plan = WorkRunner().plan(config)
         assert [len(level) for level in plan.levels] == [sum(counts) * 4]
         assert len(plan.preflight["studies"]) == 1
         facts = plan.preflight["studies"][0]
         assert facts["candidates"] == sum(counts)
         assert facts["required_runs"] == sum(counts) * 4
         assert facts["shared_seeds"] == [4, 7, 32, 54]
-        assert facts["study_time_budget_seconds"] == 604800
-        assert facts["scheduler_wall_time_seconds"] == 604800
-        assert facts["requested_gpus"] == 2 and facts["max_parallel"] is None
+        assert facts["study_time_budget_seconds"] == (3600000 if "v5a" in name else 604800)
+        assert facts["scheduler_wall_time_seconds"] == resources.runtime_seconds
+        assert facts["requested_gpus"] == resources.gpu_count and facts["max_parallel"] is None
         assert facts["reference"] == ({"pooling_type": "max"} if "v5a" in name else None)
         assert [item["candidates"] for item in facts["conditional_branches"]["counts"]] == counts
 
@@ -306,37 +309,43 @@ def test_v5_grids_use_exact_frozen_values_and_four_seeds():
 def test_v5_inactive_parameters_are_absent_from_native_candidates():
     """Check exact active keys, including transitive conditions on adaptive scalars."""
     root = Path(__file__).parents[1] / "experiments"
-    fixed = {
+    characterization = {
         "max": set(),
         "mean": {"pooling_area_mode"},
-        "attention": {"pooling_area_mode", "attention_hidden_dim"},
+        "attention": {"pooling_area_mode", "attention_variant", "attention_hidden_dim"},
         "topk": {"pooling_area_mode", "topk_fraction"},
         "local_mean_max": {"regional_diffusion_scale"},
-        "log_sum_exp": {"pooling_area_mode", "log_sum_exp_beta"},
+        "log_sum_exp": {"pooling_area_mode", "log_sum_exp_mode"},
+        "linear_softmax": {"pooling_area_mode"},
+        "autopool": {"pooling_area_mode", "autopool_alpha"},
+        "gem": {"pooling_area_mode", "gem_power"},
+        "max_mean": {"pooling_area_mode", "max_mean_lambda"},
+        "multiscale_regional_max": set(),
     }
     adaptive = {
-        "attention": {"pooling_area_mode", "attention_variant", "attention_hidden_dim"},
         "log_sum_exp": {"pooling_area_mode", "log_sum_exp_mode"},
         "local_mean_max": {"regional_scale_mode", "regional_diffusion_scale_init"},
-        "linear_softmax": {"pooling_area_mode"},
         "autopool": {"pooling_area_mode", "autopool_alpha_mode"},
         "gem": {"pooling_area_mode", "gem_power_mode"},
         "max_mean": {"pooling_area_mode", "max_mean_lambda_mode"},
-        "multiscale_regional_max": set(),
     }
-    for name, branches in [("v5a", fixed), ("v5b", adaptive)]:
+    for name, branches in [("v5a", characterization), ("v5b", adaptive)]:
         config = WorkConfig.from_yaml(root / f"wisdom_{name}.yaml")
         run = config.levels[0].runs[0]
         for candidate in run.variants:
             family = candidate["pooling_type"]
             keys = {"pooling_type"} | branches[family]
+            if family == "log_sum_exp":
+                mode = candidate["log_sum_exp_mode"]
+                keys |= {
+                    "fixed": {"log_sum_exp_beta"},
+                    "learned": {"log_sum_exp_beta_init"},
+                    "curriculum": {
+                        "pooling_curriculum_end_beta",
+                        "pooling_curriculum_hold_fraction",
+                    },
+                }[mode]
             if name == "v5b":
-                if family == "log_sum_exp":
-                    keys |= (
-                        {"log_sum_exp_beta_init"}
-                        if candidate["log_sum_exp_mode"] == "learned"
-                        else {"pooling_curriculum_end_beta", "pooling_curriculum_hold_fraction"}
-                    )
                 for scalar_family, scalar in [
                     ("autopool", "autopool_alpha"),
                     ("gem", "gem_power"),
@@ -356,16 +365,93 @@ def test_v5_inactive_parameters_are_absent_from_native_candidates():
             assert all(c["pooling_type"] != "max" for c in run.variants)
 
 
-def test_v5b_curriculum_changes_before_validation_patience_can_expire():
+def test_v5a_curriculum_changes_before_validation_patience_can_expire():
     """Ensure the configured schedule has a chance to act without disabling early stopping."""
     root = Path(__file__).parents[1] / "experiments"
-    run = WorkConfig.from_yaml(root / "wisdom_v5b.yaml").levels[0].runs[0]
+    run = WorkConfig.from_yaml(root / "wisdom_v5a.yaml").levels[0].runs[0]
     curriculum = [c for c in run.variants if c.get("log_sum_exp_mode") == "curriculum"]
-    assert len(curriculum) == 10
+    assert len(curriculum) == 22
     assert run.parameters["epochs"] == 500 and run.parameters["patience"] == 30
     for candidate in curriculum:
         assert candidate["pooling_curriculum_hold_fraction"] == 0.0
         # Training computes progress=(epoch-1)/epochs; zero hold changes beta at epoch 2.
         fraction = (2 - 1) / run.parameters["epochs"]
         beta = 1.0 + fraction * (candidate["pooling_curriculum_end_beta"] - 1.0)
-        assert 1.0 < beta < candidate["pooling_curriculum_end_beta"]
+        if candidate["pooling_curriculum_end_beta"] == 1.0:
+            assert beta == 1.0  # Explicit constant-beta schedule control, not a delayed change.
+        else:
+            assert 1.0 < beta < candidate["pooling_curriculum_end_beta"]
+
+
+def test_v5a_covers_every_family_and_expands_old_upper_edges():
+    """Require both mathematical endpoints and substantial continuation past old grid edges."""
+    root = Path(__file__).parents[1] / "experiments"
+    raw = safe_load((root / "wisdom_v5a.yaml").read_text())
+    space = raw["sweep"]["space"]
+    assert set(space["pooling_type"]["values"]) == {family.value for family in PoolingType}
+    assert set(space["attention_variant"]["values"]) == {"simple", "gated"}
+    assert set(space["log_sum_exp_mode"]["values"]) == {"fixed", "curriculum"}
+    assert {0.6, 0.8, 1.0}.issubset(space["topk_fraction"]["values"])
+    assert {0.0, 1.0}.issubset(space["max_mean_lambda"]["values"])
+    for key, lower, upper in [
+        ("attention_hidden_dim", 4, 512),
+        ("regional_diffusion_scale", 0, 64),
+        ("log_sum_exp_beta", 0.01, 1280),
+        ("pooling_curriculum_end_beta", 1, 1280),
+        ("autopool_alpha", 0, 1000),
+        ("gem_power", 1, 1024),
+    ]:
+        values = space[key]["values"]
+        assert min(values) == lower and max(values) == upper
+        assert values == sorted(set(values))
+
+
+@pytest.mark.parametrize("name", ["v5a", "v5b"])
+def test_every_authored_pooling_candidate_has_finite_forward_and_backward(name):
+    """Execute all native candidate heads, including extreme controls and bounded initializations.
+
+    Args:
+        name: Characterization or learned-scalar refinement configuration name.
+
+    These synthetic numerical checks establish executability, not scientific superiority.
+    """
+    root = Path(__file__).parents[1] / "experiments"
+    run = WorkConfig.from_yaml(root / f"wisdom_{name}.yaml").levels[0].runs[0]
+    accepted = set(inspect.signature(ProteinPoolingHead).parameters)
+    for candidate in run.variants:
+        parameters = {key: value for key, value in candidate.items() if key in accepted}
+        head = ProteinPoolingHead(3, dropout=0, **parameters).eval()
+        if candidate.get("log_sum_exp_mode") == "curriculum":
+            head.set_log_sum_exp_beta(candidate["pooling_curriculum_end_beta"])
+        values = torch.tensor([-2.0, -0.25, 0.5, 1.75], requires_grad=True)
+        areas = torch.tensor([1.0, 3.0, 2.0, 1.0])
+        pooled = _pool(head, values, areas)["logits"]
+        assert torch.isfinite(pooled).all(), candidate
+        pooled.sum().backward()
+        assert values.grad is not None and torch.isfinite(values.grad).all(), candidate
+        assert all(p.grad is None or torch.isfinite(p.grad).all() for p in head.parameters())
+
+
+@pytest.mark.parametrize("area", ["point", "area"])
+def test_expanded_fixed_pooling_endpoints_recover_their_controls(area):
+    """Verify exact endpoints and finite high-sharpness limits on moderate local logits.
+
+    Args:
+        area: Point-count or represented-area measure used consistently by compared controls.
+    """
+    values = torch.tensor([-2.0, -0.25, 0.5, 1.75])
+    areas = torch.tensor([1.0, 3.0, 2.0, 1.0])
+    mean = _pool(_head("mean", area), values, areas)["logits"]
+    maximum = values.max()[None]
+    topk = _pool(_head("topk", area, topk_fraction=1), values, areas)["logits"]
+    assert torch.allclose(topk, mean, atol=1e-6)
+    for weight, target in [(0.0, mean), (1.0, maximum)]:
+        mixture = _pool(_head("max_mean", area, max_mean_lambda=weight), values, areas)["logits"]
+        assert torch.allclose(mixture, target, atol=1e-6)
+    for family, settings, tolerance in [
+        ("log_sum_exp", {"log_sum_exp_beta": 1280}, 0.01),
+        ("autopool", {"autopool_alpha": 1000}, 0.01),
+        ("gem", {"gem_power": 1024}, 0.02),
+    ]:
+        pooled = _pool(_head(family, area, **settings), values, areas)["logits"]
+        assert torch.allclose(pooled, maximum, atol=tolerance), (family, area, pooled)

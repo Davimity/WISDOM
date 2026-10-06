@@ -14,9 +14,9 @@ from pathlib import Path
 from collections import defaultdict
 from collections.abc import Sequence
 from plotly.offline import get_plotlyjs
-
 from lambdaforge.data import DatasetIndex, DatasetMember
 from wisdom.evaluation.PointCloudExporter import PointCloudExporter
+from wisdom.visualization.ProteinReportPage import ProteinReportPage
 from wisdom.preprocessing.structure.ProteinArchive import ProteinArchive
 from wisdom.preprocessing.structure.ProteinVisualizer import ProteinVisualizer
 
@@ -41,6 +41,8 @@ class Visualization(lf.Work):
         normal_length         : float           = 1.5,
         mesh_alpha            : float           = 4.0,
         maximum_vdw_atoms     : int             = 1500,
+        report_section        : bool            = True,
+        report_maximum_mib    : float           = 4.0,
         verbose               : bool            = False,
     ) -> dict[str, Any]:
         """Create interactive HTML and portable PLY views without changing the dataset.
@@ -73,6 +75,10 @@ class Visualization(lf.Work):
             mesh_alpha: Largest retained alpha-complex tetrahedron radius in ångströms.
             maximum_vdw_atoms: Largest deterministic atom subset rendered as physical-radius
                 icosahedra; every atom remains available in the ordinary marker layer.
+            report_section: Also declare an offline WISDOM proteins tab in the LF Study report,
+                using the identical inspector without relative file links.
+            report_maximum_mib: Per-Run section byte limit in (0,16] MiB. Omitted viewers are listed;
+                the framework separately enforces its 64 MiB combined-report limit.
             verbose: Log every rendered member in addition to normal progress summaries.
 
         Returns:
@@ -82,6 +88,7 @@ class Visualization(lf.Work):
         Raises:
             ValueError: If the dataset/index, filters, requested IDs, assets, or visualization
                 parameters are missing or inconsistent.
+            RuntimeError: If the requested report API is absent from the installed LambdaForge.
             OSError: If dataset assets cannot be read or managed outputs cannot be written.
         """
         if skip:
@@ -92,6 +99,12 @@ class Visualization(lf.Work):
             raise ValueError("dataset is required when visualization runs")
         if maximum_proteins < 0:
             raise ValueError("maximum_proteins cannot be negative")
+        if report_section and not callable(getattr(self.outputs, "html_section", None)):
+            raise RuntimeError(
+                "This LambdaForge installation lacks outputs.html_section. Install the current "
+                "LambdaForge source, then run ./install.sh locally or "
+                "lf clusters bootstrap <cluster> --project . for managed execution."
+            )
 
         dataset_root = Path(dataset).resolve()
         index_path   = dataset_root / "index.jsonl"
@@ -136,7 +149,8 @@ class Visualization(lf.Work):
         )
         exporter = PointCloudExporter()
 
-        reports: list[dict[str, Any]] = []
+        reports        : list[dict[str, Any]] = []
+        report_documents: list[dict[str, Any]] = []
         for member_index, member in enumerate(selected, start=1):
             report = self._render_member(
                 dataset_root,
@@ -145,6 +159,9 @@ class Visualization(lf.Work):
                 visualizer,
                 exporter,
             )
+            document = report.pop("document")
+            if report_section:
+                report_documents.append({**report, "html": document})
             reports.append(report)
 
             if verbose or member_index == len(selected) or member_index % 10 == 0:
@@ -173,6 +190,18 @@ class Visualization(lf.Work):
         )
         ProteinArchive.write_text(output_root / "index.html", self._index_html(reports))
 
+        # Report collection is explicitly triggered by LF, not by normal polling or training.
+        # The same compressed gallery supports both dataset inspection and model predictions.
+
+        report_summary = None
+        if report_section:
+            page, report_summary = ProteinReportPage(report_maximum_mib).render(
+                report_documents, {"source": "Immutable dataset geometry and DNA ground truth"},
+            )
+            self.outputs.html_section(
+                "protein-report", section="wisdom-proteins", title="WISDOM proteins",
+            ).write_text(page)
+
         failures = sum(report["diagnostics"]["status"] != "PASS" for report in reports)
         self.metrics.log("visualized_proteins", len(reports))
         self.metrics.log("visual_diagnostic_failures", failures)
@@ -186,6 +215,7 @@ class Visualization(lf.Work):
             "rendered_proteins":   len(reports),
             "identifiers":         [report["identifier"] for report in reports],
             "diagnostic_failures": failures,
+            "report_summary":      report_summary,
         }
 
     @staticmethod
@@ -267,7 +297,7 @@ class Visualization(lf.Work):
             exporter: Lossless-order PLY/NPZ point-cloud exporter.
 
         Returns:
-            JSON-compatible paths, member metadata, channel names, and diagnostics.
+            Paths, metadata, channels, diagnostics and the in-memory shared inspector document.
 
         Raises:
             ValueError: If required member assets or aligned arrays are missing.
@@ -286,15 +316,16 @@ class Visualization(lf.Work):
         ply_path  = output_root / "proteins" / f"{safe_name}.ply"
 
         surface_channels = visualizer.surface_channels(base, annotation)
-        diagnostics = visualizer.visualize(
+        page, diagnostics = visualizer.render(
             base,
-            html_path,
             member.member_id,
             annotation      = annotation,
             protein_label   = int(member.targets["dna_binding"]),
             partitions      = dict(member.partitions),
-            plotly_script   = "../plotly.min.js",
+            plotly_script   = False,
         )
+        standalone = page.replace("<head>", '<head><script src="../plotly.min.js"></script>', 1)
+        ProteinArchive.write_text(html_path, standalone)
         with np.load(base, allow_pickle=False) as archive:
             positions = archive["surface_positions"]
         exporter.export(ply_path, positions, surface_channels)
@@ -307,6 +338,7 @@ class Visualization(lf.Work):
             "ply":         ply_path.relative_to(output_root).as_posix(),
             "channels":    sorted(surface_channels),
             "diagnostics": dict(diagnostics),
+            "document":    page,
         }
 
     @staticmethod

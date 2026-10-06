@@ -1,8 +1,8 @@
-# OBJECTIVE: compare fixed pooling rules in one finite paired Study.
+# OBJECTIVE: characterize every implemented pooling family, including extreme controls.
 # PREREQUISITES: use the reviewed V5 backbone and immutable reduced benchmark.
-# VARIES: pooling family, point/area measure, and active fixed parameters.
+# VARIES: all pooling families, attention variants, fixed parameters, and LSE curriculum.
 # FIXED: backbone, four paired seeds, protein BCE, validation objective, sealed test.
-# DECISION: nominate 2-4 nondominated families jointly with V5b, not one automatic winner.
+# DECISION: nominate 2-4 families; V5b separately refines their learned scalar behavior.
 name: wisdom-v5a-pooling-characterization  # One native Study, not a family-step composition.
 run: wisdom.Training.Training  # Existing model, training loop, and central analysis profile.
 
@@ -36,7 +36,21 @@ with:  # Exact reviewed V5 backbone; only the sweep below varies.
   precision: "auto"                                    # Use supported mixed precision.
   surface_metrics: true                                # Evaluation-only local ground truth.
   surface_metrics_interval: 1                          # Record local metrics each validation epoch.
-  surface_visualization: "none"                        # Avoid galleries for every sweep candidate.
+  visualization:                                    # Presentation only; generated once at this Run's best checkpoint.
+    mode: none                                      # none disables all viewers; report embeds HTML without duplicate files.
+    content: predictions                            # Probability, original logits and soft/hard GT only; full adds structural layers.
+    maximum_points: 2000                            # Deterministic display-only sample; metrics retain every point.
+    maximum_proteins: 4                             # Balanced proteins per evaluated split; zero displays all.
+    report_budget_mib: 4.0                          # Maximum embedded document size, not evaluation coverage.
+    # identifiers: [1ABC_A]                         # Optional exact evaluated IDs instead of automatic balanced sampling.
+
+  # Visualization defaults: mode=none (none/report/viewer/full), content=predictions
+  # (predictions/full), maximum_points=2000 (>0), maximum_proteins=12 (>=0),
+  # report_budget_mib=4.0 in (0,16], identifiers=(), threshold=0.5 in [0,1],
+  # embed_report=true. report writes embedded pages only; viewer adds HTML/PLY;
+  # full additionally saves prediction NPZ. none overrides embed_report completely.
+  # This is per completed Run, not per epoch or a post-Study best-seed callback.
+  # LF has a 64 MiB combined report limit: keep mode=none for large sweeps/HPO.
   faithfulness_audit: true                             # Deletion/insertion controls; regional audits remain unavailable.
   evaluate_test: false                                 # Keep held-out test sealed.
   data_workers: 4                                      # Persistent NPZ-decoding workers per Run.
@@ -52,32 +66,58 @@ with:  # Exact reviewed V5 backbone; only the sweep below varies.
 
 seeds: [4, 7, 32, 54]  # Four paired repetitions for every finite candidate; no seed racing.
 
-sweep:  # Exhaust every finite cell; no adaptive candidate pruning.
-  reference: {pooling_type: max}  # Exactly one matching candidate; paired MAX comparisons.
-  space:  # Children exist only while their native activation conditions hold.
-    pooling_type:  # Scientific aggregation hypothesis.
-      values: [max, mean, attention, topk, local_mean_max, log_sum_exp]  # Six families.
-    pooling_area_mode:  # Point-count or represented-area weighting.
-      values: [point, area]  # Compare both measures where the operator uses one.
-      when: {pooling_type: {in: [mean, attention, topk, log_sum_exp]}}  # Native finite membership.
-    attention_hidden_dim:  # Width of the default simple tanh attention scorer.
-      values: [8, 16, 32, 64, 128]  # Five fixed capacities.
-      when: {pooling_type: attention}  # No attention parameter on other families.
-    topk_fraction:  # Selected fraction of points or represented area.
-      values: [0.0025, 0.005, 0.01, 0.025, 0.05, 0.1, 0.2, 0.4]  # Eight support sizes.
-      when: {pooling_type: topk}  # Only Top-K uses this fraction.
-    regional_diffusion_scale:  # Regional smoothing length in angstroms, not diffusion time.
-      values: [0.0, 0.5, 1.0, 1.5, 2.5, 4.0, 6.0, 8.0, 12.0]  # Zero is unsmoothed identity.
-      when: {pooling_type: local_mean_max}  # Only regional MAX uses this scale.
-    log_sum_exp_beta:  # Fixed normalized log-sum-exp sharpness.
-      values: [0.5, 1.0, 2.0, 5.0, 10.0, 20.0, 40.0, 80.0, 160.0]  # Mean-like to MAX-like.
-      when: {pooling_type: log_sum_exp}  # Only fixed LSE uses beta.
+sweep:  # Exhaust all implemented pooling families and their applicable protocols.
+  reference: {pooling_type: max}  # One exact MAX reference, shared across all families.
+  space:  # Native conditions omit irrelevant parameters instead of multiplying defaults.
+    pooling_type:  # All eleven implemented aggregation families belong to this Study.
+      values: [max, mean, attention, topk, local_mean_max, log_sum_exp, linear_softmax, autopool, gem, max_mean, multiscale_regional_max]  # Full family screen.
+    pooling_area_mode:  # Point-count or represented-area weighting where meaningful.
+      values: [point, area]  # Both measures; regional diffusion already uses geometric mass.
+      when: {pooling_type: {in: [mean, attention, topk, log_sum_exp, linear_softmax, autopool, gem, max_mean]}}  # Eight applicable families.
+    attention_variant:  # Compare both existing learned attention scorers.
+      values: [simple, gated]  # Same local predictor; only the aggregation scorer changes.
+      when: {pooling_type: attention}  # No attention selector on other families.
+    attention_hidden_dim:  # Attention scorer capacity, not the frozen encoder width.
+      values: [4, 8, 16, 32, 64, 128, 256, 512]  # Narrow bottleneck through wide scorer.
+      when: {pooling_type: attention}  # Eight widths x two scorers x two measures.
+    topk_fraction:  # Highest-scoring fraction of point count or represented area.
+      values: [0.0005, 0.001, 0.0025, 0.005, 0.01, 0.025, 0.05, 0.1, 0.2, 0.4, 0.6, 0.8, 1.0]  # Tiny support through the full-surface mean.
+      when: {pooling_type: topk}  # Fraction 1 is the exact corresponding mean control.
+    regional_diffusion_scale:  # Fixed heat length in angstroms.
+      values: [0.0, 0.1, 0.25, 0.5, 1.0, 1.5, 2.5, 4.0, 6.0, 8.0, 12.0, 16.0, 24.0, 32.0, 48.0, 64.0]  # Identity through protein-scale smoothing.
+      when: {pooling_type: local_mean_max}  # Positive lengths retain the existing truncated spectrum.
+    log_sum_exp_mode:  # Fixed sharpness or a prescribed training schedule.
+      values: [fixed, curriculum]  # Learned scalar refinement is isolated in V5b.
+      when: {pooling_type: log_sum_exp}  # Parent of mutually exclusive beta controls.
+    log_sum_exp_beta:  # Fixed normalized LSE sharpness on local logits.
+      values: [0.01, 0.05, 0.1, 0.25, 0.5, 1.0, 2.0, 5.0, 10.0, 20.0, 40.0, 80.0, 160.0, 320.0, 640.0, 1280.0]  # Mean-like through strongly MAX-like.
+      when: {log_sum_exp_mode: fixed}  # Not passed to a curriculum candidate.
+    pooling_curriculum_end_beta:  # Target sharpness of the prescribed LSE schedule.
+      values: [1.0, 2.0, 5.0, 10.0, 20.0, 40.0, 80.0, 160.0, 320.0, 640.0, 1280.0]  # Endpoint 1 is a deliberately constant-beta control.
+      when: {log_sum_exp_mode: curriculum}  # No schedule parameter on fixed LSE.
+    pooling_curriculum_hold_fraction:  # Initial fraction of the epoch ceiling held at beta=1.
+      values: [0.0]  # Change from epoch 2; do not wait beyond patience 30.
+      when: {log_sum_exp_mode: curriculum}  # Endpoint 1 intentionally never changes.
+    autopool_alpha:  # Fixed non-negative probability-space exponential sharpness.
+      values: [0.0, 0.1, 0.5, 1.0, 2.0, 5.0, 10.0, 20.0, 50.0, 100.0, 250.0, 500.0, 1000.0]  # Probability mean through strong peak selection.
+      when: {pooling_type: autopool}  # Default mode remains fixed; no inactive learned initialization.
+    gem_power:  # Fixed probability-space generalized-mean exponent.
+      values: [1.0, 1.25, 2.0, 4.0, 8.0, 16.0, 32.0, 64.0, 128.0, 256.0, 512.0, 1024.0]  # Probability mean through MAX-like behavior.
+      when: {pooling_type: gem}  # Log-probability implementation avoids direct p**power underflow.
+    max_mean_lambda:  # Fixed contribution of MAX to a convex MAX-MEAN mixture.
+      values: [0.0, 0.01, 0.05, 0.1, 0.25, 0.5, 0.75, 0.9, 0.95, 0.99, 1.0]  # Exact MEAN/MAX endpoints plus near-endpoint controls.
+      when: {pooling_type: max_mean}  # Area affects only the MEAN component.
 
-# sweep.space is required; reference is optional and must match exactly one candidate.
-# values are finite choices; when accepts equality or {in: [...]} over a finite parent domain.
-# Multiple parents mean AND; inactive descendants are omitted transitively.
-# Branch counts: MAX=1, MEAN=2, ATTENTION=10, TOPK=16, REGIONAL=9, LSE=18.
-# Total: 56 candidates x 4 seeds = 224 required Runs in one Study.
+# sweep.space is required; optional reference must match exactly one candidate.
+# Native when accepts equality or finite membership; inactive descendants are absent.
+# Branch counts: MAX=1, MEAN=2, ATTENTION=32, TOPK=26, REGIONAL=16, LSE=54,
+# LINEAR_SOFTMAX=2, AUTOPOOL=26, GEM=24, MAX-MEAN=22, MULTISCALE_REGIONAL_MAX=1.
+# Total: 206 candidates x 4 paired seeds = 824 required Runs; no competitive pruning.
+# Exact endpoint-equivalent cells are intentional controls, not distinct scientific discoveries.
+# A best value at an unbounded-grid edge is unresolved, not an optimum: inspect paired curves
+# and expand a subsequent preregistered grid if no plateau/reversal appears. These are not infinite ranges.
+# The multiscale operator keeps its existing five-length bank [0, 1.5, 3, 6, 12] angstroms.
+# Its learned convex weights are intrinsic to this family; V5a introduces no new operator.
 
 objective:  # Unchanged development utility, never held-out test performance.
   metric: val_wisdom_hpo_score  # Existing protein/surface/coupling utility.
@@ -89,21 +129,21 @@ objective:  # Unchanged development utility, never held-out test performance.
 # Keep the existing utility and 0.015 margin; analysis never changes selection/pruning.
 
 resources:  # One enclosing allocation for this complete Study, not one per family.
-  gpu: 2  # Match the two-GPU ctgpgpu12 target.
-  cpu: 36  # Shared host decoding/orchestration budget.
+  gpu: 3  # Match the two-GPU ctgpgpu12 target.
+  cpu: 42  # Shared host decoding/orchestration budget.
   memory: 96GiB  # Shared host-memory ceiling.
-  time: 168h  # Scheduler wall-time ceiling for the enclosing allocation.
+  time: 1000h  # Scheduler wall-time ceiling for the enclosing allocation.
 
 # Resource defaults: cpu=1, gpu=0, processes=1; memory/gpu_memory/storage=0, time=null.
 # Counts are non-negative (cpu/processes >= 1, processes <= cpu); time must be positive. GPU packing is native
 # automatic planning; no runs_per_gpu, max_parallel, or hard-coded VRAM reservations.
 
 execution:  # Explicit logical budget, independently of the scheduler's allocation ceiling.
-  max_time: 168h  # Stop dispatching new Runs after seven days; coverage may be incomplete.
+  max_time: 1000h  # Preserve the authored dispatch budget; scheduler time still limits this allocation.
 
 # Execution defaults: max_time/max_runs/max_parallel/runs_per_gpu=null, failure_retries=1.
 # A time budget does not grant extra scheduler time or guarantee full sweep completion.
-# Omit max_time for an unbounded logical budget; resources.time still limits the allocation.
+# Omit max_time for an unbounded logical budget; the authored scheduler ceiling still applies.
 
 analysis:  # Small native overrides of Training.analysis_profile for this entire Study.
   metrics:  # Priorities order research interest only; objectives remain unchanged.

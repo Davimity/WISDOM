@@ -17,15 +17,16 @@ that a formal scientific WISDOM generation has already been validated.
 | Order | File | Scientific question | Prerequisites | What varies | Decision metric | Next experiment |
 |---:|---|---|---|---|---|---|
 | 1a | `wisdom_v1a.yaml` | How variable and failure-prone is the untouched baseline? | Dataset registered | Complete run seed | Distribution of `val_wisdom_hpo_score` plus collapse diagnostics | 1b |
-| 1b | `wisdom_v1b.yaml` | Does variance mainly originate in parameter initialization or later training randomness? | Relevant variance in 1a | One RNG source at a time | Variance decomposition; no winner | 2 |
+| 1b | `wisdom_v1b.yaml` | How much variance comes from training randomness with identical initial weights? | Relevant variance in 1a | Training RNG only | Variance decomposition; no winner | 1c |
+| 1c | `wisdom_v1c.yaml` | How much variance comes from initial weights with fixed training randomness? | Same baseline as 1b | Initialization RNG only | Complementary variance control; no winner | 2 |
 | 2 | `wisdom_v2.yaml` | Which initialization policy is stable on the unchanged backbone? | 1a–1b reviewed | `initialization_profile` | `val_wisdom_hpo_score`, collapse rate, diagnostics | 3 |
 | 3 | `wisdom_v3.yaml` | Which optimizer stabilization complements the selected initialization? | Initialization winner | `optimization_profile` | `val_wisdom_hpo_score`, stability, runtime | 4 |
 | 4 | `wisdom_v4.yaml` | Which width, depth, topology, and regularization define the strongest fixed-MAX core? | Initialization and optimizer winners copied into `with` | Core model and AdamW hyperparameters | `val_wisdom_hpo_score` | 5 |
 | 5a | `wisdom_v5a.yaml` | How do fixed pooling families behave across their parameter curves? | Existing V5 ledger frozen exactly | Family, point/area measure, applicable fixed parameter | G, S, coupling, regret, seed stability, faithfulness, cost | 5b |
 | 5b | `wisdom_v5b.yaml` | Do learned parameters or additional families provide competitive representatives? | Same frozen ledger and four paired seeds as 5a | Family-specific adaptation and point/area measure | Same metrics plus parameter trajectories | Shortlist review before adapting 6a |
 | 6a | `wisdom_v6a.yaml` | Do curated negatives provide useful weak local supervision? | Pooling winner copied into `with` | `negative_surface_lambda` | `val_wisdom_hpo_score` and surface diagnostics | 6b only if useful, otherwise 7 |
-| 6b | `wisdom_v6b.yaml` | Does existence, regional existence, or ranking add signal over 6a? | Credible 6a signal | One additional loss family per independent step | `val_wisdom_hpo_score` | 6c only if a diagnosed failure remains, otherwise 7 |
-| 6c | `wisdom_v6c.yaml` | Does an identified map pathology justify cardinality, TV, or Dirichlet regularization? | Reviewed 6a/6b winner and explicit failure mode | One regularizer family per independent step | `val_wisdom_hpo_score` plus pathology-specific diagnostics | 6d if three families are credible; otherwise 7 |
+| 6b/6b2/6b3 | `wisdom_v6b.yaml`, `wisdom_v6b2.yaml`, `wisdom_v6b3.yaml` | Does existence, regional existence, or ranking add signal over 6a? | Credible 6a signal | One additional loss family per independent Study, respectively | `val_wisdom_hpo_score` | 6c only if a diagnosed failure remains, otherwise 7 |
+| 6c/6c2/6c3 | `wisdom_v6c.yaml`, `wisdom_v6c2.yaml`, `wisdom_v6c3.yaml` | Does an identified map pathology justify cardinality, TV, or Dirichlet regularization? | Reviewed 6a/6b winner and explicit failure mode | One regularizer per independent Study, respectively | `val_wisdom_hpo_score` plus pathology-specific diagnostics | 6d if three families are credible; otherwise 7 |
 | 6d | `wisdom_v6d.yaml` | Do the selected negative, regional, and regularization terms cooperate? | One credible family from each of 6a–6c | Three contribution weights jointly | `val_wisdom_hpo_score`, then fresh-seed confirmation | 7 |
 | 7 | `wisdom_v7.yaml` | Which global/local head relationship is accurate and faithful? | Selected weak-loss policy copied into `with` | `head_type` | `val_wisdom_hpo_score` and faithfulness | 8 |
 | 8 | `wisdom_v8.yaml` | Does one isolated architectural spike beat its proper control? | Head winner copied into `with` | `architecture_spike` | `val_wisdom_hpo_score`, faithfulness, compute | 9 |
@@ -38,11 +39,15 @@ file begins with `OBJECTIVE`, `PREREQUISITES`, `VARIES`, `FIXED`, and `DECISION`
 This manual freeze is preferable to silently selecting a trial or allowing a downstream YAML to
 revert to defaults.
 
-## Why V1a and V1b have no `search`
+Every training study is a single executable Work: none contains `steps`. Only the
+dataset-construction YAML composes sequential actions. Splitting the old 1b, 6b and 6c does not
+change their grids or controls; it makes each question independently launchable and reviewable.
 
-V1a estimates the baseline distribution. V1b contains two complementary controls: its first step
-keeps epoch-zero weights identical and varies later training randomness; its second step varies the
-initial weights while fixing later randomness. Adaptive HPO would censor precisely the failures and
+## Why V1a, V1b and V1c have no `search`
+
+V1a estimates the baseline distribution. V1b keeps epoch-zero weights identical and varies later
+training randomness; V1c varies initial weights while fixing later randomness. These are two
+separate studies with complementary controls. Adaptive HPO would censor precisely the failures and
 tail behavior these diagnostics measure. Their seed lists therefore expand into complete Runs with
 no pruning or winner.
 
@@ -51,7 +56,7 @@ variance estimate, so it also has no `search` section.
 
 ## Diagnostics, complete sweeps, and adaptive HPO
 
-- **Diagnostics:** V1a and V1b estimate variance and causation; they select nothing.
+- **Diagnostics:** V1a, V1b and V1c estimate variance and causation; they select nothing.
 - **Complete finite sweeps:** V2, V3, V5a/V5b, V6a–V6c, V7, and V8 use LambdaForge's explicit
   `sweep.space`. Every authored cell is mandatory. LambdaForge adds one complete shared-seed block
   at a time and stops with an anytime-valid paired analysis; HPO pruning and per-cell seed racing
@@ -72,7 +77,7 @@ The campaign omits `name`, `execution.max_parallel`, `execution.runs_per_gpu`,
 0.15's defaults match the intended policy. Filenames supply study names, and
 `lf config resolve FILE` exposes every resolved automatic value. `objective.mode: max` remains
 explicit because the current execution path still requires it for a mapped custom metric.
-V1a/V1b retain their historical explicit seeds, while V10 retains a deliberately fresh explicit
+V1a/V1b/V1c retain their historical explicit seeds, while V10 retains a deliberately fresh explicit
 confirmation set; those identities are scientific inputs rather than scheduler boilerplate.
 
 ## V5 family characterization and shortlist
@@ -90,36 +95,51 @@ curves and pairing; no new WISDOM HPO controller is introduced.
 
 | Study / branch | Candidates | Required Runs |
 |---|---:|---:|
-| V5a MAX / mean / attention / Top-K / regional / LSE | 1 / 2 / 10 / 16 / 9 / 18 | 224 total |
-| V5b gated attention | 8 | 32 |
-| V5b adaptive LSE | 18 | 72 |
-| V5b learned regional | 4 | 16 |
-| V5b linear softmax | 2 | 8 |
-| V5b AutoPool | 16 | 64 |
-| V5b GeM | 18 | 72 |
-| V5b MAX–MEAN | 12 | 48 |
-| V5b multiscale regional | 1 | 4 |
-| V5b total | 79 | 316 |
+| V5a MAX / mean / attention / Top-K / regional / LSE | 1 / 2 / 32 / 26 / 16 / 54 | 524 |
+| V5a linear softmax / AutoPool / GeM / MAX–MEAN / multiscale regional | 2 / 26 / 24 / 22 / 1 | 300 |
+| V5a total: all eleven families | 206 | 824 |
+| V5b learned LSE | 16 | 64 |
+| V5b learned regional | 9 | 36 |
+| V5b learned AutoPool | 16 | 64 |
+| V5b learned GeM | 16 | 64 |
+| V5b learned MAX–MEAN | 18 | 72 |
+| V5b total: learned-scalar initialization refinement | 75 | 300 |
 
 Each file now defines one Study, with native `when: {parent: {in: [...]}}` membership conditions
 for shared area parameters and equality conditions for family-specific/nested scalar settings.
 Inactive parameters are absent, not default-valued dimensions. V5a has exactly one MAX reference;
-V5b has none because it contains no MAX cell. The reviewed backbone and all candidate grids remain
-unchanged. V5a studies fixed rules; V5b studies adaptive rules and additional controls. Their
-scientific questions remain distinct, with no automatic winner handoff. Fixed sweeps reject
+V5b has none because it contains no MAX cell. The reviewed backbone remains unchanged. V5a includes
+all implemented families, both attention scorers, fixed scalar grids and prescribed LSE schedules.
+V5b isolates learned-scalar initialization in the five families that expose it. Their scientific
+questions remain distinct, with no automatic winner handoff. Fixed sweeps reject
 `trials` and `proposal_pool_size`; native planning verifies the complete finite design.
 
-Both request two GPUs, 36 CPUs, 96 GiB RAM, and a 168-hour enclosing scheduler ceiling, with native
-automatic packing. The old six/eight sequential allocations summed to 42/56-day ceilings.
-`execution.max_time: 168h` separately stops dispatching new Runs after seven days; it does not
-extend scheduler time or guarantee complete coverage. No packing/pruning compatibility helpers
+V5a currently requests three GPUs, 42 CPUs, 96 GiB RAM and 1000 hours; V5b requests two GPUs,
+36 CPUs, 96 GiB RAM and 168 hours, with native automatic packing. Their dispatch budgets are
+1000 and 168 hours respectively. These budgets do not extend the authored scheduler limit or
+guarantee complete coverage. No packing/pruning compatibility helpers
 are required. Shared research semantics come from Training.analysis_profile, with four YAML
 metric-priority overrides applied to the entire Study.
 
-V5b intentionally sets the curriculum hold to zero only on curriculum cells. With epochs=500
+V5a intentionally sets the curriculum hold to zero only on curriculum cells. With epochs=500
 and patience=30, the previous 0.30 hold delayed the first beta change to epoch 152. The new schedule
-changes at epoch 2, while retaining ordinary patience; its endpoint is still not guaranteed before
-early stopping. Inspect the recorded beta trajectory and restored checkpoint, not only the target.
+changes at epoch 2, while retaining ordinary patience; endpoint 1 is the deliberate constant-beta
+control. Other endpoints are still not guaranteed before early stopping. Inspect the recorded beta
+trajectory and restored checkpoint, not only the target.
+
+The fixed screen extends Top-K from 0.0005 through 1.0 (including 0.6 and 0.8), attention widths
+from 4 through 512, regional length from 0 through 64 angstroms, LSE beta from 0.01 through 1280,
+AutoPool alpha from 0 through 1000, GeM power from 1 through 1024, and MAX–MEAN weight across
+the full [0,1] interval. Multiscale regional pooling keeps its existing fixed length bank
+[0,1.5,3,6,12] angstroms and learned mixture; no artificial parameter is added to this family.
+V5b probes initializations near both existing learned bounds without changing those bounds.
+
+If quality still improves at a finite grid edge, the range is **not closed**: compare neighboring
+levels over paired seeds and propose a separate extension, never claim the edge is an optimum.
+Small Top-K fractions may select the same number of points; high beta/alpha/power can concentrate
+gradients on a few points. Report these controls and their runtime/local-quality tradeoffs. Zero
+regional length is exact identity, but positive lengths use the existing truncated spectrum;
+even 64 angstroms does not imply whole-protein averaging across disconnected components.
 
 Review each family's fixed/learned representatives with paired seed variation, global score G,
 surface score S, coupling, selection regret, subgroup/faithfulness diagnostics and runtime.
@@ -133,6 +153,28 @@ The output is a reviewed shortlist of approximately **2–4 nondominated familie
 current loss spaces unchanged; revising them to cover the shortlist is a subsequent task, not an
 implicit change in this implementation. Their current single-pooling ledger must therefore be
 reviewed before launching V6.
+
+## Protein reports
+
+Configure presentation directly in each training YAML's `with.visualization` mapping.
+V1a/V1b/V1c and V10 request `mode: report`; other screening studies retain `mode: none` to
+avoid exceeding LF's combined 64 MiB report limit. NONE disables the tab completely.
+
+The default `content: predictions` embeds only probabilities, original logits and available
+soft/hard GT. `maximum_points: 2000` bounds the displayed cloud; `maximum_proteins: 4`
+selects a balanced per-split sample and `report_budget_mib: 4.0` caps the document.
+Metrics and optional numerical exports retain all points and full precision.
+`content: full` restores the structural inspector. `mode: viewer` adds standalone HTML/PLY;
+`mode: full` also writes prediction NPZ. See both READMEs for every option/default.
+
+Reports are generated once after restoring each completed Run's best protein-selected checkpoint,
+not every epoch. Numerical surface metric frequency remains independent. Failed Runs cannot
+publish unfinished reports; failed Studies may still contain reports from successful seeds.
+Historical exported HTML is not rewritten by changing configuration.
+
+Separate VVAL YAMLs have been removed. There is no verified public LF post-Study callback to
+forward only a final winning candidate/seed. Do not implement a project-owned ranker, hidden
+runner, seed cleanup process or training `steps` to imitate that unsupported lifecycle.
 
 ## Formal scientific roadmap after V1
 

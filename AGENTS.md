@@ -90,7 +90,20 @@ project contract, not optional style suggestions.
   Several tiny related enums may share one clearly named vocabulary module when separate files
   would add navigation without isolating behavior.
 - Expose exactly the cohesive LambdaForge 0.15 Work classes required by public YAML actions:
-  `Selection`, `Preprocessing`, `Visualization`, `DNAValidation`, and `Training`. Keep other cohesive
+  `Selection`, `Preprocessing`, `Visualization`, `ModelValidation`, `DNAValidation`, and `Training`.
+  Training studies must be single executable Works, never `steps` compositions. The
+  DNA preprocessing workflow remains the explicit composition exception. Optional checkpoint reviews reuse
+  researcher-selected Trial checkpoints from native portable LF exports without fitting models,
+  ranking hyperparameters or silently picking seeds. Missing checkpoints require native recovery;
+  never implement a nested runner or hidden fallback training without a public LF lifecycle API.
+  Configure normal protein reports directly in Training's `visualization` mapping, not separate
+  VVAL YAMLs. Use lightweight prediction/logit/GT content and bounded display sampling by default;
+  retain full point coverage and precision for scientific metrics. Mode `none` must suppress both
+  viewers and empty report tabs. Generate enabled reports only on the restored best checkpoint at
+  the end of each eligible Run, never each epoch. Do not claim that this is a final Study-wide
+  best-seed callback: that requires a verified public LambdaForge lifecycle API. Never generate
+  all seeds' pictures merely to discard them after a hidden project-owned ranking.
+  Keep other cohesive
   stateful/scientific concepts as classes; private module helpers are allowed only when they isolate
   a substantial algorithm and cannot be expressed more clearly as a method.
 - Keep `wisdom.preprocessing.dna.selection.Selection` and
@@ -360,7 +373,7 @@ project contract, not optional style suggestions.
   lf explain experiments/dna_preprocess.yaml
   lf run experiments/dna_preprocess.yaml --dry-run
   lf validate experiments/validate_dna.yaml
-  lf validate experiments/wisdom_v1.yaml
+  lf validate experiments/wisdom_v1a.yaml
   lf validate experiments/wisdom_v2.yaml
   ```
 

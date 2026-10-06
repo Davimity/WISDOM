@@ -148,9 +148,13 @@ Every Training experiment inherits the profile. V5a/V5b each declare one conditi
 small metric-priority overrides on its single executable Work. A composed workflow has `analysis` on
 each Work step, never on the workflow root. Class metric fields merge with YAML fields;
 families replace by name, defaults/questions replace whole lists. Analysis policy is not HPO
-policy. The unified V5 Studies retain all reviewed cells, seeds, objectives and losses, request
-two GPUs, and distinguish their seven-day dispatch budget from scheduler wall-time. V5b changes
-only the curriculum hold from 0.30 to zero to avoid an unchanged beta through patience 30.
+policy. V5a now screens all eleven implemented pooling families with 206 candidates (824 paired
+Runs), including both attention variants and fixed/curriculum LSE. V5b isolates learned-scalar
+initialization with 75 candidates (300 Runs). Both preserve the reviewed backbone, seeds,
+objectives and losses. Their current dispatch and scheduler budgets are 1000 hours for V5a and
+168 hours for V5b. Researcher-selected allocations are three GPUs/42 CPUs for V5a and two
+GPUs/36 CPUs for V5b. Curriculum hold is zero in V5a so changing schedules do not
+remain frozen through patience 30; endpoint 1 is an intentional constant-beta control.
 
 Use `lf results analyze EXECUTION --recompute --json` for machine-readable research,
 `lf results report EXECUTION --output research.html` for an offline interactive report, and
@@ -172,6 +176,9 @@ with the new `>=0.16.0` requirement. WISDOM did not modify external package meta
 LambdaForge during this task.
 
 ## 8. Conditional pooling Study verification (2026-10-03)
+
+This section records the historical conditional-YAML migration, not the current candidate grids.
+The subsequent range/family expansion is described in section 9 below.
 
 The installed source is commit `d97ebab`, which implements native finite membership conditions.
 The pre-refactor candidate union was captured with the public WorkConfig planner before editing:
@@ -198,3 +205,151 @@ The curriculum begins changing at epoch 2 instead of 152, retaining patience 30.
 the scheduled beta is `1 + 29/500 * (end_beta - 1)`, so the target choices already differ, but
 early stopping can still prevent reaching them. Recorded beta trajectories and the restored
 checkpoint must be interpreted as realized behavior, not as the configured endpoint.
+
+## 9. Full-family pooling coverage and extreme controls (2026-10-04)
+
+V5a now includes all eleven implemented families, both simple/gated attention scorers, and fixed
+or curriculum LSE. Its native branch counts are 1/2/32/26/16/54/2/26/24/22/1, totaling 206
+candidates and 824 Runs with the same four seeds. V5b contains learned LSE/regional/AutoPool/GeM/
+MAX–MEAN scalar initialization only: counts 16/9/16/16/18, totaling 75 candidates and 300 Runs.
+No model operator, learned-scalar bound, encoder, dataset, objective or loss was changed.
+
+Top-K includes 0.6, 0.8 and 1.0; attention spans widths 4–512, regional diffusion lengths 0–64
+angstroms, fixed LSE beta 0.01–1280, AutoPool alpha 0–1000, GeM power 1–1024, and MAX–MEAN
+weight the complete [0,1] interval. The existing multiscale regional bank remains [0,1.5,3,6,12]
+angstroms. Learned initializations approach both existing bounds rather than redefining them.
+Inactive dimensions remain absent through native conditions. Only V5a contains the exact MAX
+reference; endpoint-equivalent cells are deliberate limiting-behavior controls.
+
+The finite screen cannot guarantee that a response curve has reached its optimum or plateau.
+An improving edge remains unresolved and requires a separately planned extension based on paired
+uncertainty, surface evidence and cost, with held-out test still sealed. Small Top-K fractions
+can discretize to identical support counts; very sharp pooling can concentrate gradients or
+saturate probabilities. Positive regional lengths operate on a truncated spectrum and retain
+component-specific constant modes when available, unlike the exact zero-length identity.
+
+Focused numerical checks construct every native V5a/V5b candidate and verify finite forward and
+backward results, including the extreme fixed values and curriculum endpoints. They also verify
+Top-K/full-mean and MAX–MEAN endpoint equivalence and high-sharpness convergence toward MAX.
+These establish numerical executability on the test fixture, not scientific improvement or
+training stability on the actual dataset. The inherited analysis profile and native result
+questions remain unchanged; no WISDOM ranking controller was introduced.
+
+Verification for this expansion: Ruff and mypy pass; the complete suite reports 257 passed and
+four skipped tests requiring absent production data/local placement. Both changed YAMLs pass
+native `lf validate` and `lf explain`. Remote dry-runs for `citius-ctgpgpu12` pass with two exposed
+GPUs; the local workstation cannot admit their unchanged two-GPU request. No training was started.
+The bilingual README heading hierarchy remains equivalent. Production performance and complete
+824/300-Run coverage remain untested; the scheduler still caps each allocation at 168 hours.
+
+## 10. Project protein inspection in native HTML sections (2026-10-05)
+
+The current uncommitted LambdaForge public API adds `outputs.html_section(name, section, title)`.
+WISDOM declares `protein-report` under the `wisdom-proteins` section with title `WISDOM proteins`.
+LF owns artifact finalization, fingerprint verification, collection, Trial/seed selectors,
+isolated iframe presentation and report/export lifecycle. No external framework source or
+metadata was patched. Every recorded seed remains available; the viewer does not select a winner.
+
+`ProteinReportPage` packages the shared `ProteinVisualizer` in a searchable split/label gallery
+with a return button and a single compressed Plotly library per document. Inspectors open lazily
+without nested frames, neighboring files or network requests. Switching proteins waits for queued
+updates, removes the previous resize listener and releases its WebGL scene. GT hard/soft,
+prediction probability and adjustable hard prediction, structure channels and mesh interpretation
+stay identical to the standalone preprocessing inspector.
+
+Training's new `report` presentation mode emits embedded inspectors and small audit/index files
+instead of per-protein HTML/PLY/NPZ. Existing `viewer`/`full` modes are preserved; `none` does not
+generate maps. `surface_report=true` declares the tab, even if it must explain a disabled, empty-ID
+or competitively pruned Run. False omits the tab and cannot be combined with report-only mode.
+Exact IDs can override the automatic balanced sample, but only evaluated splits are eligible.
+Generation is final, using the restored protein-validation-selected checkpoint; numerical
+surface-metric intervals, training losses, objectives and held-out-test policy do not change.
+
+The per-Run budget defaults to 4 MiB, with explicit omitted-viewer IDs. The native limits are
+16 MiB/document and 64 MiB/combined report, so large HPO studies must keep sections disabled or
+maps off and inspect confirmation Runs. This integration does not bypass the combined limit or
+retroactively reconstruct old predictions. Browser compatibility requires DecompressionStream.
+Tests cover empty states, byte omission, exact channels, native output metadata and report-only
+file policy; optional Chromium exercises the real LF sandbox, prediction threshold, mesh, return
+navigation, multiple protein scenes and seed selection with no external requests.
+
+Verification: Ruff and mypy pass; the full suite reports 264 passed and four skips for absent
+production data/placement. The seven focused integration tests also pass with Chromium, including
+a real one-epoch CPU Training fixture that publishes the native section from its best checkpoint,
+without test evaluation or standalone prediction files. This verifies execution, not model quality.
+Changed Work configurations validate and explain; preprocessing and V10 dry-runs pass locally.
+V1a's authored three-GPU request cannot run on this one-GPU workstation. Its temporary dry-run
+uses one GPU and the tiny unregistered synthetic fixture; scientific model parameters and the
+repository allocation are unchanged. The production Registry selector must resolve on its cluster.
+Both README heading hierarchies and language links match. No remote scientific job was launched.
+
+## 12. Frozen-checkpoint visual review
+
+Training studies no longer compose executable steps. V1b/V1c isolate the two RNG sources;
+V6b/V6b2/V6b3 isolate existence, regional existence and ranking; V6c/V6c2/V6c3 isolate
+cardinality, total variation and Dirichlet regularization. Their original controls and grids
+remain unchanged. The dataset-construction workflow remains a composition.
+
+Separate `VVAL` YAMLs were retired in favor of Training's `visualization` mapping. The existing
+`ModelValidation` Work remains available for explicit frozen-export compatibility, not as a
+second required campaign. For that optional API, the researcher supplies a
+native LF portable Study export and a reviewed mapping of display names to native Trial indices.
+An empty mapping publishes inventory only; WISDOM does not rank candidates. Every completed,
+unpruned seed remains visible unless explicitly filtered. Native Run/Attempt identities reconnect
+the exported `best-model` artifact; its inventory checksum and the source dataset identity are
+verified before inference. Saved model/data parameters and gate warm-up override are restored.
+Training now persists that override because warm-up state is not part of the weight state_dict.
+Older exports reconstruct it from the checkpoint epoch and original warm-up schedule.
+
+Each selected checkpoint evaluates every protein in each requested split without an optimizer.
+The existing global/local metric producers are reused. Review metrics are indexed under
+`review_<audit-number>_<metric>`; the detailed audit maps each number to Trial, seed and split.
+These are descriptive fixed-checkpoint measurements, not new Training objectives or WISDOM
+statistical comparisons. The original LF paired-seed analysis remains authoritative.
+
+Presentation selects overlapping categories of binary errors, poor/good positive localization,
+global/local mismatch, negative false mass and confident correct cases. Exact-ID and complete
+viewer requests are supported. Sampling never changes numerical coverage; undefined ground truth
+is unavailable rather than zero. The generated interpretation README explains prevalence-normalized
+AP, area-weighted activation mass, peak activation and the descriptive mismatch heuristic.
+
+One shared `ProteinReportPage` embeds the existing `ProteinVisualizer` inspector with model and
+seed filters. Full-split CSV/JSON evidence accompanies a 14 MiB default native HTML section;
+omitted viewers are explicit. Prediction NPZ export is opt-in and no standalone viewer copies
+are generated. Test access requires explicit authorization and never chooses parameters.
+Missing checkpoints stop or are audited/skipped, according to `strict_checkpoints`. Exceptional
+automatic retraining is not implemented: the current public LF API exposes no nested per-Run
+recovery lifecycle, and WISDOM must not reproduce framework orchestration.
+
+Verification: Ruff and mypy pass for 126 source files. The full suite with optional Chromium
+reports 266 passed and four skips for unavailable production data/placement. A real one-epoch
+CPU fixture exports its native checkpoint, then performs frozen review with optimizer construction
+forbidden. It tests warm-up restoration, complete metric coverage, empty inventory mode, byte
+corruption, and both missing-checkpoint policies. Chromium verifies model/seed filtering, inspector
+navigation, threshold and mesh controls inside LF's sandbox without external requests.
+The earlier separated configurations passed validation using temporary bindings; their VVAL
+YAMLs have since been retired. Production training and preprocessing configurations validate, and the
+preprocessing explain/dry-run passes. Bilingual section/TOC numbering agrees. No remote scientific
+job was launched, and no LambdaForge source, installed package or metadata was modified.
+
+### Lightweight reports configured in Training
+
+Use `with.visualization` in the existing training YAML, not a separate visualization Study.
+Its modes are none/report/viewer/full; the default content, predictions, includes only probability,
+original logits, adjustable hard prediction and available soft/hard GT. Full content restores
+the structural inspector. Maximum points defaults to 2000 and affects display only; full-split
+scientific metrics and optional numerical exports retain their original coverage and precision.
+Report mode writes no standalone protein HTML/PLY/NPZ duplicates. NONE suppresses the report tab
+even if the legacy embed flag remains true.
+
+Each eligible Run generates its report once after restoring the best protein-selected checkpoint.
+A failed Study can contain successful seeds with reports; a failed Run before publication has no
+finished viewer. An omitted gallery indicates a byte budget, not missing model predictions.
+In the synthetic regression fixture the compact inspector is about 43 KB versus 762 KB for the
+structural inspector, and four embedded compact viewers plus Plotly fit in approximately 2 MiB.
+This is a payload measurement, not a scientific-quality or production-speed claim.
+
+The current verified public LF API has no post-Study Work callback for forwarding only a final
+best candidate/seed. WISDOM does not implement hidden ranking, scheduling, retraining or generating
+all seed pictures to delete them later. Large HPO studies retain mode none until that lifecycle
+is available. Per-Run reports never replace repeated-seed evidence.

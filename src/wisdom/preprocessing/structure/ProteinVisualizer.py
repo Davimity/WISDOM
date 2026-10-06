@@ -14,8 +14,8 @@ from typing import Any, cast
 from itertools import pairwise
 from collections.abc import Mapping
 from scipy.spatial import Delaunay, ConvexHull, QhullError
-
 from wisdom.preprocessing.structure.ProteinArchive import ProteinArchive
+from wisdom.preprocessing.structure.VisualizationContent import VisualizationContent
 
 
 class ProteinVisualizer:
@@ -136,18 +136,86 @@ class ProteinVisualizer:
             ValueError: If geometry, metadata, or annotation alignment is malformed.
             OSError: If NPZ inputs or the HTML cannot be read or written.
         """
+        page, diagnostics = self.render(
+            path, identifier, annotation, protein_label, partitions, plotly_script,
+            additional_channels, prediction_threshold,
+        )
+        ProteinArchive.write_text(output, page)
+        return diagnostics
+
+    def render(
+        self,
+        path                 : Path,
+        identifier           : str,
+        annotation           : Path | None              = None,
+        protein_label        : int | None               = None,
+        partitions           : Mapping[str, Any] | None = None,
+        plotly_script        : str | bool               = False,
+        additional_channels  : Mapping[str, np.ndarray] | None = None,
+        prediction_threshold : float = 0.5,
+        content              : str   = "full",
+    ) -> tuple[str, Mapping[str, Any]]:
+        """Render the shared inspector in memory for standalone or embedded presentation.
+
+        Args:
+            path: Pickle-free structural NPZ with positions in angstroms.
+            identifier: Dataset member ID displayed after HTML escaping.
+            annotation: Optional fingerprint-aligned DNA sidecar.
+            protein_label: Optional global binary target, not a model input.
+            partitions: Explicit split/group metadata shown in provenance.
+            plotly_script: False uses a library supplied by the containing gallery; True embeds
+                Plotly, and a string references the existing standalone gallery's local library.
+            additional_channels: Numeric scalar arrays of shape [M], in base surface point order.
+            prediction_threshold: Initial interactive hard-prediction cutoff in [0,1].
+            content: full retains all structural layers; predictions embeds only bounded surface
+                points and prediction/GT channels, without atoms, mesh or structural features.
+
+        Returns:
+            Complete HTML and numerical geometry diagnostics, without writing either to disk.
+
+        Raises:
+            ValueError: If geometry, annotation alignment or prediction threshold is invalid.
+            OSError: If an input archive cannot be read.
+        """
         if not 0.0 <= prediction_threshold <= 1.0:
             raise ValueError("prediction_threshold must lie in [0,1]")
 
         arrays, metadata, sidecar = self._load(path, annotation)
-        channels                 = self._surface_channels(arrays, metadata, sidecar)
+        profile                  = VisualizationContent(content)
+        channels                 = (
+            self._surface_channels(arrays, metadata, sidecar)
+            if profile is VisualizationContent.FULL
+            else {
+                name: sidecar[source]
+                for name, source in (
+                    ("dna_target_hard", "surface_target_hard"),
+                    ("dna_target_soft", "surface_target_soft"),
+                    ("dna_target_valid", "surface_valid_mask"),
+                )
+                if source in sidecar
+            }
+        )
         channels                 = self._extend_surface_channels(
             channels,
-            additional_channels,
+            additional_channels if profile is VisualizationContent.FULL else {
+                name: values for name, values in (additional_channels or {}).items()
+                if name in ("model_prediction_probability", "model_prediction_hard",
+                            "model_prediction_logit")
+            },
             len(arrays["surface_positions"]),
         )
-        diagnostics              = self._diagnostics(arrays, metadata)
-        figure, controls         = self._figure(arrays, channels, prediction_threshold)
+        diagnostics              = (
+            self._diagnostics(arrays, metadata)
+            if profile is VisualizationContent.FULL
+            else {"status": "DISPLAY", "surface points": len(arrays["surface_positions"]),
+                  "profile": "Prediction-only display; not a geometry validation report"}
+        )
+        figure, controls = (
+            self._figure(arrays, channels, prediction_threshold)
+            if profile is VisualizationContent.FULL
+            else self._prediction_figure(arrays["surface_positions"], channels,
+                                         prediction_threshold)
+        )
 
         plot = figure.to_html(
             full_html        = False,
@@ -155,11 +223,21 @@ class ProteinVisualizer:
             div_id           = "wisdom-plot",
             config           = {"displaylogo": False, "responsive": True, "scrollZoom": True},
         )
+        # The shared report shell waits for WebGL initialization before attaching inspector
+        # controls. This also makes switching proteins release the previous scene safely.
+
+        plot = plot.replace("Plotly.newPlot(", "window.wisdomPlotReady = Plotly.newPlot(")
         inventory_rows = "".join(
             f"<tr><td><code>{self._escape(item['name'])}</code></td>"
             f"<td>{item['shape']}</td><td>{item['dtype']}</td>"
             f"<td>{self._escape(item['summary'])}</td></tr>"
-            for item in self._inventory(arrays, sidecar, additional_channels or {})
+            for item in self._inventory(
+                arrays if profile is VisualizationContent.FULL else {
+                    "surface_positions": arrays["surface_positions"]
+                },
+                sidecar if profile is VisualizationContent.FULL else {},
+                additional_channels or {} if profile is VisualizationContent.FULL else channels,
+            )
         )
         diagnostic_rows = "".join(
             f"<tr><td>{self._escape(name)}</td><td>{self._escape(value)}</td></tr>"
@@ -177,8 +255,9 @@ class ProteinVisualizer:
                     "identifier":          identifier,
                     "protein_label":       protein_label,
                     "partitions":          dict(partitions or {}),
-                    "base_metadata":       metadata,
-                    "annotation_metadata": annotation_metadata,
+                    "content":             content,
+                    "base_metadata":       metadata if profile is VisualizationContent.FULL else None,
+                    "annotation_metadata": annotation_metadata if profile is VisualizationContent.FULL else None,
                 },
                 indent=2,
                 sort_keys=True,
@@ -196,8 +275,80 @@ class ProteinVisualizer:
             plot            = plot,
             controls        = control_data,
         )
-        ProteinArchive.write_text(output, html)
-        return diagnostics
+        return html, diagnostics
+
+    def _prediction_figure(
+        self,
+        points              : np.ndarray,
+        channels            : Mapping[str, np.ndarray],
+        prediction_threshold : float,
+    ) -> tuple[go.Figure, dict[str, Any]]:
+        """Build a sampled surface scene without computing or embedding hidden structural layers.
+
+        Args:
+            points: Immutable full-order surface positions [M,3] in angstroms.
+            channels: Point-aligned prediction logits/probabilities and valid soft/hard GT.
+            prediction_threshold: Initial local hard decision threshold in [0,1].
+
+        Returns:
+            The same inspector's Plotly scene and control contract, containing only cloud and
+            measurement traces. Sampling and four-decimal rounding affect display only; metrics
+            and optional numerical exports keep all points and their original precision.
+
+        Raises:
+            ValueError: If neither prediction nor usable ground-truth channels are provided.
+        """
+        ids = np.linspace(0, len(points) - 1, min(self.max_surface_points, len(points)),
+                          dtype=np.int64)
+        positions = np.round(points[ids].astype(np.float64), 4)
+        if not channels:
+            raise ValueError("prediction-only display requires prediction or ground-truth channels")
+        default   = ("model_prediction_probability" if "model_prediction_probability" in channels
+                     else next(iter(channels)))
+        values = np.asarray(channels[default])[ids]
+        limits = self._colour_range(values)
+        figure = go.Figure(go.Scatter3d(
+            x=positions[:, 0], y=positions[:, 1], z=positions[:, 2],
+            customdata=ids, mode="markers", name="Surface prediction display (sampled)",
+            marker={"size": 4, "color": np.round(values, 4), "colorscale": "Turbo",
+                    "cmin": limits[0], "cmax": limits[1], "opacity": 1},
+            hovertemplate="surface %{customdata}<br>value=%{marker.color:.5g}<extra></extra>",
+        ))
+        figure.add_trace(go.Scatter3d(x=[], y=[], z=[], mode="lines+markers",
+                                     name="Distance measurement", showlegend=False))
+        figure.update_layout(
+            template="plotly_dark", margin={"l": 0, "r": 0, "t": 0, "b": 0},
+            showlegend=False, uirevision="wisdom-protein-view",
+            scene={"aspectmode": "data", "dragmode": "orbit",
+                   "xaxis": {"title": "x (Å)"}, "yaxis": {"title": "y (Å)"},
+                   "zaxis": {"title": "z (Å)"}},
+        )
+        return figure, {
+            "surface": {
+                name: {"cloud": self._json_values(np.round(np.asarray(values)[ids].astype(np.float64), 4)),
+                       "mesh": [], "range": list(self._colour_range(np.asarray(values)))}
+                for name, values in channels.items()
+            },
+            "atoms":          {},
+            "defaultAtom":    "",
+            "sphereAtomIds":  [],
+            "defaultSurface": default,
+            "predictionProbability": "model_prediction_probability"
+                if "model_prediction_probability" in channels else None,
+            "predictionHard": "model_prediction_hard"
+                if "model_prediction_hard" in channels else None,
+            "predictionThreshold": prediction_threshold,
+
+            "traces":         {"surface": 0, "measurement": 1},
+            "traceCount":     2,
+            "surfaceIndices": ids.tolist(),
+
+            "meshVertexCount": 0,
+            "meshTriangles":   0,
+            "meshMethod":      "Omitted in prediction-only display",
+            "vdwAtoms":        0,
+            "atomCount":       0,
+        }
 
     @staticmethod
     def _extend_surface_channels(
@@ -987,13 +1138,13 @@ class ProteinVisualizer:
         Returns:
             Complete HTML document.
         """
-        status_class = "ok" if status == "PASS" else "bad"
+        status_class = "ok" if status == "PASS" else ("" if status == "DISPLAY" else "bad")
         template = """<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>WISDOM protein inspector · @@IDENTIFIER@@</title>
 <style>
 :root{color-scheme:dark;--bg:#080c16;--panel:#111827;--panel2:#182230;--line:#2d3b50;--text:#e7edf7;--muted:#98a2b3;--accent:#45c5d5;--accent2:#7f8cff;--warn:#fdb022;--bad:#ff6b6b;--ok:#65d68a;font:14px Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
-*{box-sizing:border-box}body{margin:0;height:100vh;overflow:hidden;background:var(--bg);color:var(--text);display:grid;grid-template-columns:320px minmax(420px,1fr) 390px;transition:grid-template-columns .2s ease}body.left-wide{grid-template-columns:460px minmax(420px,1fr) 390px}body.right-wide{grid-template-columns:320px minmax(420px,1fr) 560px}body.left-wide.right-wide{grid-template-columns:460px minmax(420px,1fr) 560px}body.left-closed{grid-template-columns:0 minmax(420px,1fr) 390px}body.right-closed{grid-template-columns:320px minmax(420px,1fr) 0}body.left-closed.right-closed{grid-template-columns:0 minmax(420px,1fr) 0}body.left-closed.right-wide{grid-template-columns:0 minmax(420px,1fr) 560px}body.right-closed.left-wide{grid-template-columns:460px minmax(420px,1fr) 0}
+*{box-sizing:border-box}[hidden]{display:none!important}body{margin:0;height:100vh;overflow:hidden;background:var(--bg);color:var(--text);display:grid;grid-template-columns:320px minmax(420px,1fr) 390px;transition:grid-template-columns .2s ease}body.left-wide{grid-template-columns:460px minmax(420px,1fr) 390px}body.right-wide{grid-template-columns:320px minmax(420px,1fr) 560px}body.left-wide.right-wide{grid-template-columns:460px minmax(420px,1fr) 560px}body.left-closed{grid-template-columns:0 minmax(420px,1fr) 390px}body.right-closed{grid-template-columns:320px minmax(420px,1fr) 0}body.left-closed.right-closed{grid-template-columns:0 minmax(420px,1fr) 0}body.left-closed.right-wide{grid-template-columns:0 minmax(420px,1fr) 560px}body.right-closed.left-wide{grid-template-columns:460px minmax(420px,1fr) 0}
 button,select,input{font:inherit}button,select,input[type=number],input[type=color]{border:1px solid #3b4a61;background:#1b2638;color:var(--text);border-radius:8px;padding:7px 9px}input[type=range]{width:100%;accent-color:var(--accent)}input[type=color]{width:100%;height:36px;padding:4px;cursor:pointer}input:disabled{opacity:.42;cursor:not-allowed}output{color:#d9faff;font-variant-numeric:tabular-nums}button{cursor:pointer;transition:border-color .15s,background .15s,transform .08s}button:hover{border-color:var(--accent);background:#24344d}button:active{transform:translateY(1px)}button.active{background:#173e49;border-color:var(--accent);color:#dffcff}button.icon{padding:5px 8px;min-width:32px}.sidebar{min-width:0;overflow:hidden;background:linear-gradient(180deg,#111827,#0e1625);border-color:var(--line);transition:opacity .16s,transform .2s}.sidebar-inner{height:100%;overflow:auto;padding:14px}.left-panel{border-right:1px solid var(--line)}.right-panel{border-left:1px solid var(--line)}body.left-closed .left-panel{opacity:0;pointer-events:none;transform:translateX(-100%)}body.right-closed .right-panel{opacity:0;pointer-events:none;transform:translateX(100%)}
 .panel-head,.viewer-head,.row,.control-head{display:flex;align-items:center;gap:8px}.panel-head{position:sticky;top:-14px;z-index:4;margin:-14px -14px 12px;padding:13px 14px;background:rgba(17,24,39,.96);border-bottom:1px solid var(--line)}.panel-head h1{font-size:15px;margin:0;flex:1}.viewer-head{height:48px;padding:0 14px;border-bottom:1px solid var(--line);background:rgba(12,18,30,.96)}.viewer-head strong{font-size:15px}.badge{font-size:11px;padding:3px 7px;border-radius:999px;background:#243044;color:#cbd5e1}.badge.ok{background:#123923;color:#8ce6a7}.badge.bad{background:#482020;color:#ff9b9b}.viewer-state{margin-left:auto;color:var(--muted);font-size:12px}.viewer-state.busy{color:var(--warn)}
 #viewer{min-width:0;min-height:0;display:flex;flex-direction:column;position:relative;background:radial-gradient(circle at 50% 42%,#121d2e 0,#080c16 70%)}#wisdom-plot{flex:1;min-height:0}.floating-open{display:none;position:absolute;z-index:10;top:58px;box-shadow:0 8px 24px #0008}.floating-open.left{left:10px}.floating-open.right{right:10px}body.left-closed .floating-open.left,body.right-closed .floating-open.right{display:block}.loading-shade{position:absolute;inset:48px 0 0;z-index:9;background:#080c1688;display:none;place-items:center;pointer-events:none}.loading-shade.visible{display:grid}.loading-card{padding:10px 14px;background:#101a2b;border:1px solid var(--line);border-radius:10px;color:#d9e2f2}
@@ -1059,6 +1210,8 @@ table{border-collapse:collapse;width:100%;font-size:12px}th,td{border-bottom:1px
   <details class="section"><summary>Dataset and provenance</summary><div class="section-body"><pre>@@PROVENANCE@@</pre></div></details>
 </div></aside>
 <script>
+window.wisdomViewerReady=(async()=>{
+await window.wisdomPlotReady;
 const C=@@CONTROLS@@;
 const gd=document.getElementById('wisdom-plot');
 const state={surface:C.defaultSurface,atom:C.defaultAtom,predictionThreshold:Number(C.predictionThreshold),measure:false,measurePoints:[],selected:null,pending:0,queue:Promise.resolve()};
@@ -1078,13 +1231,18 @@ function thresholdValues(values){return values.map(value=>value===null?null:(Num
 function surfaceChannel(name=state.surface){if(name===C.predictionHard&&C.predictionProbability){const source=C.surface[C.predictionProbability];return {cloud:thresholdValues(source.cloud),mesh:thresholdValues(source.mesh),range:[0,1]}}return C.surface[name]}
 function updatePredictionThreshold(){const active=state.surface===C.predictionHard&&Boolean(C.predictionProbability);byId('prediction-threshold-field').hidden=!active;byId('prediction-threshold-value').textContent=state.predictionThreshold.toFixed(2)}
 function updateStyleLabels(){byId('surface-size-value').textContent=`${Number(byId('surface-size').value).toFixed(1)} px`;byId('surface-opacity-value').textContent=Number(byId('surface-opacity').value).toFixed(2);byId('mesh-opacity-value').textContent=Number(byId('mesh-opacity').value).toFixed(2)}
-fillOptions(byId('surface-channel'),Object.keys(C.surface),C.defaultSurface);fillOptions(byId('atom-channel'),Object.keys(C.atoms),C.defaultAtom);fillOptions(byId('surface-palette'),palettes,'Turbo');fillOptions(byId('atom-palette'),palettes,'Viridis');byId('prediction-threshold').value=String(state.predictionThreshold);setRange('surface',surfaceChannel().range);setRange('atom',C.atoms[C.defaultAtom].range);
+fillOptions(byId('surface-channel'),Object.keys(C.surface),C.defaultSurface);fillOptions(byId('atom-channel'),Object.keys(C.atoms),C.defaultAtom);fillOptions(byId('surface-palette'),palettes,'Turbo');fillOptions(byId('atom-palette'),palettes,'Viridis');byId('prediction-threshold').value=String(state.predictionThreshold);setRange('surface',surfaceChannel().range);if(C.defaultAtom)setRange('atom',C.atoms[C.defaultAtom].range);
+// Compact reports omit structural payloads, rather than hiding expensive precomputed traces.
+document.querySelectorAll('[data-layer]').forEach(input=>{if(!(input.dataset.layer in C.traces)){input.checked=false;input.disabled=true;input.closest('label').hidden=true}});
+document.querySelectorAll('[data-preset]').forEach(button=>{button.hidden=presets[button.dataset.preset].some(name=>!(name in C.traces))});
+if(!C.defaultAtom)byId('atom-channel').closest('details').hidden=true;
+if(!('mesh' in C.traces)){byId('mesh-colour-mode').closest('label').hidden=true;byId('mesh-colour').closest('.inline-grid').hidden=true;document.querySelector('[data-preset="surface"]').classList.add('active');layer('surface').closest('label').lastChild.textContent='Displayed surface points (sampled)';document.querySelector('#details-panel h1').textContent='Prediction inspection';document.querySelectorAll('#details-panel details>summary').forEach(summary=>{if(summary.textContent==='Automatic geometry audit')summary.textContent='Display sampling';if(summary.textContent==='Mesh interpretation')summary.parentElement.hidden=true;if(summary.textContent==='NPZ arrays')summary.textContent='Displayed arrays'});byId('selection-card').textContent='Click a displayed surface point to inspect prediction and available GT channels.';byId('surface-opacity').closest('.section-body').querySelector('.small').textContent='This is a bounded display sample. Scientific metrics use every original surface point. Rear points may remain visible through gaps; increase point size for stronger occlusion.'}
 updatePredictionThreshold();updateStyleLabels();
 byId('mesh-method').textContent=C.meshMethod;byId('mesh-count').textContent=C.meshTriangles.toLocaleString();byId('vdw-count').textContent=C.vdwAtoms.toLocaleString();byId('atom-count').textContent=C.atomCount.toLocaleString();
-function applyLayers(){const indices=[],values=[];document.querySelectorAll('[data-layer]').forEach(input=>{indices.push(C.traces[input.dataset.layer]);values.push(input.checked)});return Plotly.restyle(gd,{visible:values},indices).then(updateSurface)}
+function applyLayers(){const indices=[],values=[];document.querySelectorAll('[data-layer]').forEach(input=>{if(input.dataset.layer in C.traces){indices.push(C.traces[input.dataset.layer]);values.push(input.checked)}});return Plotly.restyle(gd,{visible:values},indices).then(updateSurface)}
 function choosePreset(name){const enabled=new Set(presets[name]);document.querySelectorAll('[data-layer]').forEach(input=>input.checked=enabled.has(input.dataset.layer));document.querySelectorAll('[data-preset]').forEach(button=>button.classList.toggle('active',button.dataset.preset===name));schedule(applyLayers,`Applying ${name} view`)}
-function updateSurface(){const channel=surfaceChannel(),range=readRange('surface',channel.range),scale=byId('surface-palette').value,reversed=byId('surface-reverse').checked,uniform=byId('mesh-colour-mode').value==='uniform',meshColour=byId('mesh-colour').value,surfaceVisible=layer('surface').checked,meshVisible=layer('mesh').checked;byId('mesh-colour').disabled=!uniform;updatePredictionThreshold();updateStyleLabels();return Plotly.restyle(gd,{'marker.color':[channel.cloud],'marker.cmin':[range[0]],'marker.cmax':[range[1]],'marker.colorscale':[scale],'marker.reversescale':[reversed],'marker.size':[Number(byId('surface-size').value)],'marker.opacity':[Number(byId('surface-opacity').value)],'marker.showscale':[surfaceVisible],'marker.colorbar.title.text':[human(state.surface)]},[C.traces.surface]).then(()=>Plotly.restyle(gd,{intensity:[uniform?uniformMesh:channel.mesh],cmin:[uniform?0:range[0]],cmax:[uniform?1:range[1]],colorscale:[uniform?[[0,meshColour],[1,meshColour]]:scale],reversescale:[uniform?false:reversed],opacity:[Number(byId('mesh-opacity').value)],showscale:[!uniform&&meshVisible&&!surfaceVisible]},[C.traces.mesh]))}
-function updateAtoms(){const channel=C.atoms[state.atom],range=readRange('atom',channel.range),scale=byId('atom-palette').value,reversed=byId('atom-reverse').checked,sphere=C.sphereAtomIds.map(index=>channel.values[index]);return Plotly.restyle(gd,{'marker.color':[channel.values],'marker.cmin':[range[0]],'marker.cmax':[range[1]],'marker.colorscale':[scale],'marker.reversescale':[reversed]},[C.traces.atoms]).then(()=>Plotly.restyle(gd,{intensity:[sphere],cmin:[range[0]],cmax:[range[1]],colorscale:[scale],reversescale:[reversed]},[C.traces.vdw]))}
+function updateSurface(){const channel=surfaceChannel(),range=readRange('surface',channel.range),scale=byId('surface-palette').value,reversed=byId('surface-reverse').checked,uniform=byId('mesh-colour-mode').value==='uniform',meshColour=byId('mesh-colour').value,surfaceVisible=layer('surface').checked,meshVisible=layer('mesh').checked;byId('mesh-colour').disabled=!uniform;updatePredictionThreshold();updateStyleLabels();return Plotly.restyle(gd,{'marker.color':[channel.cloud],'marker.cmin':[range[0]],'marker.cmax':[range[1]],'marker.colorscale':[scale],'marker.reversescale':[reversed],'marker.size':[Number(byId('surface-size').value)],'marker.opacity':[Number(byId('surface-opacity').value)],'marker.showscale':[surfaceVisible],'marker.colorbar.title.text':[human(state.surface)]},[C.traces.surface]).then(()=>('mesh' in C.traces)?Plotly.restyle(gd,{intensity:[uniform?uniformMesh:channel.mesh],cmin:[uniform?0:range[0]],cmax:[uniform?1:range[1]],colorscale:[uniform?[[0,meshColour],[1,meshColour]]:scale],reversescale:[uniform?false:reversed],opacity:[Number(byId('mesh-opacity').value)],showscale:[!uniform&&meshVisible&&!surfaceVisible]},[C.traces.mesh]):undefined)}
+function updateAtoms(){if(!C.defaultAtom)return Promise.resolve();const channel=C.atoms[state.atom],range=readRange('atom',channel.range),scale=byId('atom-palette').value,reversed=byId('atom-reverse').checked,sphere=C.sphereAtomIds.map(index=>channel.values[index]);return Plotly.restyle(gd,{'marker.color':[channel.values],'marker.cmin':[range[0]],'marker.cmax':[range[1]],'marker.colorscale':[scale],'marker.reversescale':[reversed]},[C.traces.atoms]).then(()=>Plotly.restyle(gd,{intensity:[sphere],cmin:[range[0]],cmax:[range[1]],colorscale:[scale],reversescale:[reversed]},[C.traces.vdw]))}
 function appendRow(table,name,value){const row=table.insertRow(),key=row.insertCell(),cell=row.insertCell();key.textContent=name;cell.textContent=value===null?'unavailable':String(value)}
 function inspectPoint(point){const card=byId('selection-card'),table=document.createElement('table');table.className='selection-table';card.replaceChildren();const title=document.createElement('h3');if(point.curveNumber===C.traces.surface){const local=point.pointNumber,index=Number(point.customdata);title.textContent=`Surface point ${index}`;appendRow(table,'position',`${Number(point.x).toFixed(4)}, ${Number(point.y).toFixed(4)}, ${Number(point.z).toFixed(4)} Å`);for(const [name] of Object.entries(C.surface))appendRow(table,human(name),surfaceChannel(name).cloud[local])}else if(point.curveNumber===C.traces.atoms){const local=point.pointNumber,data=point.customdata;title.textContent=`Atom ${data[0]} · ${data[1]}`;appendRow(table,'residue',`${data[2]} ${data[3]}`);appendRow(table,'chain index',data[4]);appendRow(table,'position',`${Number(point.x).toFixed(4)}, ${Number(point.y).toFixed(4)}, ${Number(point.z).toFixed(4)} Å`);for(const [name,channel] of Object.entries(C.atoms))appendRow(table,human(name),channel.values[local])}else{return false}card.append(title,table);state.selected=point;return true}
 function updateMeasurementTrace(){const coordinates=axis=>state.measurePoints.map(point=>point[axis]);return Plotly.restyle(gd,{x:[coordinates('x')],y:[coordinates('y')],z:[coordinates('z')],visible:[state.measurePoints.length>0]},[C.traces.measurement])}
@@ -1100,9 +1258,12 @@ byId('surface-auto').addEventListener('click',()=>{setRange('surface',surfaceCha
 byId('measure-toggle').addEventListener('click',event=>{state.measure=!state.measure;event.currentTarget.classList.toggle('active',state.measure);event.currentTarget.textContent=state.measure?'Stop measuring':'Start measuring';byId('viewer-state').textContent=state.measure?'Measurement mode':'Ready'});byId('measure-clear').addEventListener('click',()=>{state.measurePoints=[];byId('measure-result').textContent='Select measurement mode, then click two atoms or surface points.';schedule(updateMeasurementTrace,'Clearing measurement')});
 byId('projection').addEventListener('change',event=>schedule(()=>Plotly.relayout(gd,{'scene.camera.projection.type':event.target.value}),'Changing projection'));byId('show-axes').addEventListener('change',event=>{const visible=event.target.checked;const update={};for(const axis of ['xaxis','yaxis','zaxis']){update[`scene.${axis}.visible`]=visible}schedule(()=>Plotly.relayout(gd,update),'Updating axes')});
 const cameras={front:{x:0,y:2.2,z:0},side:{x:2.2,y:0,z:0},top:{x:0,y:0.01,z:2.2},reset:{x:1.5,y:1.5,z:1.1}};document.querySelectorAll('[data-camera]').forEach(button=>button.addEventListener('click',()=>schedule(()=>Plotly.relayout(gd,{'scene.camera.eye':cameras[button.dataset.camera]}),'Moving camera')));byId('fit-view').addEventListener('click',()=>schedule(()=>Plotly.relayout(gd,{'scene.aspectmode':'data','scene.camera.eye':cameras.reset,'scene.camera.center':{x:0,y:0,z:0}}),'Fitting scene'));byId('reset-scene').addEventListener('click',()=>{byId('projection').value='perspective';byId('show-axes').checked=true;schedule(()=>Plotly.relayout(gd,{'scene.camera.projection.type':'perspective','scene.camera.eye':cameras.reset,'scene.xaxis.visible':true,'scene.yaxis.visible':true,'scene.zaxis.visible':true}),'Resetting scene')});
-document.querySelectorAll('[data-panel]').forEach(button=>button.addEventListener('click',()=>{const side=button.dataset.panel,action=button.dataset.action;if(action==='close')document.body.classList.add(`${side}-closed`);if(action==='open')document.body.classList.remove(`${side}-closed`);if(action==='wide')document.body.classList.toggle(`${side}-wide`);requestAnimationFrame(()=>Plotly.Plots.resize(gd));setTimeout(()=>Plotly.Plots.resize(gd),240)}));
+document.querySelectorAll('[data-panel]').forEach(button=>button.addEventListener('click',()=>{const side=button.dataset.panel,action=button.dataset.action;if(action==='close')document.body.classList.add(`${side}-closed`);if(action==='open')document.body.classList.remove(`${side}-closed`);if(action==='wide')document.body.classList.toggle(`${side}-wide`);const resizePanel=()=>{if(gd.isConnected)Plotly.Plots.resize(gd)};requestAnimationFrame(resizePanel);setTimeout(resizePanel,240)}));
 if(window.innerWidth<1100){document.body.classList.add('left-closed','right-closed')}
-window.addEventListener('resize',()=>Plotly.Plots.resize(gd));
+const resize=()=>{if(gd.isConnected)Plotly.Plots.resize(gd)};
+window.addEventListener('resize',resize);
+window.wisdomDispose=async()=>{await state.queue;window.removeEventListener('resize',resize);Plotly.purge(gd)};
+})();
 </script></body></html>"""
         replacements = {
             "@@IDENTIFIER@@":   identifier,

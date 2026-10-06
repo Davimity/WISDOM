@@ -198,6 +198,8 @@ steps:                                                          # LambdaForge ru
       normal_length: 1.5                                         # Normal-vector display length in ångströms.
       mesh_alpha: 4.0                                            # Maximum alpha-complex tetrahedron radius in Å.
       maximum_vdw_atoms: 1500                                    # Physical-radius icosahedra cap per protein.
+      report_section: true                                       # Add the same offline inspectors to the LF report's WISDOM proteins tab.
+      report_maximum_mib: 4.0                                     # Per-Run document cap; omitted viewers are listed explicitly.
       verbose: false                                              # True logs every rendered member.
     resources:                                                    # Small CPU-only visualization reservation.
       cpu: 1                                                      # Rendering is bounded and sequential for a small gallery.
@@ -210,9 +212,12 @@ steps:                                                          # LambdaForge ru
     # overwrite_output=true, identifiers=(), splits=("train","validation","test"),
     # labels=(0,1), maximum_proteins=12, maximum_surface_points=6000,
     # maximum_mesh_points=2500, maximum_edges=5000, normal_stride=25,
-    # normal_length=1.5 Å, mesh_alpha=4.0 Å, maximum_vdw_atoms=1500, and verbose=false are true
+    # normal_length=1.5 Å, mesh_alpha=4.0 Å, maximum_vdw_atoms=1500, report_section=true,
+    # report_maximum_mib=4.0 in (0,16], and verbose=false are true
     # defaults. maximum_vdw_atoms bounds the physical-radius envelope only; every atom remains
     # selectable in the ordinary atom layer.
+    # report_section=false omits the LF tab while retaining the standalone gallery. The section
+    # embeds its assets; LF collects it on explicit report/export only and caps total HTML at 64 MiB.
     # dataset is required only when skip=false. `{from: preprocess.dataset}` consumes a version
     # published earlier in this same workflow without resolving it before Preprocessing runs;
     # `{dataset: name@version}` resolves a version that already exists in the Registry and is the

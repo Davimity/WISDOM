@@ -53,6 +53,7 @@ gradient or checkpoint choice.
   - [5.6. Post-HPO sparse concept discovery](#56-post-hpo-sparse-concept-discovery)
   - [5.7. Formal roadmap and decision gates](#57-formal-roadmap-and-decision-gates)
   - [5.8. Research analysis: finding useful evidence](#58-research-analysis-finding-useful-evidence)
+  - [5.9. Reading protein maps and recovering reports](#59-reading-protein-maps-and-recovering-reports)
 - [6. Bibliography](#6-bibliography)
 
 ## 1. Quick start
@@ -196,6 +197,15 @@ this is a package-dependency conflict, not a cluster or training failure. After 
 checkout, rerun `./install.sh` and then `lf clusters bootstrap <cluster> --project .` to rebuild
 the managed environment from the corrected requirements. Do not bypass the resolver with
 `--no-deps` or edit cached wheels/metadata; those actions would hide the incompatible environment.
+
+WISDOM's wheel builds always copy the current `src/` modules, even if old `build/lib/` copies
+have newer modification dates. Without this, a package can mix a new prediction report with an
+old protein viewer and fail with `ProteinVisualizer.render is missing` only after training.
+Training now checks this interface before loading data or allocating the model. If an already
+submitted Work reports this error, update the checkout, run `./install.sh`, bootstrap the cluster
+with `lf clusters bootstrap <cluster> --project .`, and submit a new Work from the updated YAML.
+An existing Work keeps its original bundle; reinstalling locally does not update running Runs.
+This correction changes packaging and error detection, not models, data, or metric definitions.
 
 ### 2.2. Automated Conda installation
 
@@ -2759,7 +2769,7 @@ pre-freeze sanity check before any formal version is assigned to a pooling study
 
 **Current experiment order.** The short filenames run from `wisdom_v1a.yaml` to
 `wisdom_v10.yaml`. These labels order the construction campaign; they are not ten validated model
-generations. V1a–V1b diagnose seed variance, V2 selects initialization, V3 selects optimizer
+generations. V1a–V1c diagnose seed variance, V2 selects initialization, V3 selects optimizer
 stability, V4 performs broad core HPO, V5 checks pooling, V6a–V6c screen weak-loss families, and
 V6d tests their joint contribution. V7 compares heads, V8 tests isolated spikes, V9 performs a
 small final retune, and V10 confirms the frozen ledger on fresh seeds.
@@ -2801,6 +2811,12 @@ gate penalty; surface labels are evaluation-only, the head stays `single`, and t
 These are complete finite sweeps: no competitive curve pruning or seed racing. The ordinary
 30-epoch validation patience remains active; completing a candidate does not mean forcing 500 epochs.
 
+**Study order.** V5a now screens all eleven implemented families, both attention scorers, and
+fixed/curriculum LSE. V5b no longer repeats those family screens: it studies how initializing an
+existing learned scalar changes training. Its five families are learned LSE, regional, AutoPool,
+GeM and MAX–MEAN. Attention and multiscale weights are intrinsic learned parts of their respective
+V5a operators, not an extra encoder or a scalar-initialization experiment.
+
 **Point measure versus represented area.** Let `P_b` be protein `b`'s points, `N_b` their number,
 `l_p` a point's positivity logit, and `A_p>0` its represented area in Å². A logit is an unrestricted
 real score; its sigmoid `p_p=1/(1+exp(-l_p))` is a probability. Define the normalized measure
@@ -2819,7 +2835,7 @@ better: `pooling_area_mode: point | area` is an explicit ablation. The compatibi
 `legacy` keeps area-weighted mean and point-based attention, Top-K and LSE. MAX has no meaningful
 area variant. Regional diffusion already uses geometric mass, so it also has no duplicate area flag.
 
-**Fixed logit-based rules (V5a).**
+**Logit-based families (V5a).**
 
 | Family | Calculation | What the parameter controls |
 |---|---|---|
@@ -2877,7 +2893,11 @@ This attenuates spatially rapid changes before choosing a region. Positive lengt
 truncated spectral approximation; **float length zero bypasses it and reproduces MAX exactly**.
 A learned length retains autograd through the exponential. This changes aggregation, not DiffusionNet.
 
-**Adaptive and additional families (V5b).** Probability-space poolers below first compute `p_p`
+Near-zero positive length is still a truncated reconstruction, not the exact zero-length control.
+Large lengths suppress nonconstant retained modes; each connected surface component retains its
+constant mode if that mode is present in the stored spectrum. This need not equal a whole-protein mean.
+
+**Additional V5a families and learned-scalar V5b refinement.** Probability-space poolers below first compute `p_p`
 from the local logits, then convert the aggregate probability `P_b` back to a safely clipped logit
 `log(P_b/(1-P_b))`. BCEWithLogits therefore keeps its existing interface. Mean of probabilities
 is not mean of logits: sigmoid is nonlinear, and the distinction is intentional.
@@ -2907,44 +2927,81 @@ AdamW optimizer, and serialize in `state_dict`.
 
 | Public settings | Learned domain | Initializations compared |
 |---|---|---|
-| `log_sum_exp_mode=learned`, `log_sum_exp_beta_init` | beta ∈ [0.25, 200] | 1, 5, 20, 80 |
-| `regional_scale_mode=learned`, `regional_diffusion_scale_init` | ell ∈ [0.05, 12] Å | 0.5, 1.5, 3, 6 Å |
-| `autopool_alpha_mode=learned`, `autopool_alpha_init` | alpha ∈ [0, 50] | 0.1, 1, 5 |
-| `gem_power_mode=learned`, `gem_power_init` | r ∈ [1, 32] | 1.25, 4, 16 |
-| `max_mean_lambda_mode=learned`, `max_mean_lambda_init` | lambda ∈ [0, 1] | 0.25, 0.5, 0.75 |
+| `log_sum_exp_mode=learned`, `log_sum_exp_beta_init` | beta ∈ [0.25, 200] | 0.3, 0.5, 1, 5, 20, 80, 160, 190 |
+| `regional_scale_mode=learned`, `regional_diffusion_scale_init` | ell ∈ [0.05, 12] Å | 0.075, 0.1, 0.25, 0.5, 1.5, 3, 6, 10, 11.5 Å |
+| `autopool_alpha_mode=learned`, `autopool_alpha_init` | alpha ∈ [0, 50] | 0.01, 0.1, 1, 5, 10, 25, 45, 49 |
+| `gem_power_mode=learned`, `gem_power_init` | r ∈ [1, 32] | 1.01, 1.25, 2, 4, 8, 16, 28, 31 |
+| `max_mean_lambda_mode=learned`, `max_mean_lambda_init` | lambda ∈ [0, 1] | 0.01, 0.05, 0.1, 0.25, 0.5, 0.75, 0.9, 0.95, 0.99 |
 
-Initial values lie strictly inside the interval. Fixed modes use `log_sum_exp_beta`,
+Initial values lie strictly inside the interval. Near-bound starts probe optimizer sensitivity;
+they are not fixed final values and do not enlarge the learned domain. If a learned scalar piles
+up at a bound while V5a benefits from larger fixed values, its bound remains a question for a
+separate experiment, not proof that the learned method is worse. Fixed modes use `log_sum_exp_beta`,
 `regional_diffusion_scale`, `autopool_alpha`, `gem_power`, or `max_mean_lambda`.
 `log_sum_exp_mode=curriculum` starts beta at 1, then increases it linearly toward
 `pooling_curriculum_end_beta`. The Python hold default is 30% of the epoch ceiling; with
-500 epochs this would delay the first change until epoch 152, beyond patience 30. V5b therefore
+500 epochs this would delay the first change until epoch 152, beyond patience 30. V5a therefore
 sets `pooling_curriculum_hold_fraction=0`: beta first changes at epoch 2. Ordinary patience may
-still stop before the endpoint. The scheduled beta is checkpointed, so restoring the best epoch restores its
+still stop before the endpoint. Endpoint 1 is an intentional constant-beta control. The scheduled
+beta is checkpointed, so restoring the best epoch restores its
 actual pooling behavior as well. Learned scalar values, fixed values and scale-bank weights are
 logged each epoch and written to `evaluation.json` as `pooling_parameter_trajectory` and
 `selected_pooling_parameters`. The constructor settings remain in `model_parameters`.
 
-**Coverage and decision.** V5a has 56 candidates: MAX 1, mean 2, attention 10, Top-K 16,
-regional 9 and LSE 18. Four seeds give **224 Runs**. V5b has **79 candidates / 316 Runs**:
-gated attention 8, adaptive LSE 18, learned regional 4, linear softmax 2, AutoPool 16, GeM 18,
-MAX–MEAN 12 and multiscale regional 1. Each YAML is **one Study**, not sequential family steps.
-Native `when: {pooling_type: {in: [...]}}` activates the area measure only for applicable families;
-equality conditions activate individual family parameters and fixed/learned/curriculum children.
-Inactive parameters are absent from the candidate, not filled with Python defaults. V5a uses
-the unique MAX cell as its paired reference; V5b has no MAX cell and imposes no reference.
-Both retain seeds `[4, 7, 32, 54]` and the same frozen backbone/objective. LambdaForge fixed sweeps reject adaptive
-`trials`/`proposal_pool_size` controls, so counts are verified by its planner rather than
-invented search budgets. The old `wisdom_v5.yaml` is historical, not authoritative.
+**Coverage and range design.** V5a contains all eleven implemented families in one Study.
+Its **206 candidates × four seeds = 824 required Runs** include both attention variants and
+fixed/curriculum LSE. V5b now contains only **75 learned-scalar candidates / 300 Runs**:
+LSE 16, regional 9, AutoPool 16, GeM 16 and MAX–MEAN 18. No family is first introduced in V5b.
 
-V5a asks how fixed aggregation rules behave; V5b asks how adaptive rules and additional controls
-behave. They remain distinct Studies with no automatic winner handoff. Their common native
-`Training.analysis_profile` supplies metric meanings and questions; YAML only adjusts four metric
-priorities. Each requests two GPUs, 36 CPUs, 96 GiB RAM and `resources.time: 168h` for the entire
-Study. Automatic GPU packing remains LambdaForge's responsibility. Previously six/eight sequential
-168-hour allocations meant ceilings of 42/56 days, not predicted runtimes. Each unified allocation
-now has a seven-day scheduler ceiling. Separately, `execution.max_time: 168h` stops new Run dispatch
-after seven days; it does not extend scheduler time or guarantee that all 224/316 Runs finish.
-A budget-exhausted sweep is incomplete evidence, not complete coverage.
+| V5a family | Range or control | Candidates |
+|---|---|---:|
+| MAX / mean | Exact MAX; point/area whole-surface mean | 1 / 2 |
+| Attention | Simple/gated, eight widths from 4 to 512, point/area | 32 |
+| Top-K | Thirteen fractions from 0.0005 to 1, including 0.6 and 0.8 | 26 |
+| Regional | Sixteen lengths from 0 to 64 Å | 16 |
+| LSE | Sixteen fixed betas 0.01–1280; eleven curriculum endpoints 1–1280; point/area | 54 |
+| Linear softmax | Point/area probability-space control | 2 |
+| AutoPool | Thirteen fixed alphas 0–1000; point/area | 26 |
+| GeM | Twelve fixed powers 1–1024; point/area | 24 |
+| MAX–MEAN | Eleven weights 0–1, including exact and near endpoints; point/area | 22 |
+| Multiscale regional | Existing five-length bank and its learned convex weights | 1 |
+
+The grids retain earlier fixed values and continue beyond the old upper edges using increasingly
+spaced values. They are not merely searches for the largest parameter. Top-K at 1 and MAX–MEAN
+at 0 recover the corresponding logit mean; MAX–MEAN at 1 and regional length 0 recover MAX.
+AutoPool alpha 0 and GeM power 1 instead recover a probability mean. These endpoint-equivalent
+cells are intentional controls, not evidence of new mechanisms. Tiny point Top-K fractions can
+select the same single point when the protein has few samples.
+
+Large LSE beta, AutoPool alpha and GeM power probe strongly MAX-like behavior, while their low
+values test broad aggregation. Positive regional lengths probe local through protein-scale
+smoothing with the same stored spectrum. The multiscale bank remains 0, 1.5, 3, 6 and 12 Å;
+there is no invented configurable bank or new surface operator. Very sharp reductions may
+legitimately concentrate gradients on a few points, or saturate after probability clipping.
+Forward/backward tests cover the authored extremes, but do not establish scientific superiority.
+
+**An edge winner is not an optimum.** If repeated-seed performance still improves at the largest
+unbounded-grid value, label that range unresolved and plan a separate extension before claiming
+a plateau. Look for practical equivalence or reversal across several adjacent values, paired
+uncertainty, surface quality and cost; a flat noisy pair alone is not proof. Do not extend the
+grid mid-study after inspecting the held-out test. At the genuine Top-K bound 1, more coverage
+is impossible; the full-surface mean is already available. Learned V5b bounds remain unchanged,
+so their saturation must also be interpreted rather than silently widened.
+
+Each YAML remains **one native Study**. Membership `when: {pooling_type: {in: [...]}}` activates
+area only for applicable families; equality activates family/protocol children. Inactive parameters
+are absent, not filled with Python defaults. V5a has its unique MAX reference; V5b has no MAX cell.
+Seeds `[4, 7, 32, 54]`, frozen backbone, objective, and central `Training.analysis_profile` remain
+shared. YAML overrides only four metric priorities; it implements no scheduling or discovery engine.
+The old `wisdom_v5.yaml` is historical, not authoritative. V5b is a refinement protocol, not another
+place to hide candidate pooling families; review V5a before narrowing its learned-scalar grid.
+
+The current operational V5a allocation is three GPUs, 42 CPUs, 96 GiB RAM and 1000 hours;
+V5b requests two GPUs, 36 CPUs, 96 GiB RAM and 168 hours. Their logical dispatch budgets are
+1000 and 168 hours respectively; dispatch never extends the scheduler ceiling.
+Operational resource changes do not change candidate grids or paired seeds. Larger designs may not
+finish within it: incomplete/budget-censored coverage is not a completed sweep. No runtime estimate
+is implied by the 824/300 required Runs.
 
 For each family, review the best fixed and learned representatives, point/area differences, paired
 seed variation, G, S, coupling, regret, faithfulness and runtime (Section 5.5 defines these metrics).
@@ -2952,8 +3009,8 @@ A family is dominated only when another is meaningfully no worse on the reviewed
 better on at least one, with uncertainty considered. Keep roughly **2–4 nondominated families**;
 do not collapse the result into a single winner. Four seeds are a controlled comparison, not a
 guarantee of statistical certainty. V6's loss spaces are unchanged; adapting V6 to that shortlist
-is a subsequent task. If beta 160 still improves over 80, report that the plateau remains unresolved
-rather than extending the grid mid-study.
+is a subsequent task. A benefit at the new largest beta, alpha, power or length remains an open
+range question, not a reason to change this registered grid mid-study.
 
 Deletion/insertion faithfulness is unavailable for both regional families because removing points
 would invalidate their fixed operator. Missing values are not zeros and are not evidence of failure.
@@ -3029,7 +3086,7 @@ explicitly; automatic compatibility would hide a scientific change.
 
 | Configuration | Responsibility |
 |---|---|
-| `V1a`–`V1b` | Measure baseline variance and separate its two random sources without HPO. |
+| `V1a`–`V1c` | Measure baseline variance and separate its two random sources without HPO. |
 | `V2`–`V3` | Select initialization and optimizer stability independently so both winners compose. |
 | `wisdom_v4.yaml` | Search the complete fixed-MAX core widths, depths, neighbourhoods and regularization. |
 | `wisdom_v5a.yaml`, `wisdom_v5b.yaml` | Characterize fixed/adaptive pooling families and retain a shortlist before weak local supervision. |
@@ -3065,7 +3122,7 @@ The YAMLs omit framework fields whose LambdaForge 0.15 defaults already express 
 filenames provide study names, while execution concurrency, GPU-memory admission, search seeds,
 and controller stopping remain automatic. The custom mapped objective keeps `mode: max` because
 the current execution path requires it. Run
-`lf config resolve FILE` to see those concrete resolved values. V1a/V1b keep historical explicit
+`lf config resolve FILE` to see those concrete resolved values. V1a/V1b/V1c keep historical explicit
 seeds, and V10 keeps a deliberately fresh confirmation set, because those identities are part of
 their scientific question rather than scheduling detail.
 
@@ -3337,34 +3394,45 @@ surface once after restoring the best global checkpoint, so `S` is available but
 correlation is not. A positive value `N` evaluates epochs `N`, `2N`, `3N`, and so on. Test surface
 metrics, when explicitly enabled, are calculated once from the restored checkpoint.
 Setting `surface_metrics: false` disables local metric-target decoding and computation without
-changing training. If `surface_visualization` remains `viewer` or `full`, the bounded HTML sample still opens
+changing training. If `surface_visualization` is `report`, `viewer` or `full`, the bounded HTML sample still opens
 its sidecars to display GT channels beside the predictions. Adaptively pruned candidates perform
 neither final validation nor test surface evaluation because they cannot become the selected
 result.
 
-`surface_visualization` has three explicit levels. `none` writes no map artifacts. The default
-`viewer` reuses the final best-checkpoint pass to write a deterministic, class-balanced HTML/PLY
-gallery without duplicate numerical archives. `full` writes the same viewers and one companion NPZ
-for every evaluated protein when downstream numerical analysis needs these arrays:
+Use one `visualization` mapping inside `with` to control presentation. The default mode is
+`none`: it generates neither viewers nor an empty protein tab, even if legacy `surface_report`
+is true. V1a/V1b/V1c and final confirmation explicitly enable lightweight reports; large HPO
+studies keep them off to avoid hundreds of documents. Numerical surface metrics remain independent.
 
-- `surface_prediction_probability[M]`: the continuous sigmoid score in the exact point order of
-  the immutable structural NPZ;
-- `surface_prediction_hard[M]`: the boolean decision at `surface_prediction_threshold`;
-- `prediction_threshold` and `best_epoch`: the cutoff and checkpoint provenance.
+```yaml
+visualization:                      # Presentation only; no scientific hyperparameter changes.
+  mode: report                      # Embedded LF report; none disables viewers completely.
+  content: predictions              # Probability, raw logits and soft/hard GT; full adds structure.
+  maximum_points: 2000               # Display only; all points still contribute to metrics.
+  maximum_proteins: 4                # Balanced sample per evaluated split; zero requests all.
+  report_budget_mib: 4.0             # Per-Run document budget; LF also caps the whole report.
+  # identifiers: [1ABC_A]            # Optional exact evaluated IDs instead of the sample.
+```
 
-The continuous probability is authoritative: changing the threshold changes a decision view, not
-the model output. `surface_visualization_maximum` limits only the heavier HTML/PLY gallery to a
-deterministic class-balanced sample; `0` renders every protein. Each HTML is produced by the same
-`ProteinVisualizer` used in Section 4.2, so improvements to the structural viewer automatically
-benefit trained predictions. It retains atoms, bonds, van der Waals spheres, normals, curvature,
-area, signed surface gap, and DNA GT channels, then adds model probability and hard-prediction
-channels. Selecting the hard channel exposes a browser slider that changes the cutoff immediately.
-The viewer therefore compares `dna_target_soft`, `dna_target_hard`, probability, and thresholded
-prediction without rewriting data or rerunning inference.
+All mapping defaults are: `mode=none`, `content=predictions`, `maximum_points=2000`,
+`maximum_proteins=12`, `report_budget_mib=4.0`, `identifiers=()`, `threshold=0.5`,
+`embed_report=true`. Modes are `none/report/viewer/full`; contents are `predictions/full`.
+Point limits must be positive, protein limits non-negative, budgets in (0,16] MiB, and thresholds
+in [0,1]. Supplied entries override equivalent legacy `surface_*` arguments, which remain callable
+for compatibility. Do not mix both forms in new YAMLs.
 
-With `evaluate_test: false`, as in HPO, reports contain validation only. A final confirmation Run
-may set it to `true` to add test predictions after checkpoint selection. Adaptively pruned Runs do
-not produce this final report because their checkpoint is not an eligible completed candidate.
+`report` embeds a single compressed offline gallery, with one Plotly library and lazily opened
+protein pages. `viewer` also writes standalone HTML/PLY; `full` additionally writes
+`surface_prediction_probability[M]`, `surface_prediction_hard[M]`, the threshold and best epoch
+in one NPZ per evaluated protein. `content: predictions` includes only prediction, raw logits
+and available GT; `content: full` restores the structural inspector. See Section 5.9 for display
+sampling, byte omissions and limitations.
+
+With `evaluate_test: false`, reports use validation only. Test access remains explicit and follows
+checkpoint selection. Pruned Runs do not create final maps; failed Runs cannot publish unfinished
+viewers. LF caps each document at 16 MiB and all project sections at 64 MiB/report. A report of
+one selected seed is not an unbiased estimate of seed variability. Existing exported HTML is
+not regenerated by changing the YAML, and WISDOM adds no hidden post-study ranking or training.
 
 Within one training, `epochs: 500` is a safety ceiling: the best validation checkpoint is retained,
 and `patience: 30` stops after 30 validation epochs without a `G` gain of at least
@@ -3409,7 +3477,7 @@ block. A heat time `t` is measured in square ångströms and corresponds to a ch
 of roughly `sqrt(t)` ångströms; comparing both distributions shows whether different initial
 multiscale schedules converge to similar physical scales.
 
-The authoritative pooling studies are V5a (56 fixed candidates) and V5b (79 adaptive/additional
+The authoritative pooling studies are V5a (206 all-family candidates) and V5b (75 learned-scalar
 candidates), defined in Section 5.3. Every candidate receives the same four seeds. Review the
 family curves and learned-scalar trajectories alongside localization and global metrics; these
 studies nominate a shortlist, not a universal pooling winner.
@@ -3484,6 +3552,7 @@ optimizer policies, run the restored core HPO, and check pooling:
 
 ```bash
 lf run experiments/wisdom_v1b.yaml
+lf run experiments/wisdom_v1c.yaml
 lf run experiments/wisdom_v2.yaml
 lf run experiments/wisdom_v3.yaml
 lf run experiments/wisdom_v4.yaml
@@ -3497,8 +3566,12 @@ heads, architecture, final retuning and uncensored confirmation follow:
 
 ```bash
 lf run experiments/wisdom_v6a.yaml
-lf run experiments/wisdom_v6b.yaml       # only after useful V6a signal
-lf run experiments/wisdom_v6c.yaml       # only for a diagnosed remaining failure
+lf run experiments/wisdom_v6b.yaml       # positive existence; only after useful V6a signal
+lf run experiments/wisdom_v6b2.yaml      # regional existence, independently
+lf run experiments/wisdom_v6b3.yaml      # regional ranking, independently
+lf run experiments/wisdom_v6c.yaml       # cardinality; only for a diagnosed remaining failure
+lf run experiments/wisdom_v6c2.yaml      # total variation, independently
+lf run experiments/wisdom_v6c3.yaml      # Dirichlet energy, independently
 lf run experiments/wisdom_v6d.yaml       # only if one term from each family is credible
 lf run experiments/wisdom_v7.yaml
 lf run experiments/wisdom_v8.yaml
@@ -3821,6 +3894,17 @@ lf results report EXECUTION --output research.html
 lf export STUDY --output ./exports
 ```
 
+For a remote Study, export its evidence through the native command:
+
+```bash
+lf export STUDY --output ./exports
+```
+
+Open the generated `reports/study-analysis.html` (the command prints its Analysis path), then
+**WISDOM proteins**, choose Trial/seed and a protein. `lf results report` reads locally available
+results and does not accept `--on`; the TUI's Study HTML action is the other native remote path.
+Newly finished Runs need a regenerated report. Old trainings are not retroactively visualized.
+
 The HTML report is an offline snapshot: regenerate it to include later Runs. Research shows
 prioritized findings; Metrics & health searches the catalog and exposes coverage and spread.
 Enable **Show constants / missing / hidden** to inspect counts, controls or unavailable metrics.
@@ -3861,6 +3945,54 @@ observation is required. Likewise, independent metric groups,
 support-conditioned rules and automatic dataset-dependent family coordinates are not exposed by
 the current public schema. Categories, metadata and supported optional questions cover the usable
 parts; [the integration report](docs/WISDOM_RESEARCH_ANALYSIS.md) lists the exact remaining limits.
+
+### 5.9. Reading protein maps and recovering reports
+
+An empty gallery does not always mean missing predictions. Read the message:
+
+| Message | Meaning and action |
+|---|---|
+| Visualization disabled | `visualization.mode: none` creates no new tab; historical reports may contain an empty one |
+| Viewers omitted by byte budget | Inspectors were generated but did not fit: use `content: predictions`, reduce `maximum_points`, or raise `report_budget_mib` up to 16 |
+| Run failed before publication | No complete viewer exists for that Run; recover its original execution through LF |
+| Requested IDs absent | Choose IDs from the evaluated split; pictures do not authorize access to other partitions |
+
+A failed Study can contain successful Runs with reports. Check the source Run and seed: a successful
+seed's gallery is not the failed seed's result. Changing YAML does not rewrite historical HTML.
+
+The lightweight inspector displays probability, original logit, threshold-adjustable hard prediction
+and available soft/hard ground truth (GT). A logit is the model's unbounded score before conversion
+to probability; positive logits correspond to probabilities above 0.5. Changing a display threshold
+changes a decision, not the model or scientific metrics. Missing GT remains unavailable.
+
+Only display is sampled: at most `maximum_points` evenly spaced original indices are embedded,
+with coordinates/scalars rounded to four decimals. The indices preserve prediction/GT alignment.
+Metrics and optional numerical exports retain all points and full precision. A reduced cloud can
+miss a tiny binding patch: increase the cap or use `content: full` for structural inspection.
+The lightweight profile does not compute or embed atoms, mesh, normals or curvature just to hide them.
+
+Generation occurs once at the end of an eligible Run, using its restored protein-validation-selected
+checkpoint and final surface forward pass. There is no retraining or per-epoch image generation.
+`surface_metrics_interval` controls numerical metrics independently. `report` writes the native
+embedded `protein-report` and small audit/index files; `viewer` adds standalone HTML/PLY; `full`
+also saves prediction NPZ. Artifact mode and content are independent: `content: full` restores
+structural layers, whereas `mode: full` controls numerical export.
+
+Export existing evidence through LF. Its HTML report contains **WISDOM proteins**, with the source
+seed identified. Named `protein-report` and `surface-predictions` artifacts are retained inside
+the exported execution. `validation/surface-predictions.json` records evaluated members,
+selected viewers, best epoch and display settings:
+
+```bash
+lf export WORK_ID --output ./exports
+```
+
+**No study-wide best-seed callback.** Separate VVAL YAMLs have been removed. The verified LF
+public API currently provides no post-Study Work hook for forwarding only the final winning
+candidate/seed. WISDOM does not disguise per-Run generation as that behavior or add a hidden
+ranking scheduler. Keep `mode: none` in large HPO campaigns until the lifecycle exists.
+Enabled reports remain per Run/seed and never replace repeated-seed statistics, change HPO,
+select a new checkpoint or open unauthorized test data.
 
 ## 6. Bibliography
 
