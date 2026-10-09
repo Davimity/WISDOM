@@ -46,6 +46,10 @@ class ProteinPoolingHead(nn.Module):
         max_mean_lambda              : float = 0.5,
         max_mean_lambda_mode         : str = "fixed",
         max_mean_lambda_init         : float = 0.5,
+        regional_diffusion_scale_bounds: Sequence[float] = (0.05, 12.0),
+        log_sum_exp_beta_bounds        : Sequence[float] = (0.25, 200.0),
+        autopool_alpha_bounds          : Sequence[float] = (0.0, 50.0),
+        gem_power_bounds               : Sequence[float] = (1.0, 32.0),
     ) -> None:
         """Construct only the parameters used by the selected family.
 
@@ -60,18 +64,24 @@ class ProteinPoolingHead(nn.Module):
             pooling_area_mode: point or area; legacy retains area-mean and point other families.
             attention_variant: simple tanh scorer or gated tanh-times-sigmoid scorer.
             regional_scale_mode: fixed or learned heat length.
-            regional_diffusion_scale_init: Learned length initialization inside (0.05, 12) Å.
+            regional_diffusion_scale_init: Learned length initialization inside its bounds, in Å.
             log_sum_exp_mode: fixed, learned, or externally scheduled curriculum.
-            log_sum_exp_beta_init: Learned beta initialization inside (0.25, 200).
+            log_sum_exp_beta_init: Learned beta initialization strictly inside its bounds.
             autopool_alpha: Fixed non-negative sharpness on probabilities.
             autopool_alpha_mode: fixed or learned AutoPool sharpness.
-            autopool_alpha_init: Learned initialization inside (0, 50).
+            autopool_alpha_init: Learned initialization strictly inside its bounds.
             gem_power: Fixed probability power >= 1.
             gem_power_mode: fixed or learned probability power.
-            gem_power_init: Learned initialization inside (1, 32).
+            gem_power_init: Learned initialization strictly inside its bounds.
             max_mean_lambda: Fixed MAX mixing coefficient in [0, 1].
             max_mean_lambda_mode: fixed or learned convex mixing coefficient.
             max_mean_lambda_init: Learned initialization inside (0, 1).
+            regional_diffusion_scale_bounds: Positive lower/upper learned heat lengths in Å;
+                default (0.05, 12) preserves historical checkpoint interpretation.
+            log_sum_exp_beta_bounds: Positive lower/upper learned beta; default (0.25, 200).
+            autopool_alpha_bounds: Nonnegative lower/upper learned alpha; default (0, 50).
+            gem_power_bounds: Lower/upper learned power, lower at least one; default (1, 32).
+                Bounds affect learned modes only; fixed and curriculum values are unchanged.
 
         Raises:
             ValueError: If a family/mode is unknown or a selected scalar violates its domain.
@@ -105,16 +115,23 @@ class ProteinPoolingHead(nn.Module):
 
         self.learned_scalar: BoundedScalar | None = None
         specifications = {
-            PoolingType.LOG_SUM_EXP: (log_sum_exp_mode, log_sum_exp_beta_init, 0.25, 200.0, True),
-            PoolingType.LOCAL_MEAN_MAX: (
-                regional_scale_mode, regional_diffusion_scale_init, 0.05, 12.0, True,
+            PoolingType.LOG_SUM_EXP: (
+                log_sum_exp_mode, log_sum_exp_beta_init, log_sum_exp_beta_bounds, True,
             ),
-            PoolingType.AUTOPOOL: (autopool_alpha_mode, autopool_alpha_init, 0.0, 50.0, False),
-            PoolingType.GEM: (gem_power_mode, gem_power_init, 1.0, 32.0, True),
-            PoolingType.MAX_MEAN: (max_mean_lambda_mode, max_mean_lambda_init, 0.0, 1.0, False),
+            PoolingType.LOCAL_MEAN_MAX: (
+                regional_scale_mode, regional_diffusion_scale_init,
+                regional_diffusion_scale_bounds, True,
+            ),
+            PoolingType.AUTOPOOL: (
+                autopool_alpha_mode, autopool_alpha_init, autopool_alpha_bounds, False,
+            ),
+            PoolingType.GEM: (gem_power_mode, gem_power_init, gem_power_bounds, True),
+            PoolingType.MAX_MEAN: (
+                max_mean_lambda_mode, max_mean_lambda_init, (0.0, 1.0), False,
+            ),
         }
         if self.pooling_type in specifications:
-            mode, initial, lower, upper, logarithmic = specifications[self.pooling_type]
+            mode, initial, bounds, logarithmic = specifications[self.pooling_type]
             selected_mode = PoolingParameterMode(mode)
             if (
                 selected_mode is PoolingParameterMode.CURRICULUM
@@ -122,6 +139,11 @@ class ProteinPoolingHead(nn.Module):
             ):
                 raise ValueError("curriculum is available only for log_sum_exp")
             if selected_mode is PoolingParameterMode.LEARNED:
+                lower, upper = bounds
+                if self.pooling_type is PoolingType.AUTOPOOL and lower < 0:
+                    raise ValueError("learned AutoPool bounds must remain non-negative")
+                if self.pooling_type is PoolingType.GEM and lower < 1:
+                    raise ValueError("learned GeM bounds must remain at least one")
                 self.learned_scalar = BoundedScalar(initial, lower, upper, logarithmic)
 
         self.fixed_alpha  = float(autopool_alpha)

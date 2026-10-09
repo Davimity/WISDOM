@@ -182,15 +182,16 @@ class ProteinVisualizer:
 
         arrays, metadata, sidecar = self._load(path, annotation)
         profile                  = VisualizationContent(content)
+        target_prefix            = "surface" if "surface_distance_to_target" in sidecar else "dna"
         channels                 = (
             self._surface_channels(arrays, metadata, sidecar)
             if profile is VisualizationContent.FULL
             else {
                 name: sidecar[source]
                 for name, source in (
-                    ("dna_target_hard", "surface_target_hard"),
-                    ("dna_target_soft", "surface_target_soft"),
-                    ("dna_target_valid", "surface_valid_mask"),
+                    (f"{target_prefix}_target_hard", "surface_target_hard"),
+                    (f"{target_prefix}_target_soft", "surface_target_soft"),
+                    (f"{target_prefix}_target_valid", "surface_valid_mask"),
                 )
                 if source in sidecar
             }
@@ -199,8 +200,7 @@ class ProteinVisualizer:
             channels,
             additional_channels if profile is VisualizationContent.FULL else {
                 name: values for name, values in (additional_channels or {}).items()
-                if name in ("model_prediction_probability", "model_prediction_hard",
-                            "model_prediction_logit")
+                if name.startswith("model_prediction_")
             },
             len(arrays["surface_positions"]),
         )
@@ -427,9 +427,13 @@ class ProteinVisualizer:
         if annotation is not None:
             with np.load(annotation, allow_pickle=False) as archive:
                 sidecar = {name: archive[name] for name in archive.files}
+            distance_name = (
+                "surface_distance_to_target" if "surface_distance_to_target" in sidecar
+                else "surface_distance_to_dna"
+            )
             required_sidecar = {
                 "surface_target_hard", "surface_valid_mask", "surface_target_soft",
-                "surface_distance_to_dna", "surface_distance_valid",
+                distance_name, "surface_distance_valid",
                 "surface_target_hard_sensitivity", "sensitivity_gaps", "base_npz_sha256",
             }
             missing_sidecar = required_sidecar - sidecar.keys()
@@ -440,7 +444,7 @@ class ProteinVisualizer:
             surface_count = len(arrays["surface_positions"])
             for name in (
                 "surface_target_hard", "surface_valid_mask", "surface_target_soft",
-                "surface_distance_to_dna", "surface_distance_valid",
+                distance_name, "surface_distance_valid",
             ):
                 if sidecar[name].shape != (surface_count,):
                     raise ValueError(f"visualization sidecar {name} must have shape [M]")
@@ -481,15 +485,18 @@ class ProteinVisualizer:
 
         channels: dict[str, np.ndarray] = {}
         if sidecar:
-            channels["dna_target_hard"]    = sidecar["surface_target_hard"]
-            channels["dna_target_soft"]    = sidecar["surface_target_soft"]
-            channels["dna_target_valid"]   = sidecar["surface_valid_mask"].astype(np.uint8)
-            channels["dna_distance"]       = sidecar["surface_distance_to_dna"]
-            channels["dna_distance_valid"] = sidecar["surface_distance_valid"].astype(np.uint8)
+            generic = "surface_distance_to_target" in sidecar
+            prefix = "surface" if generic else "dna"
+            distance = "surface_distance_to_target" if generic else "surface_distance_to_dna"
+            channels[f"{prefix}_target_hard"] = sidecar["surface_target_hard"]
+            channels[f"{prefix}_target_soft"] = sidecar["surface_target_soft"]
+            channels[f"{prefix}_target_valid"] = sidecar["surface_valid_mask"].astype(np.uint8)
+            channels[f"{prefix}_distance"] = sidecar[distance]
+            channels[f"{prefix}_distance_valid"] = sidecar["surface_distance_valid"].astype(np.uint8)
             sensitivity = sidecar["surface_target_hard_sensitivity"]
             for index, cutoff in enumerate(sidecar["sensitivity_gaps"].tolist()):
                 suffix = f"{float(cutoff):g}A".replace(".", "p")
-                channels[f"dna_target_hard_gap_{suffix}"] = sensitivity[:, index]
+                channels[f"{prefix}_target_hard_gap_{suffix}"] = sensitivity[:, index]
 
         channels["signed_envelope_gap"] = minimum_gaps.astype(np.float32)
         channels["surface_area_weight"]  = arrays["surface_area_weights"]

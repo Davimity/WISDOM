@@ -14,6 +14,7 @@ from wisdom.models.BoundedScalar import BoundedScalar
 from wisdom.models.DiffusionSurfaceEncoder import DiffusionSurfaceEncoder
 from wisdom.models.PoolingType import PoolingType
 from wisdom.models.ProteinPoolingHead import ProteinPoolingHead
+from wisdom.Training import _create_model
 
 
 def _pool(head, logits, areas=None, embeddings=None, counts=None):
@@ -194,6 +195,93 @@ def test_multiscale_convex_weights_receive_gradients_and_serialize():
     assert torch.equal(_pool(restored, values)["logits"], _pool(head, values)["logits"])
 
 
+@pytest.mark.parametrize(
+    "family,settings,initial,fixed_setting",
+    [
+        ("log_sum_exp", {"log_sum_exp_mode": "learned", "log_sum_exp_beta_init": 0.25,
+                         "log_sum_exp_beta_bounds": (0.005, 2560)}, 0.25, "log_sum_exp_beta"),
+        ("local_mean_max", {"regional_scale_mode": "learned", "regional_diffusion_scale_init": 16,
+                            "regional_diffusion_scale_bounds": (0.05, 128)},
+         16, "regional_diffusion_scale"),
+        ("autopool", {"autopool_alpha_mode": "learned", "autopool_alpha_init": 500,
+                      "autopool_alpha_bounds": (0, 2000)}, 500, "autopool_alpha"),
+        ("gem", {"gem_power_mode": "learned", "gem_power_init": 2,
+                 "gem_power_bounds": (1, 2048)}, 2, "gem_power"),
+        ("max_mean", {"max_mean_lambda_mode": "learned", "max_mean_lambda_init": 0.95},
+         0.95, "max_mean_lambda"),
+    ],
+)
+def test_v5b_warm_starts_match_fixed_operators_and_receive_bce_gradients(
+    family, settings, initial, fixed_setting
+):
+    """Only the scalar is trainable: its initial forward equals the paired fixed reference."""
+    learned = _head(family, "area", **settings)
+    fixed = _head(family, "area", **{fixed_setting: initial})
+    # Avoid a genuine MAX/probability saturation so the test diagnoses autograd, not biology.
+    logits = torch.tensor([-0.008, -0.003, 0.001, 0.006], requires_grad=True)
+    owners = torch.zeros(4, dtype=torch.int64)
+    ptr = torch.tensor([0, 4])
+    op = _line_operator(4)
+    op["eigenvalues"] = op["eigenvalues"] / 1000
+    mass = torch.ones(4)
+    features = torch.randn(4, 3)
+    result = learned(logits, features, mass, owners, [op], ptr)["logits"]
+    baseline = fixed(logits, features, mass, owners, [op], ptr)["logits"]
+    assert torch.allclose(result, baseline, atol=2e-6, rtol=2e-5)
+    assert learned.learned_scalar is not None
+    scalar = learned.learned_scalar
+    assert scalar().item() == pytest.approx(initial, rel=2e-6)
+    optimizer = torch.optim.AdamW(learned.parameters(), lr=0.01, weight_decay=0)
+    assert any(p is scalar.raw for group in optimizer.param_groups for p in group["params"])
+    torch.nn.functional.binary_cross_entropy_with_logits(result, torch.ones(1)).backward()
+    assert scalar.raw.grad is not None and torch.isfinite(scalar.raw.grad)
+    assert scalar.raw.grad.abs() > 0
+    assert logits.grad is not None and torch.isfinite(logits.grad).all()
+    before = scalar().item()
+    optimizer.step()
+    assert scalar().item() != before
+    # A scalar pooler cannot secretly learn from the embeddings: changing them has no effect.
+    first = learned(logits, features, mass, owners, [op], ptr)["logits"]
+    second = learned(logits, 100 * features, mass, owners, [op], ptr)["logits"]
+    assert torch.equal(first, second)
+
+
+def test_attention_uses_embeddings_while_pooling_values_remain_local_logits():
+    """Attention is the distinct embedding-conditioned family already explored in V5a."""
+    for variant in ("simple", "gated"):
+        head = _head("attention", attention_variant=variant)
+        embeddings = torch.randn(4, 3, requires_grad=True)
+        values = torch.tensor([-2.0, -0.5, 0.7, 3.0], requires_grad=True)
+        result = _pool(head, values, embeddings=embeddings)
+        assert torch.allclose(
+            result["logits"], (result["attention_weights"] * values).sum()[None]
+        )
+        result["logits"].sum().backward()
+        assert embeddings.grad is not None and embeddings.grad.abs().sum() > 0
+
+
+def test_expanded_constructor_bounds_restore_without_reinterpreting_historical_models():
+    """Saved constructor limits restore exact weights; omitted limits retain historical domains."""
+    options = {
+        "hidden_dim": 4, "embedding_dim": 2, "atomic_layers": 1, "surface_layers": 1,
+        "pooling_type": "autopool", "autopool_alpha_mode": "learned",
+        "autopool_alpha_init": 500, "autopool_alpha_bounds": (0, 2000),
+    }
+    model, saved = _create_model(2, options)
+    restored, _ = _create_model(2, saved)
+    restored.load_state_dict(model.state_dict(), strict=True)
+    assert saved["autopool_alpha_bounds"] == (0, 2000)
+    assert restored.pooling_head.parameter_values() == model.pooling_head.parameter_values()
+    historical = _head("autopool", autopool_alpha_mode="learned", autopool_alpha_init=5)
+    assert historical.learned_scalar.upper_bound == 50
+    assert _head("local_mean_max", regional_scale_mode="learned").learned_scalar.upper_bound == 12
+    # Physical domain restrictions are scientific invariants, not arbitrary numerical checks.
+    with pytest.raises(ValueError, match="non-negative"):
+        _head("autopool", autopool_alpha_mode="learned", autopool_alpha_bounds=(-1, 10))
+    with pytest.raises(ValueError, match="at least one"):
+        _head("gem", gem_power_mode="learned", gem_power_bounds=(0.5, 10))
+
+
 @pytest.mark.parametrize("variant", ["simple", "gated"])
 def test_attention_uniform_prior_subdivision_and_bfloat16_audit(variant):
     point = _head("attention", attention_variant=variant)
@@ -276,10 +364,19 @@ def test_bounded_scalars_have_finite_initial_gradients_and_valid_domains():
 def test_v5_grids_use_exact_frozen_values_and_four_seeds():
     """Use native planning to verify one paired Study and the reviewed ledger per YAML."""
     root = Path(__file__).parents[1] / "experiments"
-    legacy = safe_load((root / "wisdom_v5.yaml").read_text())["with"]
+    # Freeze the reviewed scientific ledger directly: a retired legacy YAML is not an input.
+    ledger = {
+        "model_version": 2, "subset": "full", "initialization_profile": "baseline",
+        "optimization_profile": "baseline", "hidden_dim": 128, "embedding_dim": 32,
+        "residue_embedding_dim": 64, "atomic_layers": 2, "projection_depth": 3,
+        "surface_layers": 4, "atom_spatial_k": 8, "surface_atom_k": 16,
+        "diffusion_spectral_modes": 32, "surface_atom_radius": 4.0,
+        "dropout": 0.2, "learning_rate": 0.001, "weight_decay": 0.0005,
+        "gate_lambda": 0.04, "weak_loss_profile": "baseline", "architecture_spike": "baseline",
+    }
     expected = {
         "wisdom_v5a.yaml": [1, 2, 32, 26, 16, 54, 2, 26, 24, 22, 1],
-        "wisdom_v5b.yaml": [16, 9, 16, 16, 18],
+        "wisdom_v5b.yaml": [1, 1, 1, 1, 1],
     }
     for name, counts in expected.items():
         raw = safe_load((root / name).read_text())
@@ -289,7 +386,7 @@ def test_v5_grids_use_exact_frozen_values_and_four_seeds():
         config = WorkConfig.from_yaml(root / name)
         resources = config.resources
         assert resources.gpu_count >= 1 and resources.cpu_cores >= 1
-        for key, value in legacy.items():
+        for key, value in ledger.items():
             assert raw["with"][key] == value, (name, key)
         # Planning invokes the installed public LF expander but executes no scientific Work.
         plan = WorkRunner().plan(config)
@@ -323,11 +420,14 @@ def test_v5_inactive_parameters_are_absent_from_native_candidates():
         "multiscale_regional_max": set(),
     }
     adaptive = {
-        "log_sum_exp": {"pooling_area_mode", "log_sum_exp_mode"},
-        "local_mean_max": {"regional_scale_mode", "regional_diffusion_scale_init"},
-        "autopool": {"pooling_area_mode", "autopool_alpha_mode"},
-        "gem": {"pooling_area_mode", "gem_power_mode"},
-        "max_mean": {"pooling_area_mode", "max_mean_lambda_mode"},
+        "log_sum_exp": {"pooling_area_mode", "log_sum_exp_mode", "log_sum_exp_beta_bounds"},
+        "local_mean_max": {
+            "regional_scale_mode", "regional_diffusion_scale_init",
+            "regional_diffusion_scale_bounds",
+        },
+        "autopool": {"autopool_alpha_mode", "autopool_alpha_bounds"},
+        "gem": {"gem_power_mode", "gem_power_bounds"},
+        "max_mean": {"max_mean_lambda_mode"},
     }
     for name, branches in [("v5a", characterization), ("v5b", adaptive)]:
         config = WorkConfig.from_yaml(root / f"wisdom_{name}.yaml")

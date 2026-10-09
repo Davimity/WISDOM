@@ -1,0 +1,50 @@
+# Global/local head relationships; compare every authored head.
+# Post-hoc inspection does not fit models or replace paired-study decisions.
+run: wisdom.visualization.StudyReview.StudyReview     # Native inference-only LF Work.
+
+with:                                                # Arguments for reviewing registered evidence.
+  source_execution: REPLACE_WITH_EXECUTION_ID         # Exact ID from lf results list after native import.
+  dataset: {dataset: wisdom-dna-reduced@6}             # Exact original dataset, locally placed.
+  trial_selection:                                   # Explicit scientific-factor comparison.
+    mode: parameter_filter                           # Select by active parameters, not a hidden winner.
+    where:                                           # Exact recorded values; every condition must hold.
+      head_type: [single, dual, global_context, film] # Contrasting values from this training Study.
+  seed_selection:                                    # Representative replications within each Trial.
+    mode: median                                # Typical observed realization, not best-looking seed.
+    metric: wisdom_score                             # Requires exact checkpoint-bound validation W.
+  protein_selection:                                 # Views of contrasting cases; metrics cover all.
+    mode: automatic                                  # Select diagnostic pictures after full inference.
+    strategy: diagnostic                             # FP/FN, local extremes, negative peaks and mismatch.
+    cases_per_category: 2                            # At most two cases per available category.
+  maximum_proteins: 8                                 # Explicit override: eight viewers per model/split.
+  # A direct protein head can classify correctly while its surface remains poor; compare both metrics.
+
+# Work argument reference (actual defaults):
+# source_execution: required registered ID; results_root=null uses LF's project ResultStore.
+# dataset: required typed Path, identical to training; placements may differ, content may not.
+# trial_selection=null: one Trial only; multiple Trials require an explicit policy.
+# Trial modes: all; explicit/trial_indices=[]; parameter_filter/where={};
+# best_by_metric or top_k_by_metric/metric="wisdom_score",direction="max",k=3;
+# pareto/metrics={metric:max|min},maximum_trials=8. Ranked aggregation="median" or "mean".
+# Every rank uses best-model metadata.metrics, never Run latest metrics. Conditional absent != null.
+# seed_selection=null means median by wisdom_score, direction=max, k=3.
+# Seed modes: all; explicit/seeds=[]; best/worst/median/top_k/bottom_k/representative.
+# Historical artifacts without scored metadata require all/explicit Trial and seed selection.
+# evaluation_scope="full" evaluates complete splits; "explicit" requires explicit protein IDs.
+# protein_selection=null means automatic/diagnostic/cases_per_category=2.
+# Protein modes: automatic (diagnostic/best/worst/mixed), explicit/identifiers=[], all (size warning).
+# splits=["val"]; allow_test=false. Test is descriptive only, never used for model selection.
+# content="predictions" or "full"; maximum_surface_points=2000 (>0), maximum_proteins=12 (>=0).
+# prediction_threshold=0.5 in [0,1]; report_maximum_mib=14.0 in (0,16]; save_predictions=false.
+# batch_size=4 (>0), data_workers=0 (>=0); strict_checkpoints=true fails on missing selected files.
+# Numeric coverage is never sampled by viewer caps. Corrupt evidence always fails verification.
+
+resources:                                           # Allocation for inference only, not training.
+  cpu: 4                                             # Host decoding and CPU fallback.
+  memory: 16GiB                                      # Bounded host-memory request.
+
+# LF resource defaults: cpu=1, gpu=0; memory, gpu_memory, storage, time, processes are unset.
+# cpu>=1, gpu>=0; memory/gpu_memory/storage accept sizes, time accepts durations;
+# processes<=cpu. Add gpu: 1 explicitly for accelerator inference if useful.
+# name defaults to the YAML stem; no seeds/search/sweep is needed for this frozen review.
+

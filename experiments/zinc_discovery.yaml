@@ -1,0 +1,22 @@
+# Freeze structural Zn candidates plus explicit, sequence-bound negative evidence.
+run: wisdom.preprocessing.zinc.ZincDiscovery.ZincDiscovery  # Public evidence-acquisition Work.
+with:  # Scientific inputs and bounded public-service acquisition.
+  negative_evidence: {file: ../data/zinc/negative-evidence.jsonl}  # Researcher-verified negatives, not ligand absence.
+  release_id: zinc-pilot-1  # Immutable researcher-assigned query snapshot label.
+  workers: 8  # Concurrent managed downloads.
+  maximum_entries: 0  # Zero inspects all query hits; a positive cap marks the release as a pilot.
+  requests_per_second: 2.0  # Shared RCSB request ceiling.
+  coordination_cutoff: 3.0  # Maximum selected-copy Zn-N/O/S center distance in angstroms.
+  minimum_occupancy: 0.5  # Minimum metal/donor occupancy used by structural verification.
+  minimum_donors: 2  # Minimum distinct selected-copy N/O/S atoms per accepted site.
+  minimum_residues: 2  # Minimum distinct coordinating residues per site.
+  output_directory: ../data/zinc/raw  # Native atomic output publication beside this YAML.
+
+# ZincDiscovery defaults: negative_evidence and release_id have no default. workers=8 (>0),
+# maximum_entries=0 (>=0; zero means all), requests_per_second=2.0 (>0),
+# coordination_cutoff=3.0 (>0 Angstrom),
+# minimum_occupancy=0.5 ([0,1]), minimum_donors=2 and minimum_residues=2 (positive integers),
+# output_directory="../data/zinc/raw" (null disables the external copy). No negative fallback exists.
+resources: {cpu: 8, memory: 16GiB}  # Host-only evidence acquisition; no model fitting or GPU.
+# LF resource defaults: cpu=1, gpu=0; memory/storage/gpu_memory/time/processes are optional.
+# cpu is positive, gpu non-negative; size fields use byte-unit strings and time uses duration units.

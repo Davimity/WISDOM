@@ -169,13 +169,17 @@ def test_report_only_collector_preserves_coverage_without_standalone_files(tmp_p
     )
     report.collect(
         {"identifier": ["tiny"], "surface_ptr": torch.tensor([0, count])},
-        {"surface_logits": torch.linspace(-2, 2, count)},
+        {"surface_logits": torch.linspace(-2, 2, count),
+         "raw_surface_logits": torch.linspace(-3, 3, count)},
     )
     summary = report.publish({}, best_epoch=3)
     np.testing.assert_array_equal(report.logits["tiny"], torch.linspace(-2, 2, count).numpy())
     page = report.report_documents[0]["html"]
     assert '"defaultAtom":""' in page
     assert "model_prediction_logit" in page
+    assert "model_prediction_raw_logit" in page
+    assert "model_prediction_raw_probability" in page
+    assert "model_prediction_refinement_delta" in page
     assert '"curvedness"' not in page
     assert summary["predicted_proteins"] == 1 and summary["visualized_proteins"] == 1
     assert report.report_documents[0]["identifier"] == "tiny"
@@ -184,7 +188,10 @@ def test_report_only_collector_preserves_coverage_without_standalone_files(tmp_p
     assert not (output / "validation/proteins/tiny.html").exists()
 
 
-def test_training_publishes_native_report_from_best_checkpoint(tmp_path, pdb_path, monkeypatch):
+@pytest.mark.parametrize("refiner", ["none", "learned_heat", "learned_anisotropic"])
+def test_training_publishes_native_report_from_best_checkpoint(
+    tmp_path, pdb_path, monkeypatch, refiner
+):
     """Run one CPU epoch to verify real Training publication, not scientific model quality."""
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
@@ -221,6 +228,8 @@ def test_training_publishes_native_report_from_best_checkpoint(tmp_path, pdb_pat
             "run": "wisdom.Training.Training",
             "with": {
                 "dataset": {"file": str(labels)},
+                "model_version": 1 if refiner == "none" else 2,
+                "surface_refiner_type": refiner,
                 "hidden_dim": 4,
                 "embedding_dim": 2,
                 "atomic_layers": 1,
@@ -240,6 +249,13 @@ def test_training_publishes_native_report_from_best_checkpoint(tmp_path, pdb_pat
     )
     result = WorkRunner().run(config)
     assert result.status == "succeeded", result.to_dict()
+    snapshot = next(a for a in result.runs[0].artifacts if a.name == "best-model")
+    saved = torch.load(result.runs[0].run_dir / snapshot.path,
+                       map_location="cpu", weights_only=True)
+    assert snapshot.metadata["step"] == snapshot.metadata["epoch"] == saved["epoch"] == 1
+    assert snapshot.metadata["metrics"]["protein_auprc"] == saved["validation_metrics"]["auprc"]
+    assert "surface_score" in snapshot.metadata["metrics"]
+    assert "selection_regret" not in snapshot.metadata["metrics"]  # One epoch supplies no curve.
     reports = [
         run.run_dir / artifact.path
         for run in result.runs

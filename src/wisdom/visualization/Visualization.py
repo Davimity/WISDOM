@@ -15,6 +15,7 @@ from collections import defaultdict
 from collections.abc import Sequence
 from plotly.offline import get_plotlyjs
 from lambdaforge.data import DatasetIndex, DatasetMember
+from wisdom.data.TaskSpecification import TaskSpecification
 from wisdom.evaluation.PointCloudExporter import PointCloudExporter
 from wisdom.visualization.ProteinReportPage import ProteinReportPage
 from wisdom.preprocessing.structure.ProteinArchive import ProteinArchive
@@ -253,7 +254,8 @@ class Visualization(lf.Work):
         buckets: dict[tuple[str, int], list[DatasetMember]] = defaultdict(list)
         for member in sorted(members, key=lambda value: value.member_id):
             split = str(member.partitions.get("split", ""))
-            label = int(member.targets.get("dna_binding", -1))
+            task = TaskSpecification.from_metadata(member.metadata)
+            label = int(member.targets.get(task.global_target_key, -1))
             if split in eligible_splits and label in eligible_labels:
                 buckets[(split, label)].append(member)
         if not buckets:
@@ -304,8 +306,9 @@ class Visualization(lf.Work):
             OSError: If NPZ/HTML/PLY files cannot be read or written.
         """
         try:
+            task = TaskSpecification.from_metadata(member.metadata)
             base       = dataset_root / member.assets["universal_npz"].path
-            annotation = dataset_root / member.assets["dna_annotation"].path
+            annotation = dataset_root / member.assets[task.local_annotation_asset].path
         except KeyError as error:
             raise ValueError(
                 f"dataset member {member.member_id!r} lacks WISDOM visualization assets"
@@ -320,7 +323,7 @@ class Visualization(lf.Work):
             base,
             member.member_id,
             annotation      = annotation,
-            protein_label   = int(member.targets["dna_binding"]),
+            protein_label   = int(member.targets[task.global_target_key]),
             partitions      = dict(member.partitions),
             plotly_script   = False,
         )
@@ -333,7 +336,7 @@ class Visualization(lf.Work):
         return {
             "identifier":  member.member_id,
             "split":       str(member.partitions.get("split", "")),
-            "label":       int(member.targets["dna_binding"]),
+            "label":       int(member.targets[task.global_target_key]),
             "html":        html_path.relative_to(output_root).as_posix(),
             "ply":         ply_path.relative_to(output_root).as_posix(),
             "channels":    sorted(surface_channels),

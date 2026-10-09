@@ -114,6 +114,7 @@ class SurfacePredictionReport:
         self.maximum_surface_points = maximum_surface_points
         self.predictions            : dict[str, np.ndarray] = {}
         self.logits                 : dict[str, np.ndarray] = {}
+        self.raw_evidence           : dict[str, np.ndarray] = {}
         self.protein_probabilities  : dict[str, float] = {}
         self.report_documents       : list[dict[str, Any]] = []
 
@@ -140,10 +141,19 @@ class SurfacePredictionReport:
             raise ValueError("surface prediction batches require identifiers and surface_ptr")
         if not isinstance(logits, Tensor) or logits.ndim != 1:
             raise ValueError("surface prediction output requires surface_logits[M]")
+        original = output.get("raw_surface_logits")
+        if original is not None and (
+            not isinstance(original, Tensor) or original.shape != logits.shape
+        ):
+            raise ValueError("raw surface evidence must align with the operative surface logits")
 
         pointers      = boundaries.detach().cpu().tolist()
         probabilities = torch.sigmoid(logits.detach()).float().cpu().numpy()
         raw_logits    = logits.detach().float().cpu().numpy()
+        original_logits = (
+            original.detach().float().cpu().numpy()
+            if isinstance(original, Tensor) else None
+        )
         global_logits = output.get("logits")
         global_scores = (
             torch.sigmoid(global_logits.detach()).float().cpu().reshape(-1).tolist()
@@ -166,6 +176,8 @@ class SurfacePredictionReport:
             stop  = int(pointers[index + 1])
             self.predictions[name] = probabilities[start:stop].copy()
             self.logits[name]      = raw_logits[start:stop].copy()
+            if original_logits is not None:
+                self.raw_evidence[name] = original_logits[start:stop].copy()
             if global_scores is not None:
                 self.protein_probabilities[name] = float(global_scores[index])
 
@@ -254,6 +266,14 @@ class SurfacePredictionReport:
                     "model_prediction_hard":        hard_prediction.astype(np.uint8),
                     "model_prediction_logit":       self.logits[identifier],
                 }
+                if identifier in self.raw_evidence:
+                    raw = self.raw_evidence[identifier]
+                    raw_probability = 1.0 / (1.0 + np.exp(-np.clip(raw, -80.0, 80.0)))
+                    channels.update({
+                        "model_prediction_raw_logit":       raw,
+                        "model_prediction_raw_probability": raw_probability,
+                        "model_prediction_refinement_delta": self.logits[identifier] - raw,
+                    })
                 html_path = protein_root / f"{safe_name}.html"
                 ply_path  = protein_root / f"{safe_name}.ply"
                 page, diagnostics = visualizer.render(
@@ -422,8 +442,12 @@ class SurfacePredictionReport:
         path.parent.mkdir(parents=True, exist_ok=True)
         temporary = path.with_name(f".{path.name}.{os.getpid()}.tmp.npz")
         try:
+            evidence: dict[str, Any] = {"surface_prediction_logit": self.logits[identifier]}
+            if identifier in self.raw_evidence:
+                evidence["raw_surface_logits"] = self.raw_evidence[identifier]
             np.savez_compressed(
                 temporary,
+                **evidence,
                 identifier=np.asarray(identifier),
                 surface_prediction_probability=values,
                 surface_prediction_hard=hard,

@@ -18,6 +18,7 @@ from wisdom.models.DiffusionTimeInitialization import DiffusionTimeInitializatio
 from wisdom.models.InteractionRound import InteractionRound
 from wisdom.models.PhysicalEmbeddingInitializer import PhysicalEmbeddingInitializer
 from wisdom.models.SurfaceAtomTransfer import SurfaceAtomTransfer
+from wisdom.models.SurfaceRepresentationMode import SurfaceRepresentationMode
 from wisdom.models.SurfaceAtomFeedback import SurfaceAtomFeedback
 from wisdom.models.VectorAtomicState import VectorAtomicState
 from wisdom.models.DiffusionSurfaceEncoder import DiffusionSurfaceEncoder
@@ -68,6 +69,8 @@ class WisdomV1(Model):
         physics_distance_initialization: bool = False,
         local_head_weight_std       : float | None = None,
         linear_initialization       : str = "current",
+        surface_representation_mode : str = "learned",
+        explicit_feature_dim        : int = 0,
     ) -> None:
         """Build the complete semantic input superset and fixed v1 hypothesis.
 
@@ -114,6 +117,8 @@ class WisdomV1(Model):
             physics_distance_initialization: Start atom transfer from a trainable ``-d/R`` prior.
             local_head_weight_std: Optional small-normal local-head weight scale.
             linear_initialization: ``current``, ``activation_aware``, or ``orthogonal`` policy.
+            surface_representation_mode: ``learned`` (default), ``explicit`` or late ``hybrid``.
+            explicit_feature_dim: Number K of selected fixed fields; positive outside learned mode.
 
         Raises:
             ValueError: If a dimension is invalid or curvature width is not ``3*S``.
@@ -249,7 +254,21 @@ class WisdomV1(Model):
             if interaction_mode is not InteractionRound.SINGLE
             else None
         )
-        self.local_head         = nn.Linear(hidden_dim, 1)
+        self.surface_representation_mode = SurfaceRepresentationMode(surface_representation_mode)
+        if self.surface_representation_mode is not SurfaceRepresentationMode.LEARNED:
+            if explicit_feature_dim < 1:
+                raise ValueError("explicit/hybrid representations require explicit_feature_dim > 0")
+        elif explicit_feature_dim:
+            raise ValueError("learned representation must not request explicit feature channels")
+        self.explicit_feature_dim = explicit_feature_dim
+        self.surface_evidence_dim = (
+            hidden_dim if self.surface_representation_mode is SurfaceRepresentationMode.LEARNED
+            else explicit_feature_dim + (
+                hidden_dim if self.surface_representation_mode is SurfaceRepresentationMode.HYBRID
+                else 0
+            )
+        )
+        self.local_head         = nn.Linear(self.surface_evidence_dim, 1)
         self.global_max_pooling = SparseMaxPooling()
 
         self._initialize_linears(linear_mode)
@@ -280,9 +299,16 @@ class WisdomV1(Model):
         self.surface_atom_radius         = float(surface_atom_radius)
         self.dropout_probability         = float(dropout)
         self.atomic_input_width          = atomic_input_width
-        self.evidence_input_width        = hidden_dim
-        self.evidence_head_parameter_count = hidden_dim + 1
+        self.evidence_input_width        = self.surface_evidence_dim
+        self.evidence_head_parameter_count = self.surface_evidence_dim + 1
         self.evidence_head_added_parameter_count = 0
+        # Explicit mode skips the learned branch, not just its output. Freeze unused tensors
+        # so optimizers and trainable-parameter accounting reflect that experimental control.
+
+        if self.surface_representation_mode is SurfaceRepresentationMode.EXPLICIT:
+            for name, parameter in self.named_parameters():
+                if not name.startswith("local_head."):
+                    parameter.requires_grad_(False)
 
     @staticmethod
     def _residual_scale(mode: ResidualInitialization) -> float | None:
@@ -437,6 +463,8 @@ class WisdomV1(Model):
 
     def gate_regularization(self) -> Tensor:
         """Return the normalized expected L0 semantic-path cost in ``[0,1]``."""
+        if self.surface_representation_mode is SurfaceRepresentationMode.EXPLICIT:
+            return self.local_head.weight.sum() * 0.0
         return self.semantic_gates.regularization()
 
     def gate_summary(self) -> dict[str, object]:
@@ -476,6 +504,7 @@ class WisdomV1(Model):
         surface_neighbors                 : Tensor | None = None,
         surface_neighbor_mask             : Tensor | None = None,
         atom_positions                    : Tensor | None = None,
+        surface_explicit_features         : Tensor | None = None,
     ) -> tuple[Tensor, Tensor]:
         """Encode atoms, transfer context, gate curvature channels, and propagate on the surface.
 
@@ -511,10 +540,25 @@ class WisdomV1(Model):
             surface_neighbors: Optional V3 neighbours ``[M,K]``.
             surface_neighbor_mask: Optional V3 validity ``[M,K]``.
             atom_positions: Optional centered atom coordinates ``[N,3]`` required by spike C.
+            surface_explicit_features: Selected train-normalized fixed fields ``[M,K]``;
+                never an annotation or a ligand-dependent input.
 
         Returns:
             Surface embeddings ``[M,H]`` and local logits ``[M]``.
         """
+        if self.surface_representation_mode is not SurfaceRepresentationMode.LEARNED:
+            if surface_explicit_features is None or surface_explicit_features.shape != (
+                len(surface_curvatures), self.explicit_feature_dim
+            ):
+                raise ValueError("selected surface fields must have shape [M,K]")
+            # Explicit-only returns before sampling gates, atomic encoding, transfer or
+            # DiffusionNet. Its prediction cannot indirectly depend on learned embeddings.
+
+            if self.surface_representation_mode is SurfaceRepresentationMode.EXPLICIT:
+                return surface_explicit_features, self.local_head(
+                    surface_explicit_features
+                ).squeeze(-1)
+
         gates = self.semantic_gates.sample(training=self.training)
 
         atom_features = torch.cat(
@@ -618,6 +662,9 @@ class WisdomV1(Model):
                 surface_operators,
                 surface_ptr,
             )
+        if self.surface_representation_mode is SurfaceRepresentationMode.HYBRID:
+            assert surface_explicit_features is not None
+            encoded = torch.cat((encoded, surface_explicit_features.to(encoded.dtype)), dim=1)
         logits = self.local_head(encoded).squeeze(-1)
         return encoded, logits
 
@@ -730,6 +777,7 @@ class WisdomV1(Model):
         surface_neighbors                 : Tensor | None = None,
         surface_neighbor_mask             : Tensor | None = None,
         atom_positions                    : Tensor | None = None,
+        surface_explicit_features         : Tensor | None = None,
     ) -> dict[str, Tensor]:
         """Predict local surface evidence and one MAX-pooled protein logit.
 
@@ -767,6 +815,8 @@ class WisdomV1(Model):
             surface_neighbors: Optional V3 neighbours ``[M,K]``.
             surface_neighbor_mask: Optional V3 validity mask ``[M,K]``.
             atom_positions: Optional atom coordinates ``[N,3]`` for vector-state spike C.
+            surface_explicit_features: Optional frozen train-normalized fields ``[M,K]``;
+                mandatory in explicit/hybrid mode, never a surface reference target.
 
         Returns:
             Essential ``surface_logits[M]`` and ``logits[B]`` outputs.
@@ -804,6 +854,7 @@ class WisdomV1(Model):
             surface_neighbors,
             surface_neighbor_mask,
             atom_positions,
+            surface_explicit_features,
         )
         protein_count = len(surface_ptr) - 1
         protein_logits = self.global_max_pooling(
@@ -813,4 +864,5 @@ class WisdomV1(Model):
             "logits":             protein_logits,
             "surface_logits":     surface_logits,
             "surface_embeddings": surface_embeddings,
+            "surface_evidence_features": surface_embeddings,
         }

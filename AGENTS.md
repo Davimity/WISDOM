@@ -90,11 +90,17 @@ project contract, not optional style suggestions.
   Several tiny related enums may share one clearly named vocabulary module when separate files
   would add navigation without isolating behavior.
 - Expose exactly the cohesive LambdaForge 0.15 Work classes required by public YAML actions:
-  `Selection`, `Preprocessing`, `Visualization`, `ModelValidation`, `DNAValidation`, and `Training`.
+  `Selection`, `Preprocessing`, `Visualization`, `DNAValidation`, `Training`, and the review Works
+  `StudyReview` and `ModelSetReview`; `ModelValidation` is legacy portable-reader compatibility.
+  Optional physicochemical fields use `SurfaceFeatures`. The independent zinc benchmark uses
+  `ZincDiscovery`, `ZincSelection`, `ZincPreprocessing`, and `ZincValidation`; it reuses universal
+  geometry and the DNA independence algorithms, never DNA-specific evidence or labels.
   Training studies must be single executable Works, never `steps` compositions. The
-  DNA preprocessing workflow remains the explicit composition exception. Optional checkpoint reviews reuse
-  researcher-selected Trial checkpoints from native portable LF exports without fitting models,
-  ranking hyperparameters or silently picking seeds. Missing checkpoints require native recovery;
+  DNA and zinc preprocessing workflows remain the explicit composition exceptions. Optional checkpoint reviews reuse
+  researcher-selected Trial checkpoints from native ResultStore imports or typed ModelSets without
+  fitting models or silently picking seeds. Post-hoc policies may rank artifact-bound validation
+  metrics or form a G/S Pareto frontier; this never changes training, HPO or StudyDecision.
+  Missing checkpoints require native recovery;
   never implement a nested runner or hidden fallback training without a public LF lifecycle API.
   Configure normal protein reports directly in Training's `visualization` mapping, not separate
   VVAL YAMLs. Use lightweight prediction/logit/GT content and bounded display sampling by default;
@@ -111,6 +117,8 @@ project contract, not optional style suggestions.
   read like scientific pseudocode. Their stateless scientific stages are the explicit exception to
   the class-per-concept rule: implement them as small function modules rather than recreating giant
   Work classes or graphs of trivial service objects.
+  The adjacent stateless zinc evidence, structure, phenotype, and audit stages follow the same
+  exception; zinc-specific coordination and annotation remain cohesive domain classes.
 - Prefer a small number of meaningful domain and service classes. Do not introduce factories,
   adapters, managers, builders, DTOs, wrappers, or interfaces unless they remove real complexity.
 - Put a class in `wisdom/utils` only when the same cohesive domain operation is genuinely reused by

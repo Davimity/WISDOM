@@ -55,6 +55,13 @@ class SurfaceFaithfulnessAudit:
 
             return {}, 0
 
+        # Vertex deletion changes a refiner's graph or spectral operator. Reusing the old
+        # operator, or pooling already-refined subsets, is not a valid whole-model intervention.
+        # Keep the audit unavailable for all active refiners until an operator-aware audit exists.
+
+        if getattr(model, "surface_refiner_type", "none") != "none":
+            return {}, 0
+
         logits      = output["surface_logits"].reshape(-1)
         embeddings  = output["surface_embeddings"]
         areas       = cast(Tensor, batch["surface_area_weights"]).reshape(-1)

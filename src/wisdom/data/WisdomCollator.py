@@ -105,6 +105,7 @@ class WisdomCollator:
             "surface_valid_mask",
             "surface_target_soft",
             "surface_distance_to_dna",
+            "surface_distance_to_target",
             "surface_distance_valid",
             "surface_target_hard_sensitivity",
         )
@@ -319,6 +320,13 @@ class WisdomCollator:
                 batch[name] = torch.cat(values[name])
         if has_atom_geometry:
             batch["atom_positions"] = torch.cat(values["atom_positions"])
+        if any("surface_explicit_features" in sample for sample in samples):
+            # All members must expose exactly the requested channel order; a missing member
+            # cannot silently become an all-zero explicit representation.
+
+            batch["surface_explicit_features"] = torch.cat([
+                self._tensor(sample, "surface_explicit_features") for sample in samples
+            ])
         if has_identity:
             batch["identifier"]          = identifiers
             batch["tier"]                = tiers

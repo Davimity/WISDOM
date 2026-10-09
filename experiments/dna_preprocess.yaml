@@ -16,7 +16,7 @@ steps:                                                          # LambdaForge ru
 
       # raw_path: {file: ../data/dna/raw/raw.jsonl}              # Rebuild mode: immutable source evidence.
       raw_path: null                                             # Reuse mode does not stage or read RAW evidence.
-      workers: 36                                               # Concurrent RCSB jobs and tool threads.
+      workers: 12                                               # Concurrent RCSB jobs and tool threads.
       requests_per_second: 60.0                                 # Aggregate RCSB request-start ceiling.
       retries: 5                                                # Extra attempts after one failed request.
       output_directory: ../data/dna/design                      # Publish beside experiments/, under data/dna/.
@@ -62,8 +62,8 @@ steps:                                                          # LambdaForge ru
       # existing_design: null                                   # No prior design participates in the new result.
       # raw_path: {file: ../data/dna/raw/raw.jsonl}              # Frozen evidence used by the reconstruction.
     resources:                                                   # Operational reservation for this configured step.
-      cpu: 36                                                    # Selection is skipped; downstream preprocessing uses its outputs.
-      memory: 120GiB                                             # Upper bound retained by the current cluster recipe.
+      cpu: 12                                                    # Selection is skipped; downstream preprocessing uses its outputs.
+      memory: 12GiB                                             # Upper bound retained by the current cluster recipe.
       storage: 100GiB                                            # Upper bound retained by the current cluster recipe.
       time: 24h                                                  # Complete step wall-time ceiling.
 
@@ -128,7 +128,7 @@ steps:                                                          # LambdaForge ru
       include_validation: true                                  # Keep the complete validation population.
       include_test: false                                       # Keep held-out test bytes absent during HPO.
 
-      workers: 36                                               # Snapshot threads and spawned protein processes.
+      workers: 12                                               # Snapshot threads and spawned protein processes.
       progress_log_seconds: 120.0                               # Parent liveness log every two minutes.
       verbose: false                                             # True logs each protein start and completion.
 
@@ -146,8 +146,8 @@ steps:                                                          # LambdaForge ru
       negative_gap: 3.0                                         # Smallest confidently non-contacting gap in Å.
       sensitivity_gaps: [1.0, 1.4, 2.0]                         # Evaluation-only positive cutoffs in Å.
     resources:                                                   # Active geometry and annotation reservation.
-      cpu: 36                                                    # Matches the configured spawned-process workers.
-      memory: 120GiB                                             # Concurrent surfaces, operators, and validation.
+      cpu: 12                                                    # Matches the configured spawned-process workers.
+      memory: 12GiB                                             # Concurrent surfaces, operators, and validation.
       storage: 100GiB                                            # Structures, archives, sidecars, and checkpoints.
       time: 24h                                                  # Complete preprocessing wall-time ceiling.
 

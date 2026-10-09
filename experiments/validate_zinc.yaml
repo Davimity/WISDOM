@@ -1,0 +1,8 @@
+run: wisdom.preprocessing.zinc.ZincValidation.ZincValidation  # Read-only scientific validation.
+with:  # Typed Registry placement and error policy.
+  dataset: {dataset: wisdom-zinc@1}  # Resolves only after successful publication.
+  fail_on_error: true  # Write verdict/JSON, then fail on scientific invariant violations.
+# ZincValidation defaults: dataset required, fail_on_error=true. False reports FAIL without raising;
+# it never converts invalid data into a valid publication or changes the dataset.
+resources: {cpu: 1, memory: 16GiB}  # Full NPZ/sidecar/hash audit; no training.
+# LF resource defaults: cpu=1/gpu=0; memory/storage/gpu_memory/time/processes optional.

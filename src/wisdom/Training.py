@@ -41,6 +41,8 @@ from wisdom.evaluation.SurfacePredictionReport import SurfacePredictionReport
 from wisdom.evaluation.SurfaceFaithfulnessAudit import SurfaceFaithfulnessAudit
 from wisdom.evaluation.SurfaceVisualizationMode import SurfaceVisualizationMode
 from wisdom.preprocessing.structure.VisualizationContent import VisualizationContent
+from wisdom.features.SurfaceFeatureSchema import SurfaceFeatureSchema
+from wisdom.models.SurfaceRepresentationMode import SurfaceRepresentationMode
 
 
 _MODEL_INPUT_NAMES = (
@@ -97,6 +99,10 @@ class Training(lf.Work):
         dataset              : Path,
         model_version        : int = 1,
         subset               : str = "full",
+        surface_representation_mode: str = "learned",
+        surface_features     : Sequence[str] = (),
+        surface_feature_group: str | None = None,
+        surface_feature_exclude: Sequence[str] = (),
         hidden_dim           : int = 128,
         embedding_dim        : int = 32,
         residue_embedding_dim: int | None = None,
@@ -136,6 +142,28 @@ class Training(lf.Work):
         max_mean_lambda              : float = 0.5,
         max_mean_lambda_mode         : str = "fixed",
         max_mean_lambda_init         : float = 0.5,
+        regional_diffusion_scale_bounds: Sequence[float] = (0.05, 12.0),
+        log_sum_exp_beta_bounds        : Sequence[float] = (0.25, 200.0),
+        autopool_alpha_bounds          : Sequence[float] = (0.0, 50.0),
+        gem_power_bounds               : Sequence[float] = (1.0, 32.0),
+        surface_refiner_type                   : str   = "none",
+        surface_refiner_heat_length            : float = 3.0,
+        surface_refiner_heat_length_init       : float = 3.0,
+        surface_refiner_strength               : float = 0.5,
+        surface_refiner_steps                  : int   = 2,
+        surface_refiner_geometry_sigma         : float = 2.0,
+        surface_refiner_normal_sigma           : float = 0.25,
+        surface_refiner_curvature_sigma        : float = 1.0,
+        surface_refiner_embedding_temperature  : float = 0.5,
+        surface_refiner_embedding_detach       : bool  = True,
+        surface_refiner_learned_hidden_dim     : int   = 32,
+        surface_refiner_tv_lambda              : float = 0.05,
+        surface_refiner_tv_steps               : int   = 5,
+        surface_refiner_tv_step_size           : float = 0.5,
+        surface_refiner_tv_epsilon             : float = 0.1,
+        surface_refiner_crf_strength           : float = 0.5,
+        surface_refiner_crf_steps              : int   = 5,
+        surface_refiner_crf_damping            : float = 0.5,
         head_type            : str = "single",
         global_context_dim   : int = 16,
         detach_global_context: bool = True,
@@ -213,6 +241,10 @@ class Training(lf.Work):
             dataset: Resolved managed dataset root containing LambdaForge ``index.jsonl``.
             model_version: Architecture generation resolved from ``WisdomV{N}`` by convention.
             subset: Full data or a deterministic training-view name.
+            surface_representation_mode: learned (default), explicit or hybrid late evidence fusion.
+            surface_features: Ordered fixed field names; empty by default, never local targets.
+            surface_feature_group: Optional SurfaceFeatureSchema group; None by default.
+            surface_feature_exclude: Known field names removed after expansion; empty by default.
             hidden_dim: Shared atom/surface latent width.
             embedding_dim: Element and optional residue embedding width.
             residue_embedding_dim: Independent residue embedding width; ``None`` reuses
@@ -242,18 +274,47 @@ class Training(lf.Work):
             pooling_area_mode: point, area, or legacy (area mean and point other families).
             attention_variant: simple tanh or gated attention; weights are not local positivity.
             regional_scale_mode: fixed or learned regional heat length.
-            regional_diffusion_scale_init: Learned length initialization inside (0.05, 12) Å.
+            regional_diffusion_scale_init: Learned length initialization inside its bounds, in Å.
             log_sum_exp_mode: fixed, learned, or curriculum LSE temperature.
-            log_sum_exp_beta_init: Learned beta initialization inside (0.25, 200).
+            log_sum_exp_beta_init: Learned beta initialization strictly inside its bounds.
             autopool_alpha: Fixed non-negative probability sharpness.
             autopool_alpha_mode: fixed or learned AutoPool alpha.
-            autopool_alpha_init: Learned alpha initialization inside (0, 50).
+            autopool_alpha_init: Learned alpha initialization strictly inside its bounds.
             gem_power: Fixed probability power >= 1.
             gem_power_mode: fixed or learned GeM power.
-            gem_power_init: Learned power initialization inside (1, 32).
+            gem_power_init: Learned power initialization strictly inside its bounds.
             max_mean_lambda: Fixed MAX coefficient in [0, 1].
             max_mean_lambda_mode: fixed or learned MAX-MEAN mixture.
             max_mean_lambda_init: Learned mixture initialization inside (0, 1).
+            regional_diffusion_scale_bounds: Positive learned length limits in Å; default
+                (0.05, 12). Bounds are saved with the checkpoint, not inferred at restoration.
+            log_sum_exp_beta_bounds: Positive learned beta limits; default (0.25, 200).
+            autopool_alpha_bounds: Nonnegative learned alpha limits; default (0, 50).
+            gem_power_bounds: Learned power limits, lower at least one; default (1, 32).
+            surface_refiner_type: Evidence operator: none, heat, learned_heat,
+                geometric_anisotropic, embedding_anisotropic, learned_anisotropic, graph_tv or
+                crf.
+            surface_refiner_heat_length: Fixed heat length in Å; zero is exact identity.
+            surface_refiner_heat_length_init: Learned heat initial length strictly inside
+                (0.05,12) Å.
+            surface_refiner_strength: Anisotropic convex mixing fraction in [0,1].
+            surface_refiner_steps: Nonnegative anisotropic update count.
+            surface_refiner_geometry_sigma: Positive spatial conductance bandwidth in Å.
+            surface_refiner_normal_sigma: Positive dimensionless normal-misalignment bandwidth.
+            surface_refiner_curvature_sigma: Positive signed-log curvature conductance bandwidth.
+            surface_refiner_embedding_temperature: Positive cosine-distance bandwidth.
+            surface_refiner_embedding_detach: Detach only embedding guides, not the
+                logit/backbone gradient path.
+            surface_refiner_learned_hidden_dim: Positive hidden width of the small learned
+                symmetric edge scorer.
+            surface_refiner_tv_lambda: Nonnegative coefficient of smoothed graph TV.
+            surface_refiner_tv_steps: Nonnegative unrolled TV descent count.
+            surface_refiner_tv_step_size: Relaxation in (0,1] of the stabilized diagonal descent
+                step.
+            surface_refiner_tv_epsilon: Positive smoothed-absolute-value scale in logit units.
+            surface_refiner_crf_strength: Nonnegative attractive Potts coefficient.
+            surface_refiner_crf_steps: Nonnegative mean-field iteration count.
+            surface_refiner_crf_damping: New-proposal fraction in (0,1].
             head_type: V2+ ``single``, ``dual``, ``global_context``, or ``film`` hypothesis.
             global_context_dim: D2/D2b global context bottleneck width.
             detach_global_context: Stop local gradients through the global context path.
@@ -380,6 +441,14 @@ class Training(lf.Work):
         # These options never enter scientific model parameters or change checkpoint selection.
 
         options = dict(visualization or {})
+        representation = SurfaceRepresentationMode(surface_representation_mode)
+        feature_names = SurfaceFeatureSchema.resolve(
+            surface_features, surface_feature_group, surface_feature_exclude,
+        )
+        if representation is SurfaceRepresentationMode.LEARNED and feature_names:
+            raise ValueError("learned representation must not request explicit surface fields")
+        if representation is not SurfaceRepresentationMode.LEARNED and not feature_names:
+            raise ValueError("explicit/hybrid representation requires named surface fields")
         surface_visualization = options.get("mode", surface_visualization)
         surface_visualization_maximum = options.get(
             "maximum_proteins", surface_visualization_maximum,
@@ -403,6 +472,8 @@ class Training(lf.Work):
             dataset=dataset,
             model_version=model_version,
             subset=subset,
+            surface_representation_mode=representation.value,
+            surface_features=feature_names,
             hidden_dim=hidden_dim,
             embedding_dim=embedding_dim,
             residue_embedding_dim=residue_embedding_dim,
@@ -442,6 +513,28 @@ class Training(lf.Work):
             max_mean_lambda=max_mean_lambda,
             max_mean_lambda_mode=max_mean_lambda_mode,
             max_mean_lambda_init=max_mean_lambda_init,
+            regional_diffusion_scale_bounds=regional_diffusion_scale_bounds,
+            log_sum_exp_beta_bounds=log_sum_exp_beta_bounds,
+            autopool_alpha_bounds=autopool_alpha_bounds,
+            gem_power_bounds=gem_power_bounds,
+            surface_refiner_type=surface_refiner_type,
+            surface_refiner_heat_length=surface_refiner_heat_length,
+            surface_refiner_heat_length_init=surface_refiner_heat_length_init,
+            surface_refiner_strength=surface_refiner_strength,
+            surface_refiner_steps=surface_refiner_steps,
+            surface_refiner_geometry_sigma=surface_refiner_geometry_sigma,
+            surface_refiner_normal_sigma=surface_refiner_normal_sigma,
+            surface_refiner_curvature_sigma=surface_refiner_curvature_sigma,
+            surface_refiner_embedding_temperature=surface_refiner_embedding_temperature,
+            surface_refiner_embedding_detach=surface_refiner_embedding_detach,
+            surface_refiner_learned_hidden_dim=surface_refiner_learned_hidden_dim,
+            surface_refiner_tv_lambda=surface_refiner_tv_lambda,
+            surface_refiner_tv_steps=surface_refiner_tv_steps,
+            surface_refiner_tv_step_size=surface_refiner_tv_step_size,
+            surface_refiner_tv_epsilon=surface_refiner_tv_epsilon,
+            surface_refiner_crf_strength=surface_refiner_crf_strength,
+            surface_refiner_crf_steps=surface_refiner_crf_steps,
+            surface_refiner_crf_damping=surface_refiner_crf_damping,
             head_type=head_type,
             global_context_dim=global_context_dim,
             detach_global_context=detach_global_context,
@@ -518,6 +611,8 @@ def _train_wisdom(
     dataset              : Path,
     model_version        : int = 1,
     subset               : str = "full",
+    surface_representation_mode: str = "learned",
+    surface_features     : Sequence[str] = (),
     hidden_dim           : int = 128,
     embedding_dim        : int = 32,
     residue_embedding_dim: int | None = None,
@@ -557,6 +652,28 @@ def _train_wisdom(
     max_mean_lambda              : float = 0.5,
     max_mean_lambda_mode         : str = "fixed",
     max_mean_lambda_init         : float = 0.5,
+    regional_diffusion_scale_bounds: Sequence[float] = (0.05, 12.0),
+    log_sum_exp_beta_bounds        : Sequence[float] = (0.25, 200.0),
+    autopool_alpha_bounds          : Sequence[float] = (0.0, 50.0),
+    gem_power_bounds               : Sequence[float] = (1.0, 32.0),
+    surface_refiner_type                   : str   = "none",
+    surface_refiner_heat_length            : float = 3.0,
+    surface_refiner_heat_length_init       : float = 3.0,
+    surface_refiner_strength               : float = 0.5,
+    surface_refiner_steps                  : int   = 2,
+    surface_refiner_geometry_sigma         : float = 2.0,
+    surface_refiner_normal_sigma           : float = 0.25,
+    surface_refiner_curvature_sigma        : float = 1.0,
+    surface_refiner_embedding_temperature  : float = 0.5,
+    surface_refiner_embedding_detach       : bool  = True,
+    surface_refiner_learned_hidden_dim     : int   = 32,
+    surface_refiner_tv_lambda              : float = 0.05,
+    surface_refiner_tv_steps               : int   = 5,
+    surface_refiner_tv_step_size           : float = 0.5,
+    surface_refiner_tv_epsilon             : float = 0.1,
+    surface_refiner_crf_strength           : float = 0.5,
+    surface_refiner_crf_steps              : int   = 5,
+    surface_refiner_crf_damping            : float = 0.5,
     head_type            : str = "single",
     global_context_dim   : int = 16,
     detach_global_context: bool = True,
@@ -636,6 +753,8 @@ def _train_wisdom(
         dataset: Resolved managed dataset root containing LambdaForge ``index.jsonl``.
         model_version: Architecture generation resolved from ``WisdomV{N}`` by convention.
         subset: Full data or a deterministic view such as ``replicate-00/train-25``.
+        surface_representation_mode: learned (default), explicit or hybrid late evidence fusion.
+        surface_features: Ordered frozen train-normalized field names; empty by default.
         hidden_dim: Shared atom/surface latent width.
         embedding_dim: Element and optional residue embedding width.
         residue_embedding_dim: Independent residue embedding width or ``None`` for the legacy
@@ -665,18 +784,44 @@ def _train_wisdom(
         pooling_area_mode: point, area, or legacy (area mean and point other families).
         attention_variant: simple tanh or gated attention; weights are not local positivity.
         regional_scale_mode: fixed or learned regional heat length.
-        regional_diffusion_scale_init: Learned length initialization inside (0.05, 12) angstroms.
+        regional_diffusion_scale_init: Learned length initialization inside its bounds, in Å.
         log_sum_exp_mode: fixed, learned, or curriculum LSE temperature.
-        log_sum_exp_beta_init: Learned beta initialization inside (0.25, 200).
+        log_sum_exp_beta_init: Learned beta initialization strictly inside its bounds.
         autopool_alpha: Fixed non-negative probability sharpness.
         autopool_alpha_mode: fixed or learned AutoPool alpha.
-        autopool_alpha_init: Learned alpha initialization inside (0, 50).
+        autopool_alpha_init: Learned alpha initialization strictly inside its bounds.
         gem_power: Fixed probability power >= 1.
         gem_power_mode: fixed or learned GeM power.
-        gem_power_init: Learned power initialization inside (1, 32).
+        gem_power_init: Learned power initialization strictly inside its bounds.
         max_mean_lambda: Fixed MAX coefficient in [0, 1].
         max_mean_lambda_mode: fixed or learned MAX-MEAN mixture.
         max_mean_lambda_init: Learned mixture initialization inside (0, 1).
+        regional_diffusion_scale_bounds: Positive learned length limits in Å; default (0.05, 12).
+        log_sum_exp_beta_bounds: Positive learned beta limits; default (0.25, 200).
+        autopool_alpha_bounds: Nonnegative learned alpha limits; default (0, 50).
+        gem_power_bounds: Learned power limits, lower at least one; default (1, 32).
+            Exact constructor bounds travel with the checkpoint; historical defaults remain valid.
+        surface_refiner_type: Evidence operator: none, heat, learned_heat,
+            geometric_anisotropic, embedding_anisotropic, learned_anisotropic, graph_tv or crf.
+        surface_refiner_heat_length: Fixed heat length in Å; zero is exact identity.
+        surface_refiner_heat_length_init: Learned heat initial length strictly inside (0.05,12) Å.
+        surface_refiner_strength: Anisotropic convex mixing fraction in [0,1].
+        surface_refiner_steps: Nonnegative anisotropic update count.
+        surface_refiner_geometry_sigma: Positive spatial conductance bandwidth in Å.
+        surface_refiner_normal_sigma: Positive dimensionless normal-misalignment bandwidth.
+        surface_refiner_curvature_sigma: Positive signed-log curvature conductance bandwidth.
+        surface_refiner_embedding_temperature: Positive cosine-distance bandwidth.
+        surface_refiner_embedding_detach: Detach only embedding guides, not the logit/backbone
+            gradient path.
+        surface_refiner_learned_hidden_dim: Positive hidden width of the small learned symmetric
+            edge scorer.
+        surface_refiner_tv_lambda: Nonnegative coefficient of smoothed graph TV.
+        surface_refiner_tv_steps: Nonnegative unrolled TV descent count.
+        surface_refiner_tv_step_size: Relaxation in (0,1] of the stabilized diagonal descent step.
+        surface_refiner_tv_epsilon: Positive smoothed-absolute-value scale in logit units.
+        surface_refiner_crf_strength: Nonnegative attractive Potts coefficient.
+        surface_refiner_crf_steps: Nonnegative mean-field iteration count.
+        surface_refiner_crf_damping: New-proposal fraction in (0,1].
         head_type: V2+ global/local head relationship.
         global_context_dim: D2/D2b context bottleneck width.
         detach_global_context: Whether local gradients stop at global context.
@@ -920,6 +1065,8 @@ def _train_wisdom(
         raise ValueError("model_version must be a positive integer")
     if model_version == 1 and pooling_type != "max":
         raise ValueError("WISDOM v1 fixes pooling_type='max'")
+    if model_version == 1 and surface_refiner_type != "none":
+        raise ValueError("evidence refinement requires model_version>=2")
     if model_version == 1 and (interaction_round != "single" or vector_atomic_channels != 0):
         raise ValueError("WISDOM v1 fixes single interaction and scalar atomic states")
     if model_version == 1 and head_type != "single":
@@ -1109,8 +1256,10 @@ def _train_wisdom(
             split,
             subset=subset,
             include_surface_targets=False,
+            surface_features=tuple(surface_features),
             include_surface_geometry=(
                 model_version == 3 or weak_surface_loss.needs_surface_neighbors
+                or surface_refiner_type not in {"none", "heat", "learned_heat"}
             ),
             include_atom_geometry=vector_atomic_channels > 0,
         )
@@ -1128,9 +1277,11 @@ def _train_wisdom(
             dataset,
             "val",
             subset=subset,
+            surface_features=tuple(surface_features),
             include_surface_targets=surface_metrics,
             include_surface_geometry=(
                 model_version == 3 or weak_surface_loss.needs_surface_neighbors
+                or surface_refiner_type not in {"none", "heat", "learned_heat"}
             ),
             include_atom_geometry=vector_atomic_channels > 0,
         )
@@ -1139,9 +1290,11 @@ def _train_wisdom(
                 dataset,
                 "test",
                 subset=subset,
+                surface_features=tuple(surface_features),
                 include_surface_targets=surface_metrics,
                 include_surface_geometry=(
                     model_version == 3 or weak_surface_loss.needs_surface_neighbors
+                    or surface_refiner_type not in {"none", "heat", "learned_heat"}
                 ),
                 include_atom_geometry=vector_atomic_channels > 0,
             )
@@ -1206,6 +1359,8 @@ def _train_wisdom(
     curvature_features = curvature_widths["train"]
 
     available_parameters = {
+        "surface_representation_mode": surface_representation_mode,
+        "explicit_feature_dim": len(surface_features),
         "hidden_dim":           hidden_dim,
         "embedding_dim":        embedding_dim,
         "residue_embedding_dim": residue_embedding_dim,
@@ -1245,6 +1400,28 @@ def _train_wisdom(
         "max_mean_lambda": max_mean_lambda,
         "max_mean_lambda_mode": max_mean_lambda_mode,
         "max_mean_lambda_init": max_mean_lambda_init,
+        "regional_diffusion_scale_bounds": tuple(regional_diffusion_scale_bounds),
+        "log_sum_exp_beta_bounds":         tuple(log_sum_exp_beta_bounds),
+        "autopool_alpha_bounds":           tuple(autopool_alpha_bounds),
+        "gem_power_bounds":                tuple(gem_power_bounds),
+        "surface_refiner_type": surface_refiner_type,
+        "surface_refiner_heat_length": surface_refiner_heat_length,
+        "surface_refiner_heat_length_init": surface_refiner_heat_length_init,
+        "surface_refiner_strength": surface_refiner_strength,
+        "surface_refiner_steps": surface_refiner_steps,
+        "surface_refiner_geometry_sigma": surface_refiner_geometry_sigma,
+        "surface_refiner_normal_sigma": surface_refiner_normal_sigma,
+        "surface_refiner_curvature_sigma": surface_refiner_curvature_sigma,
+        "surface_refiner_embedding_temperature": surface_refiner_embedding_temperature,
+        "surface_refiner_embedding_detach": surface_refiner_embedding_detach,
+        "surface_refiner_learned_hidden_dim": surface_refiner_learned_hidden_dim,
+        "surface_refiner_tv_lambda": surface_refiner_tv_lambda,
+        "surface_refiner_tv_steps": surface_refiner_tv_steps,
+        "surface_refiner_tv_step_size": surface_refiner_tv_step_size,
+        "surface_refiner_tv_epsilon": surface_refiner_tv_epsilon,
+        "surface_refiner_crf_strength": surface_refiner_crf_strength,
+        "surface_refiner_crf_steps": surface_refiner_crf_steps,
+        "surface_refiner_crf_damping": surface_refiner_crf_damping,
         "head_type":            head_type,
         "global_context_dim":   global_context_dim,
         "detach_global_context": detach_global_context,
@@ -1300,6 +1477,15 @@ def _train_wisdom(
             {
                 "model_state":         model.state_dict(),
                 "model_parameters":    model_parameters,
+                "surface_features":    tuple(surface_features),
+                "feature_statistics":  datasets["train"].feature_statistics,
+                "task_specification": {
+                    "task_name": datasets["train"].task_specification.task_name,
+                    "global_target_key": datasets["train"].task_specification.global_target_key,
+                    "local_annotation_asset": (
+                        datasets["train"].task_specification.local_annotation_asset
+                    ),
+                },
                 "initialization_seed": effective_initialization_seed,
             },
             initial_checkpoint,
@@ -1712,6 +1898,10 @@ def _train_wisdom(
         pooling_values = pooling_head.parameter_values() if pooling_head is not None else {}
         for name, value in pooling_values.items():
             work.metrics.log(name, value, step=epoch)
+        refiner = getattr(model, "surface_refiner", None)
+        if refiner is not None:
+            for name, value in refiner.parameter_values().items():
+                work.metrics.log(name, value, step=epoch)
         pooling_trajectory.append({"epoch": float(epoch), **pooling_values})
 
         moments = surface_logit_moments.cpu().tolist()
@@ -1872,6 +2062,15 @@ def _train_wisdom(
                 {
                     "model_version":    model_version,
                     "model_parameters": model_parameters,
+                    "surface_features": tuple(surface_features),
+                    "surface_feature_statistics": datasets["train"].feature_statistics,
+                    "task_specification": {
+                        "task_name": datasets["train"].task_specification.task_name,
+                        "global_target_key": datasets["train"].task_specification.global_target_key,
+                        "local_annotation_asset": (
+                            datasets["train"].task_specification.local_annotation_asset
+                        ),
+                    },
                     "pooling_type":     pooling_type,
                     "head_type":        head_type,
                     "direct_head_weight": direct_head_weight,
@@ -2302,6 +2501,13 @@ def _train_wisdom(
     )
     for name, value in final_pooling_values.items():
         work.metrics.log(f"final_{name}", value)
+    refiner = getattr(model, "surface_refiner", None)
+    final_refiner_values = (
+        refiner.parameter_values() if refiner is not None and stop_reason != "adaptive-hpo"
+        else {}
+    )
+    for name, value in final_refiner_values.items():
+        work.metrics.log(f"final_{name}", value)
     for statistic in ("minimum", "mean", "median", "maximum"):
         value = final_diffusion_times.get(statistic)
         if isinstance(value, float):
@@ -2309,11 +2515,23 @@ def _train_wisdom(
 
     report = {
         "model_version":                  model_version,
+        "surface_representation_mode":    surface_representation_mode,
+        "surface_features":               list(surface_features),
+        "feature_statistics":             datasets["train"].feature_statistics,
+        "task_specification": {
+            "task_name": datasets["train"].task_specification.task_name,
+            "global_target_key": datasets["train"].task_specification.global_target_key,
+            "local_annotation_asset": (
+                datasets["train"].task_specification.local_annotation_asset
+            ),
+        },
         "architecture":                   architecture_name,
         "pooling_type":                   pooling_type,
         "pooling_area_mode":              pooling_area_mode,
         "pooling_parameter_trajectory":   pooling_trajectory,
         "selected_pooling_parameters":    final_pooling_values,
+        "surface_refiner_type":           surface_refiner_type,
+        "selected_refiner_parameters":    final_refiner_values,
         "head_type":                      head_type,
         "direct_head_weight":             direct_head_weight,
         "surface_head_weight":            surface_head_weight,
@@ -2390,7 +2608,20 @@ def _train_wisdom(
         json.dumps(model.gate_summary(), indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
     )
-    work.outputs.artifact("best-model", checkpoint, role="checkpoint")
+    work.outputs.artifact(
+        "best-model", checkpoint, role="checkpoint",
+        metadata={
+            **_checkpoint_metadata(
+                best_epoch, best_validation_metrics, best_surface_metrics, surface_curve,
+            ),
+            "surface_refiner_type":       surface_refiner_type,
+            "surface_refiner_parameters": final_refiner_values,
+            "faithfulness_unavailable_reason": (
+                "Vertex deletion invalidates the trained surface refiner's operator."
+                if surface_refiner_type != "none" else None
+            ),
+        },
+    )
     if save_initial_checkpoint:
         work.outputs.artifact("initial-model", initial_checkpoint, role="checkpoint")
     work.outputs.artifact(
@@ -2568,6 +2799,7 @@ def _evaluate(
     head_disagreements   : list[Tensor] = []
     targets           : list[Tensor] = []
     surface_scores    : list[Tensor] = []
+    raw_surface_scores: list[Tensor] = []
     surface_targets   : list[Tensor] = []
     surface_validity  : list[Tensor] = []
     surface_owners    : list[Tensor] = []
@@ -2664,6 +2896,8 @@ def _evaluate(
 
             if "surface_target_hard" in batch and "surface_valid_mask" in batch:
                 surface_scores.append(output["surface_logits"].float().cpu())
+                if getattr(model, "surface_refiner_type", "none") != "none":
+                    raw_surface_scores.append(output["raw_surface_logits"].float().cpu())
                 surface_targets.append(_tensor(batch, "surface_target_hard").cpu())
                 surface_validity.append(_tensor(batch, "surface_valid_mask").cpu())
                 surface_owners.append(_tensor(batch, "surface_batch").cpu() + protein_offset)
@@ -2739,6 +2973,36 @@ def _evaluate(
         torch.cat(surface_attention) if attention_available and surface_attention else None,
         torch.cat(head_disagreements).cpu() if head_disagreements else None,
     )
+    # Principal surface metrics describe the exact field entering pooling. Raw diagnostics
+    # use the same valid points, protein weights and GT only after the model's forward.
+
+    raw_metrics = None
+    if raw_surface_scores:
+        raw_metrics = SurfaceMetricSuite().compute(
+            torch.sigmoid(torch.cat(raw_surface_scores)),
+            torch.cat(surface_targets), torch.cat(surface_validity),
+            torch.cat(surface_owners), torch.cat(surface_bag_labels),
+            torch.cat(surface_areas), torch.sigmoid(protein_logits),
+        )
+    elif getattr(model, "surface_refiner_type", None) == "none":
+        # The identity control needs comparable raw diagnostics without computing the
+        # same full-resolution metrics twice. Copy before adding prefixed aliases.
+
+        raw_metrics = dict(local_metrics)
+
+    if raw_metrics is not None:
+        for name, raw_value in raw_metrics.items():
+            if (name.startswith("surface_positive_macro_")
+                    or name in {"surface_negative_positive_mass", "surface_negative_peak",
+                                "surface_valid_points", "surface_positive_proteins",
+                                "surface_negative_proteins"}):
+                local_metrics[name.replace("surface_", "surface_raw_", 1)] = raw_value
+        refined_ap = local_metrics["surface_positive_macro_auprc"]
+        raw_ap     = raw_metrics["surface_positive_macro_auprc"]
+        local_metrics["surface_refinement_gain"] = (
+            refined_ap - raw_ap if refined_ap is not None and raw_ap is not None else None
+        )
+
     local_metrics.update(
         SubgroupMetricSuite().compute(
             torch.sigmoid(protein_logits),
@@ -2762,6 +3026,72 @@ def _evaluate(
             }
         )
     return protein_metrics, local_metrics
+
+
+def _checkpoint_metadata(
+    epoch  : int,
+    protein: Mapping[str, float | None],
+    surface: Mapping[str, float | None] | None,
+    curve  : Sequence[Mapping[str, float]],
+) -> dict[str, Any]:
+    """Bind native model-selection evidence to the exact saved weight snapshot.
+
+    Args:
+        epoch: One-based epoch of best-model, selected using protein validation alone.
+        protein: Validation metrics recorded when these exact weights were selected.
+        surface: Full-resolution validation metrics on the restored weights, or None.
+        curve: Paired validation observations (epoch, global G, surface S); never test data.
+
+    Returns:
+        Artifact metadata with step/epoch and finite snapshot-bound metric names. G is
+        0.70 protein AP + 0.30 protein AUROC. S is positive-protein macro surface AP.
+        With at least two paired observations, R=max(S_t)-S_checkpoint, C=0.70
+        (1-min(R/0.20,1))+0.30(rho+1)/2, and W=0.35G+0.45S+0.20C. The existing
+        score convention uses rho=0 for an undefined correlation, recorded separately
+        as unavailable. No curve means no fabricated regret, C, or W. In particular,
+        an unrelated historical maximum or the final epoch cannot replace G or S.
+    """
+    global_score = _validation_utility(protein)
+    surface_score = (surface or {}).get("surface_positive_macro_auprc")
+    if surface_score is None:
+        surface_score = next(
+            (point["surface"] for point in curve if int(point["epoch"]) == epoch), None
+        )
+    metrics = {
+        **{f"protein_{name}": value for name, value in protein.items()},
+        **dict(surface or {}),
+        "global_score": global_score,
+        "surface_score": surface_score,
+        "surface_positive_macro_auprc": surface_score,
+    }
+
+    # Curve context describes this Run, but regret must be anchored to its actual saved
+    # checkpoint. Patience/minimum_delta can keep an epoch other than argmax(curve G).
+
+    if global_score is not None and surface_score is not None and len(curve) >= 2:
+        context = _surface_coupling(curve)
+        regret = max(0.0, max(point["surface"] for point in curve) - surface_score)
+        rho = context["global_surface_spearman"]
+        coupling = 0.70 * (1.0 - min(regret / 0.20, 1.0)) + 0.30 * (
+            ((0.0 if rho is None else rho) + 1.0) / 2.0
+        )
+        metrics.update(
+            selection_regret=regret,
+            coupling=coupling,
+            wisdom_score=0.35 * global_score + 0.45 * surface_score + 0.20 * coupling,
+            global_surface_spearman=rho,
+        )
+    return {
+        "step":  epoch,
+        "epoch": epoch,
+        "metrics": {
+            name: value for name, value in metrics.items()
+            if value is not None and math.isfinite(value)
+        },
+        "selection": "protein validation only; surface metrics are post-selection diagnostics",
+        "curve_observations": len(curve),
+        "coupling_context": "observed Run curve; regret anchored to this checkpoint",
+    }
 
 
 def _validation_utility(metrics: Mapping[str, float | None]) -> float | None:
@@ -3068,6 +3398,8 @@ def _device_batch(batch: Mapping[str, Any], device: torch.device) -> dict[str, A
     selected_names = [*_MODEL_INPUT_NAMES, "target"]
     selected_names.extend(name for name in _V3_INPUT_NAMES if name in batch)
     selected_names.extend(name for name in _VECTOR_INPUT_NAMES if name in batch)
+    if "surface_explicit_features" in batch:
+        selected_names.append("surface_explicit_features")
     return {
         name: batch[name] if name == "surface_ptr" else _move_to_device(batch[name], device)
         for name in selected_names
@@ -3086,6 +3418,8 @@ def _model_inputs(batch: Mapping[str, Any]) -> dict[str, Any]:
     names = list(_MODEL_INPUT_NAMES)
     names.extend(name for name in _V3_INPUT_NAMES if name in batch)
     names.extend(name for name in _VECTOR_INPUT_NAMES if name in batch)
+    if "surface_explicit_features" in batch:
+        names.append("surface_explicit_features")
     return {name: batch[name] for name in names}
 
 

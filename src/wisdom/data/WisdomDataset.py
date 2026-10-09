@@ -12,6 +12,8 @@ from torch import Tensor
 from collections.abc import Mapping
 from torch.utils.data import Dataset
 from lambdaforge.data import DatasetIndex
+from wisdom.data.TaskSpecification import TaskSpecification
+from wisdom.features.SurfaceFeatureSidecar import SurfaceFeatureSidecar
 
 from wisdom.utils.structure.AtomicDescriptors import AtomicDescriptors
 
@@ -36,6 +38,7 @@ class WisdomDataset(Dataset[Mapping[str, Tensor | str]]):
         include_diagnostics    : bool = False,
         include_surface_geometry: bool = False,
         include_atom_geometry  : bool = False,
+        surface_features       : tuple[str, ...] = (),
     ) -> None:
         """Read and validate a compact ``file,label,split`` CSV manifest.
 
@@ -59,6 +62,8 @@ class WisdomDataset(Dataset[Mapping[str, Tensor | str]]):
                 neighborhoods required by WISDOM v3 encoders. V1/V2 leave these arrays unopened.
             include_atom_geometry: Load centered atom positions required only by the optional
                 scalar-plus-vector atomic spike.
+            surface_features: Ordered optional fields; empty leaves feature sidecars unopened.
+                Nonempty requires frozen train statistics and aligned assets on every member.
 
         Raises:
             ValueError: If the split, header, label, row split, path, or selected subset is invalid.
@@ -73,6 +78,10 @@ class WisdomDataset(Dataset[Mapping[str, Tensor | str]]):
         self.include_diagnostics     = include_diagnostics
         self.include_surface_geometry = include_surface_geometry
         self.include_atom_geometry    = include_atom_geometry
+        self.surface_features         = surface_features
+        self.feature_assets: dict[str, list[Path]] = {}
+        self.feature_statistics: Mapping[str, object] | None = None
+        self.task_specification = TaskSpecification()
 
         manifest_path = Path(manifest).resolve()
         if manifest_path.is_dir():
@@ -151,8 +160,8 @@ class WisdomDataset(Dataset[Mapping[str, Tensor | str]]):
         self.split    = split
         self.records  = tuple(records)
 
-    @staticmethod
     def _dataset_records(
+        self,
         root  : Path,
         split : str,
         subset: str,
@@ -178,7 +187,28 @@ class WisdomDataset(Dataset[Mapping[str, Tensor | str]]):
 
         records: list[tuple[Path, Path | None, int, str, str, str, str, str]] = []
         managed_split = "validation" if split == "val" else split
+        task: TaskSpecification | None = None
+        statistics_by_path: dict[Path, Mapping[str, object]] = {}
+        normalization_population: dict[str, str | None] = {}
         for member in DatasetIndex(index_path):
+            specification = TaskSpecification.from_metadata(member.metadata)
+            if task is not None and task != specification:
+                raise ValueError("managed dataset mixes incompatible task specifications")
+            task = specification
+            self.task_specification = specification
+            if self.surface_features and member.partitions.get("split") == "train":
+                checksum = member.assets["universal_npz"].sha256
+                normalization_population[member.member_id] = (
+                    checksum.removeprefix("sha256:") if checksum else None
+                )
+            if self.surface_features and "surface_feature_statistics" in member.assets:
+                statistics_path = root / member.assets["surface_feature_statistics"].path
+                if statistics_path not in statistics_by_path:
+                    statistics_by_path[statistics_path] = json.loads(statistics_path.read_text())
+                statistics = statistics_by_path[statistics_path]
+                if self.feature_statistics is not None and statistics != self.feature_statistics:
+                    raise ValueError("conflicting dataset feature normalization statistics")
+                self.feature_statistics = statistics
             if str(member.partitions.get("split", "")) != managed_split:
                 continue
             dilutions = member.metadata.get("dilutions", ())
@@ -187,7 +217,7 @@ class WisdomDataset(Dataset[Mapping[str, Tensor | str]]):
             ):
                 continue
             try:
-                label      = int(member.targets["dna_binding"])
+                label      = int(member.targets[specification.global_target_key])
                 base_asset = member.assets["universal_npz"]
                 base       = root / base_asset.path
             except (KeyError, TypeError, ValueError) as error:
@@ -197,7 +227,7 @@ class WisdomDataset(Dataset[Mapping[str, Tensor | str]]):
 
             if label not in {0, 1}:
                 raise ValueError(
-                    f"managed member {member.member_id!r} has non-binary dna_binding={label!r}"
+                    f"managed member {member.member_id!r} has non-binary target={label!r}"
                 )
             if not base.is_file():
                 raise ValueError(
@@ -213,11 +243,12 @@ class WisdomDataset(Dataset[Mapping[str, Tensor | str]]):
                     "media_type='application/x-npz' when a media type is declared"
                 )
 
-            annotation_asset = member.assets.get("dna_annotation")
+            annotation_asset = member.assets.get(specification.local_annotation_asset)
             annotation = root / annotation_asset.path if annotation_asset is not None else None
             if annotation is not None and not annotation.is_file():
                 raise ValueError(
-                    f"managed member {member.member_id!r} is missing dna_annotation at "
+                    f"managed member {member.member_id!r} is missing "
+                    f"{specification.local_annotation_asset} at "
                     f"{annotation_asset.path!r}"
                 )
             if annotation_asset is not None and (
@@ -225,7 +256,8 @@ class WisdomDataset(Dataset[Mapping[str, Tensor | str]]):
                 or annotation_asset.media_type not in {None, "application/x-npz"}
             ):
                 raise ValueError(
-                    f"managed member {member.member_id!r} dna_annotation must be a file with "
+                    f"managed member {member.member_id!r} "
+                    f"{specification.local_annotation_asset} must be a file with "
                     "media_type='application/x-npz' when a media type is declared"
                 )
             records.append(
@@ -240,10 +272,30 @@ class WisdomDataset(Dataset[Mapping[str, Tensor | str]]):
                     str(member.partitions.get("interface_phenotype", "unspecified")),
                 )
             )
+            if self.surface_features:
+                feature_asset_names = member.metadata.get(
+                    "optional_surface_feature_assets", ["surface_features"]
+                )
+                self.feature_assets[member.member_id] = [
+                    root / member.assets[name].path for name in feature_asset_names
+                ]
         if not records:
             raise ValueError(
                 f"managed dataset contains no records for split={split!r}, subset={subset!r}"
             )
+        if self.surface_features and self.feature_statistics is None:
+            raise ValueError("surface fields require dataset train-only feature statistics")
+        if self.surface_features:
+            assert self.feature_statistics is not None
+            sources = self.feature_statistics["sources"]
+            assert isinstance(sources, list)
+            fitted = {source["id"]: source["base_npz_sha256"] for source in sources}
+            if len(fitted) != len(sources) or set(fitted) != set(normalization_population):
+                raise ValueError("feature statistics must identify exactly the published "
+                                 "train population")
+            if any(digest is not None and fitted[name] != digest
+                   for name, digest in normalization_population.items()):
+                raise ValueError("feature statistics refer to different training geometry")
         return records
 
     def __len__(self) -> int:
@@ -261,7 +313,8 @@ class WisdomDataset(Dataset[Mapping[str, Tensor | str]]):
         are deduplicated so repeated logical records cannot inflate preprocessing cost.
 
         Returns:
-            Byte counts for universal NPZ files, DNA sidecars, and their total.
+            Byte counts for universal NPZ files, task sidecars, selected optional fields,
+            and their total. Historical DNA datasets retain the dna_annotation key.
 
         Raises:
             OSError: If a selected asset disappears after dataset initialization.
@@ -275,10 +328,13 @@ class WisdomDataset(Dataset[Mapping[str, Tensor | str]]):
 
         base_bytes       = sum(path.stat().st_size for path in base_paths)
         annotation_bytes = sum(path.stat().st_size for path in annotation_paths)
+        feature_paths    = {path for paths in self.feature_assets.values() for path in paths}
+        feature_bytes    = sum(path.stat().st_size for path in feature_paths)
         return {
-            "universal_npz":  base_bytes,
-            "dna_annotation": annotation_bytes,
-            "total":          base_bytes + annotation_bytes,
+            "universal_npz": base_bytes,
+            self.task_specification.local_annotation_asset: annotation_bytes,
+            "surface_features": feature_bytes,
+            "total": base_bytes + annotation_bytes + feature_bytes,
         }
 
     def __getitem__(self, index: int) -> Mapping[str, Tensor | str]:
@@ -599,11 +655,15 @@ class WisdomDataset(Dataset[Mapping[str, Tensor | str]]):
             self.include_surface_targets or self.include_diagnostics
         ):
             with np.load(annotation_path, allow_pickle=False) as annotation:
+                distance_name = (
+                    "surface_distance_to_target" if "surface_distance_to_target" in annotation
+                    else "surface_distance_to_dna"
+                )
                 annotation_required = {
                     "surface_target_hard",
                     "surface_valid_mask",
                     "surface_target_soft",
-                    "surface_distance_to_dna",
+                    distance_name,
                     "surface_distance_valid",
                     "surface_target_hard_sensitivity",
                     "sensitivity_gaps",
@@ -648,8 +708,8 @@ class WisdomDataset(Dataset[Mapping[str, Tensor | str]]):
                             "surface_target_soft": torch.from_numpy(
                                 annotation["surface_target_soft"].astype(np.float32, copy=False)
                             ),
-                            "surface_distance_to_dna": torch.from_numpy(
-                                annotation["surface_distance_to_dna"].astype(np.float32, copy=False)
+                            "surface_distance_to_target": torch.from_numpy(
+                                annotation[distance_name].astype(np.float32, copy=False)
                             ),
                             "surface_distance_valid": torch.from_numpy(
                                 annotation["surface_distance_valid"].astype(np.bool_, copy=False)
@@ -663,6 +723,24 @@ class WisdomDataset(Dataset[Mapping[str, Tensor | str]]):
                         }
                     )
         output["identifier"] = identifier
+        if self.surface_features:
+            selected = {}
+            for feature_path in self.feature_assets[identifier]:
+                with np.load(feature_path, allow_pickle=False) as archive:
+                    available = list(archive["feature_names"])
+                names = tuple(name for name in self.surface_features if name in available)
+                fields = SurfaceFeatureSidecar.read(feature_path, path, names, verify_hash=False)
+                for column, name in enumerate(names):
+                    if name in selected:
+                        raise ValueError(f"ambiguous surface feature {name!r} in multiple sidecars")
+                    selected[name] = fields[:, column]
+            fields = np.column_stack([selected[name] for name in self.surface_features])
+            assert self.feature_statistics is not None
+            output["surface_explicit_features"] = torch.from_numpy(
+                SurfaceFeatureSidecar.normalize(
+                    fields, self.surface_features, self.feature_statistics,
+                )
+            )
         output["tier"]       = tier
         output["leakage_group"]       = leakage_group
         output["global_phenotype"]    = global_phenotype

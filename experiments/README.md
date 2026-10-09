@@ -1,5 +1,29 @@
 # WISDOM experiment index
 
+## Optional task and surface-representation controls
+
+`zinc_discovery.yaml` freezes public structural candidates only after a researcher supplies
+sequence-bound explicit negative evidence. `zinc_preprocess.yaml` then selects leakage-safe
+membership and publishes universal geometry plus Zn evaluation sidecars. `validate_zinc.yaml`
+independently audits the published scientific contract. No Zn DatasetVersion is bundled or claimed
+to have been validated experimentally. See both public README versions, section 3.7, for evidence
+requirements, thresholds and limitations.
+
+`surface_features.yaml` adds optional fixed protein-only fields and pooled-train normalization to
+an existing DatasetVersion, without replacing geometry or task annotations.
+`surface_representation_ablation.yaml` compares five configurations: learned control, and explicit
+or late-hybrid evidence with generic_minimal or generic_basic fields, using four paired seeds.
+The attention pooler, backbone configuration, protein-only objective and sealed-test policy remain
+fixed. Publish the feature-augmented DatasetVersion first; neither missing inputs nor missing
+Registry versions are replaced with fake scientific data. See README sections 4.10 and 5.11.
+
+These actions are independent of the ordered architectural campaign below. They do not renumber
+its stages or imply that the historical Zn dataset is a valid transfer benchmark.
+
+Post-hoc inference-only reviews live separately in [visualization/](visualization/README.md).
+They consume registered LF Studies or durable ModelSets, not training orchestration steps.
+No automatic winner product is declared for baseline diagnostics.
+
 This directory distinguishes two different meanings that must never be conflated:
 
 - a **construction stage** is an experiment used to decide one part of the first frozen WISDOM
@@ -23,7 +47,8 @@ that a formal scientific WISDOM generation has already been validated.
 | 3 | `wisdom_v3.yaml` | Which optimizer stabilization complements the selected initialization? | Initialization winner | `optimization_profile` | `val_wisdom_hpo_score`, stability, runtime | 4 |
 | 4 | `wisdom_v4.yaml` | Which width, depth, topology, and regularization define the strongest fixed-MAX core? | Initialization and optimizer winners copied into `with` | Core model and AdamW hyperparameters | `val_wisdom_hpo_score` | 5 |
 | 5a | `wisdom_v5a.yaml` | How do fixed pooling families behave across their parameter curves? | Existing V5 ledger frozen exactly | Family, point/area measure, applicable fixed parameter | G, S, coupling, regret, seed stability, faithfulness, cost | 5b |
-| 5b | `wisdom_v5b.yaml` | Do learned parameters or additional families provide competitive representatives? | Same frozen ledger and four paired seeds as 5a | Family-specific adaptation and point/area measure | Same metrics plus parameter trajectories | Shortlist review before adapting 6a |
+| 5b | `wisdom_v5b.yaml` | Does scalar adaptation improve the selected fixed family reference? | Same frozen ledger and four paired seeds as 5a | Five learned scalars, one selected start/measure each | Same metrics plus parameter trajectories | 5c |
+| 5c | `wisdom_v5c.yaml` | Does spatial coherence of evidence before pooling improve localization/classification? | Same frozen V5 ledger; pooling choices currently provisional | Eight refiner types crossed with MAX/LSE/Attention; 54 candidates × 4 seeds = 216 Runs | Refined S, G, raw S/gain, negative controls, ranking, coupling and cost; not W alone | Post-hoc review before adapting 6a |
 | 6a | `wisdom_v6a.yaml` | Do curated negatives provide useful weak local supervision? | Pooling winner copied into `with` | `negative_surface_lambda` | `val_wisdom_hpo_score` and surface diagnostics | 6b only if useful, otherwise 7 |
 | 6b/6b2/6b3 | `wisdom_v6b.yaml`, `wisdom_v6b2.yaml`, `wisdom_v6b3.yaml` | Does existence, regional existence, or ranking add signal over 6a? | Credible 6a signal | One additional loss family per independent Study, respectively | `val_wisdom_hpo_score` | 6c only if a diagnosed failure remains, otherwise 7 |
 | 6c/6c2/6c3 | `wisdom_v6c.yaml`, `wisdom_v6c2.yaml`, `wisdom_v6c3.yaml` | Does an identified map pathology justify cardinality, TV, or Dirichlet regularization? | Reviewed 6a/6b winner and explicit failure mode | One regularizer per independent Study, respectively | `val_wisdom_hpo_score` plus pathology-specific diagnostics | 6d if three families are credible; otherwise 7 |
@@ -58,7 +83,8 @@ variance estimate, so it also has no `search` section.
 
 - **Diagnostics:** V1a, V1b and V1c estimate variance and causation; they select nothing.
 - **Complete finite sweeps:** V2, V3, V5a/V5b, V6a–V6c, V7, and V8 use LambdaForge's explicit
-  `sweep.space`. Every authored cell is mandatory. LambdaForge adds one complete shared-seed block
+  `sweep.space`. V5c also uses a complete conditional sweep. Every authored cell is mandatory.
+  LambdaForge adds one complete shared-seed block
   at a time and stops with an anytime-valid paired analysis; HPO pruning and per-cell seed racing
   are disabled by the sweep contract.
 - **Adaptive HPO:** V4, V6d, and V9 use `search.goal: optimize` plus `search.space`. Candidate
@@ -82,8 +108,22 @@ confirmation set; those identities are scientific inputs rather than scheduler b
 
 ## V5 family characterization and shortlist
 
-V5a and V5b replace the historical `wisdom_v5.yaml`, retained only as a clearly marked legacy
-screen. Their frozen `with` values come from the existing V5 file, not V4 defaults. V5 never
+V5c inserts an orthogonal `SurfaceEvidenceRefiner` between raw local logits and the existing
+pooler, inside the training forward. It does not change the backbone or add local-GT losses.
+The refiner choices are none, fixed/learned heat, geometric/embedding/learned anisotropy,
+unrolled graph-TV, and sparse Potts CRF. Only learned heat and learned conductance add parameters.
+The unchanged protein BCE differentiates through every operator; embedding guidance detaches
+only its guide branch by default. V5c crosses 18 refiner settings with three provisional poolers:
+MAX, area-LSE beta=0.25, area-Attention simple/256. This gives 54 candidates × four paired seeds
+= 216 Runs. Replace the marked LSE/Attention representatives before a definitive campaign.
+No local GT enters training or checkpoint selection; refined metrics, raw diagnostics and unclipped
+refinement gain are recorded for development. Existing W remains the objective, not the sole
+decision criterion. Vertex-deletion faithfulness is unavailable because it changes refiner operators.
+No viewers are generated in the sweep; `visualization/wisdom_v5c.yaml` reviews saved models.
+See README section 5.3.1 for all equations, defaults, gradient paths and numerical limitations.
+
+V5a and V5b replace the historical `wisdom_v5.yaml`, now retired from the active campaign.
+Their frozen `with` values retain the reviewed V5 ledger, not V4 defaults. V5 never
 changes the encoder, data, weak losses, initialization/optimizer policy or head relationship.
 Protein BCE plus the existing gate penalty remains the entire training objective; local labels
 are development-only and test remains sealed.
@@ -98,19 +138,15 @@ curves and pairing; no new WISDOM HPO controller is introduced.
 | V5a MAX / mean / attention / Top-K / regional / LSE | 1 / 2 / 32 / 26 / 16 / 54 | 524 |
 | V5a linear softmax / AutoPool / GeM / MAX–MEAN / multiscale regional | 2 / 26 / 24 / 22 / 1 | 300 |
 | V5a total: all eleven families | 206 | 824 |
-| V5b learned LSE | 16 | 64 |
-| V5b learned regional | 9 | 36 |
-| V5b learned AutoPool | 16 | 64 |
-| V5b learned GeM | 16 | 64 |
-| V5b learned MAX–MEAN | 18 | 72 |
-| V5b total: learned-scalar initialization refinement | 75 | 300 |
+| V5b learned LSE / regional / AutoPool / GeM / MAX–MEAN | 1 each | 4 each |
+| V5b total: scalar adaptation from declared V5a references | 5 | 20 |
 
 Each file now defines one Study, with native `when: {parent: {in: [...]}}` membership conditions
 for shared area parameters and equality conditions for family-specific/nested scalar settings.
 Inactive parameters are absent, not default-valued dimensions. V5a has exactly one MAX reference;
 V5b has none because it contains no MAX cell. The reviewed backbone remains unchanged. V5a includes
 all implemented families, both attention scorers, fixed scalar grids and prescribed LSE schedules.
-V5b isolates learned-scalar initialization in the five families that expose it. Their scientific
+V5b isolates learned-scalar adaptation from one declared fixed V5a reference per family. Their scientific
 questions remain distinct, with no automatic winner handoff. Fixed sweeps reject
 `trials` and `proposal_pool_size`; native planning verifies the complete finite design.
 
@@ -118,7 +154,7 @@ V5a currently requests three GPUs, 42 CPUs, 96 GiB RAM and 1000 hours; V5b reque
 36 CPUs, 96 GiB RAM and 168 hours, with native automatic packing. Their dispatch budgets are
 1000 and 168 hours respectively. These budgets do not extend the authored scheduler limit or
 guarantee complete coverage. No packing/pruning compatibility helpers
-are required. Shared research semantics come from Training.analysis_profile, with four YAML
+are required. Shared research semantics come from Training.analysis_profile, with small YAML
 metric-priority overrides applied to the entire Study.
 
 V5a intentionally sets the curriculum hold to zero only on curriculum cells. With epochs=500
@@ -132,7 +168,13 @@ from 4 through 512, regional length from 0 through 64 angstroms, LSE beta from 0
 AutoPool alpha from 0 through 1000, GeM power from 1 through 1024, and MAX–MEAN weight across
 the full [0,1] interval. Multiscale regional pooling keeps its existing fixed length bank
 [0,1.5,3,6,12] angstroms and learned mixture; no artificial parameter is added to this family.
-V5b probes initializations near both existing learned bounds without changing those bounds.
+V5b uses one start per family: beta=0.25 (area), length=16 Å, alpha=500 (point), power=2 (point),
+and MAX–MEAN coefficient=0.95 (point). These are learned starts, not fixed reductions.
+Its explicit domains are beta [0.005,2560], length [0.05,128] Å, alpha [0,2000],
+power [1,2048] and mixture [0,1]. Constructor defaults remain unchanged for historical weights;
+new checkpoints retain the exact bounds in model_parameters. The comparison reuses V5a controls
+and starts the backbone from paired random seeds, not from V5a weights. It does not prove that
+learning from arbitrary initializations removes the need for HPO.
 
 If quality still improves at a finite grid edge, the range is **not closed**: compare neighboring
 levels over paired seeds and propose a separate extension, never claim the edge is an optimum.

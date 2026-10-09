@@ -77,6 +77,12 @@ sweep:                                              # Complete finite comparison
         - same_diffusion                            # Start all existing blocks at one diffusion scale.
   reference: {initialization_profile: baseline}     # Compare every cell with the historical control.
 
+seeds:                                          # Complete uncensored initialization sample.
+  - 4                                           # Initialization seed 1.
+  - 7                                           # Initialization seed 2.
+  - 32                                          # Initialization seed 3.
+  - 54                                          # Initialization seed 4.
+
 objective:                                          # Rank candidates by WISDOM's complete validation purpose.
   metric: val_wisdom_hpo_score                      # Joint global/surface utility.
   mode: max                                         # Maximize the composite validation utility.
@@ -84,10 +90,10 @@ objective:                                          # Rank candidates by WISDOM'
   practical_margin: 0.015                           # Smaller paired differences are negligible.
 
 resources:                                          # Shared allocation for the complete study.
-  gpu: 2                                            # Three available accelerators.
+  gpu: 3                                            # Three available accelerators.
   cpu: 36                                           # Shared host decoding capacity.
   memory: 96GiB                                     # Shared host-memory ceiling.
-  time: 168h                                        # Seven-day ceiling.
+  time: 200h                                        # Seven-day ceiling.
 
 # initialization_profile defaults to custom. baseline changes no detailed parameter. This screen
 # deliberately keeps surface_layers=2; diffusion schedules adapt to the actual backbone depth.

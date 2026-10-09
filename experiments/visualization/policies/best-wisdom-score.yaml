@@ -1,0 +1,14 @@
+# Native LF SelectionPolicy: observed snapshot inspection, not a StudyDecision.
+artifact: best-model                                 # Exact WISDOM checkpoint artifact name.
+rank_by: wisdom_score                                  # Snapshot-bound validation metric, not latest Run output.
+mode: max                                            # Larger values rank first.
+top_k: 1                                             # Select 1 checkpoint(s) per exact group.
+group_by: []                           # One global group across eligible Runs/seeds.
+
+# SelectionPolicy defaults: artifact="model", mode="max", group_by=[], top_k=1,
+# constraints={}, tie_policy="stable", practical_margin=null; rank_by is required.
+# mode=max|min, top_k>=1; group_by exact parameter names preserves inactive versus null.
+# constraints maps metrics to min/max bounds on this same snapshot.
+# tie_policy=stable|include_equivalent; practical_margin>=0 only for include_equivalent.
+# Native selection ranks individual checkpoints; it does not choose a median seed or Pareto front.
+

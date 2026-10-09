@@ -11,12 +11,15 @@ from wisdom.utils.structure.BiologicalAssembly import BiologicalAssembly
 class ProteinStructure:
     """Own one coordinate deposition and provide its shared structural operations."""
 
-    def __init__(self, path: Path) -> None:
+    def __init__(self, path: Path, mmcif_bytes: bytes | None = None) -> None:
         """Read one PDB or mmCIF coordinate file and prepare entity metadata.
 
         Args:
             path: Local coordinate file supported by Gemmi. Compressed files are accepted
                 when Gemmi can read them directly.
+            mmcif_bytes: Optional exact uncompressed mmCIF payload for portable assets whose
+                managed filename no longer has a format extension. Gemmi still owns all parsing;
+                the object's digest then identifies this payload, not its transport container.
 
         Raises:
             OSError: If the coordinate file cannot be opened.
@@ -24,7 +27,12 @@ class ProteinStructure:
             ValueError: If the file contains no coordinate model.
         """
         self.path      = path
-        self.structure = gemmi.read_structure(str(path))
+        self._mmcif_bytes = mmcif_bytes
+        block = gemmi.cif.read_string(mmcif_bytes.decode()).sole_block() if mmcif_bytes else None
+        self.structure = (
+            gemmi.make_structure_from_block(block) if block is not None
+            else gemmi.read_structure(str(path))
+        )
 
         if not self.structure:
             raise ValueError(f"structure has no coordinate model: {path}")
@@ -40,8 +48,8 @@ class ProteinStructure:
         dates      : tuple[str | None, ...] = ()
 
         name = path.name.lower()
-        if name.endswith((".cif", ".mmcif", ".cif.gz", ".mmcif.gz")):
-            block  = gemmi.cif.read(str(path)).sole_block()
+        if block is not None or name.endswith((".cif", ".mmcif", ".cif.gz", ".mmcif.gz")):
+            block  = block if block is not None else gemmi.cif.read(str(path)).sole_block()
             method = str(block.find_value("_exptl.method") or "unavailable").strip("'\"")
             dates  = (
                 block.find_value("_pdbx_database_status.recvd_initial_deposition_date"),
@@ -116,11 +124,14 @@ class ProteinStructure:
         """Return the SHA-256 digest of the exact coordinate-file bytes.
 
         Returns:
-            Lowercase hexadecimal SHA-256 computed without loading the entire file into memory.
+            Lowercase hexadecimal SHA-256 of supplied mmCIF payload, or streamed file bytes
+            when no payload was supplied. Compression containers and scientific bytes are distinct.
 
         Raises:
             OSError: If the source file cannot be read.
         """
+        if self._mmcif_bytes is not None:
+            return hashlib.sha256(self._mmcif_bytes).hexdigest()
         digest = hashlib.sha256()
         with self.path.open("rb") as stream:
             for chunk in iter(lambda: stream.read(1024 * 1024), b""):

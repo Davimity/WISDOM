@@ -24,7 +24,7 @@ with:                                           # Complementary seed control.
   surface_metrics: true                         # Evaluation-only local diagnostics.
   surface_metrics_interval: 1                   # Coupling curve every epoch.
   visualization:                                    # Presentation only; generated once at this Run's best checkpoint.
-    mode: report                                    # none disables all viewers; report embeds HTML without duplicate files.
+    mode: none                                      # none disables all viewers; report embeds HTML without duplicate files.
     content: predictions                            # Probability, original logits and soft/hard GT only; full adds structural layers.
     maximum_points: 2000                            # Deterministic display-only sample; metrics retain every point.
     maximum_proteins: 4                             # Balanced proteins per evaluated split; zero displays all.

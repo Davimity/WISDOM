@@ -1,0 +1,16 @@
+run: wisdom.features.SurfaceFeatures.SurfaceFeatures  # Label-free optional field augmentation.
+with:  # Source release and new immutable output version.
+  dataset: {dataset: wisdom-dna-reduced@6}  # Existing universal geometry and annotations are untouched.
+  dataset_name: wisdom-dna-features  # Separate optional-field release family for controlled comparisons.
+  dataset_version: "1"  # First immutable feature release.
+  feature_group: generic_basic  # Nine generic chemical/elemental fields.
+  feature_names: []  # Append individual known fields, e.g. zn_lewis_strict; never GT.
+  exclude: []  # Remove known fields after group/list expansion.
+  sigma: 2.0  # Gaussian atom-distance width in angstroms, bounded by stored radius/Jmax.
+  workers: 4  # Native bounded projections; no model inference.
+# SurfaceFeatures defaults: dataset/name/version required; feature_names=(),
+# feature_group="generic_basic" (generic_minimal/generic_chemistry/generic_elemental/generic_basic/
+# zinc_interpretable/null), exclude=(), sigma=2.0 (>0 Angstrom), workers=4 (>0).
+# Known fields and units are listed in README 4.10. Existing splits and task targets are preserved.
+resources: {cpu: 4, memory: 16GiB}  # Reconstructible field cache and train-only normalization.
+# LF resource defaults: cpu=1/gpu=0; optional memory/storage/gpu_memory/time/processes.

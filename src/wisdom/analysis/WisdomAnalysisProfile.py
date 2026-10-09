@@ -202,6 +202,23 @@ class WisdomAnalysisProfile:
             label="Surface macro AUPRC",
             aliases=[f"{split} surface auprc", f"{split} localization quality", f"{split} local auprc"],
         )
+        for suffix, description, direction, bounds in (
+            ("positive_macro_auprc", "Equal-protein macro AUPRC before evidence refinement.",
+             "max", (0, 1)),
+            ("positive_macro_normalized_auprc", "Pre-refinement macro (AP-prevalence)/(1-prevalence); zero is random ranking.",
+             "max", None),
+            ("negative_positive_mass", "Pre-refinement mean area-weighted probability on negative proteins.",
+             "min", (0, 1)),
+            ("negative_peak", "Pre-refinement mean peak probability on negative proteins.",
+             "min", (0, 1)),
+        ):
+            self._metric(f"{prefix}_surface_raw_{suffix}", description,
+                         f"{split}/surface/raw", direction, bounds,
+                         split=split, aggregation="selected_epoch")
+        self._metric(f"{prefix}_surface_refinement_gain",
+                     "Refined minus raw positive-protein macro AUPRC on identical valid points; negative means the refiner worsened ranking. Evaluation only.",
+                     f"{split}/surface/refinement", "max", (-1, 1), 80,
+                     split=split, aggregation="selected_epoch")
         self._metric(f"{prefix}_surface_positive_macro_normalized_auprc",
                      "Mean (AUPRC-prevalence)/(1-prevalence) per positive protein. Zero is the random-ranking baseline; negative values are possible without a universal finite lower bound.",
                      f"{split}/surface/ranking", "max", split=split, aggregation="selected_epoch")
@@ -267,6 +284,27 @@ class WisdomAnalysisProfile:
         for name in ("surface_valid_points", "surface_positive_proteins", "surface_negative_proteins",
                      "surface_prediction_proteins", "surface_visualized_proteins"):
             self._metric(f"{prefix}_{name}", "Number of " + name.removeprefix("surface_").replace("_", " ") + " supporting evaluation or exported reports; not prediction quality.",
+                         "diagnostics/counts", priority=0, split=split, role="support", unit="count",
+                         visibility="hidden", discovery=False)
+
+        # Raw and refined evidence share evaluation support and metric definitions, not values.
+        # Keep their names separate so analysis can study the operator without duplicating outcomes.
+
+        for name, declaration in list(self.metrics.items()):
+            if name.startswith(f"{prefix}_surface_positive_macro_") and name.endswith(
+                ("top_5_recall", "top_10_recall", "top_25_recall",
+                 "top_5_enrichment", "top_10_enrichment", "top_25_enrichment",
+                 "auroc", "balanced_accuracy", "f1")
+            ):
+                raw_name = name.replace("_surface_", "_surface_raw_", 1)
+                self.metrics[raw_name] = {
+                    **declaration,
+                    "description": "Before evidence refinement: " + declaration["description"],
+                    "category": f"{split}/surface/raw",
+                }
+        for name in ("valid_points", "positive_proteins", "negative_proteins"):
+            self._metric(f"{prefix}_surface_raw_{name}",
+                         "Evaluation support for raw evidence; same valid points/proteins as refined evidence.",
                          "diagnostics/counts", priority=0, split=split, role="support", unit="count",
                          visibility="hidden", discovery=False)
 
@@ -505,6 +543,8 @@ class WisdomAnalysisProfile:
             ("train_surface_logit_*", "training/optimization", "Local evidence-logit distribution summary over training batches; not prediction quality or calibration evidence by itself."),
             ("train_sampled_gate_*", "training/gating", "Arithmetic epoch mean fraction of sampled gates at a clipping boundary; a saturation diagnostic."),
             ("pooling_*", "model/pooling", "Epoch trajectory of the active fixed, learned, or scheduled pooling scalar or scale-bank weight; not an outcome metric."),
+            ("surface_refiner_*", "model/refinement", "Learned heat length or last evaluated batch's learned conductance mean/std; not epoch-averaged conductance or validation quality."),
+            ("final_surface_refiner_*", "model/refinement", "Refiner length restored from the global-selected checkpoint, or last evaluated batch's conductance moments; not a quality metric."),
             ("final_pooling_*", "model/pooling", "Active pooling parameter restored from the globally selected checkpoint; absent for pruned Runs."),
         ):
             self.defaults.append({"pattern": pattern, "metadata": {

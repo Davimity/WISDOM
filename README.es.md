@@ -34,6 +34,7 @@ desarrollo, pero nunca entran en el gradiente ni en la selección del checkpoint
   - [3.4. Fase B — diseño de un benchmark balanceado sin fugas](#34-fase-b--diseño-de-un-benchmark-balanceado-sin-fugas)
   - [3.5. Auditoría estadística e interpretación](#35-auditoría-estadística-e-interpretación)
   - [3.6. Fase C — arrays estructurales y referencia superficial](#36-fase-c--arrays-estructurales-y-referencia-superficial)
+  - [3.7. Una segunda tarea: coordinación de zinc verificada](#37-una-segunda-tarea-coordinación-de-zinc-verificada)
 - [4. Preprocesado estructural](#4-preprocesado-estructural)
   - [4.1. Imagen mental y recorrido completo](#41-imagen-mental-y-recorrido-completo)
   - [4.2. Preparación, ejecución e inspección del dataset](#42-preparación-ejecución-e-inspección-del-dataset)
@@ -44,16 +45,21 @@ desarrollo, pero nunca entran en el gradiente ni en la selección del checkpoint
   - [4.7. Validación, reproducibilidad y ejecución paralela](#47-validación-reproducibilidad-y-ejecución-paralela)
   - [4.8. Arquitectura del código y tests](#48-arquitectura-del-código-y-tests)
   - [4.9. Limitaciones científicas](#49-limitaciones-científicas)
+  - [4.10. Campos físico-químicos superficiales fijos y opcionales](#410-campos-físico-químicos-superficiales-fijos-y-opcionales)
 - [5. Modelos entrenables de WISDOM](#5-modelos-entrenables-de-wisdom)
   - [5.1. Índice del dataset y batching de grafos](#51-índice-del-dataset-y-batching-de-grafos)
   - [5.2. Arquitectura adaptativa semántica y WISDOMv1](#52-arquitectura-adaptativa-semántica-y-wisdomv1)
   - [5.3. Caracterización del pooling: curvas fijas y familias adaptativas](#53-caracterización-del-pooling-curvas-fijas-y-familias-adaptativas)
+    - [5.3.1. V5c: refinamiento espacial de la evidencia superficial](#531-v5c-refinamiento-espacial-de-la-evidencia-superficial)
   - [5.4. Comparación aplazada de encoders superficiales](#54-comparación-aplazada-de-encoders-superficiales)
   - [5.5. Entrenamiento, evaluación y artefactos](#55-entrenamiento-evaluación-y-artefactos)
   - [5.6. Descubrimiento de conceptos sparse posterior al HPO](#56-descubrimiento-de-conceptos-sparse-posterior-al-hpo)
   - [5.7. Roadmap formal y barreras de decisión](#57-roadmap-formal-y-barreras-de-decisión)
   - [5.8. Análisis de investigación: encontrar evidencia útil](#58-análisis-de-investigación-encontrar-evidencia-útil)
   - [5.9. Interpretar mapas de proteínas y recuperar informes](#59-interpretar-mapas-de-proteínas-y-recuperar-informes)
+  - [5.10. Revisión posterior de modelos existentes](#510-revisión-posterior-de-modelos-existentes)
+  - [5.11. Evidencia superficial aprendida, explícita e híbrida](#511-evidencia-superficial-aprendida-explícita-e-híbrida)
+  - [5.12. Predicción frente a descubrimiento de regiones estructuradas](#512-predicción-frente-a-descubrimiento-de-regiones-estructuradas)
 - [6. Bibliografía](#6-bibliografía)
 
 ## 1. Inicio rápido
@@ -802,6 +808,114 @@ de contenido depende de miembros y bytes exactos, no del equipo ni del clúster.
 > **Resultado tras la fase C:** cada miembro publicado tiene una representación proteica sin
 > etiquetas y reutilizable, un sidecar de evaluación de ADN verificado por separado, metadata de
 > split fija y procedencia con checksum. Este es el dataset que consume el entrenamiento de WISDOM.
+
+### 3.7. Una segunda tarea: coordinación de zinc verificada
+
+El zinc (Zn) es un ion metálico que puede estabilizar estructuras proteicas o participar en catálisis.
+Que aparezca Zn en un depósito no demuestra que todas sus cadenas lo unan, ni que ese contacto sea
+fisiológico: pueden intervenir aditivos de cristalización, ocupación incompleta o una cadena vecina.
+El flujo distingue un **sitio de coordinación estructuralmente verificado** de una **especificidad
+fisiológica por Zn** respaldada de forma independiente. Las comprobaciones geométricas actuales solo
+establecen lo primero; conservan la confianza de la evidencia sin elevarla artificialmente.
+
+SAGLZn-II aporta antecedentes e hipótesis químicas, no un dataset que copiar. No se adoptan sus
+negativos por ausencia de ligando ni sus splits aleatorios. Un negativo necesita un experimento
+explícito de no unión o una anotación experimental curada `NOT` de GO:0008270 (unión a ion zinc), con
+referencia, alcance y SHA-256 de la secuencia exacta del sujeto. Así la evidencia queda vinculada a
+una proteína y no solo a un nombre PDB parecido. `NOT` niega expresamente una anotación; una anotación
+ausente no lo hace. Su interpretación sigue dependiendo de sensibilidad, cobertura y curación del
+ensayo. **No hay un inventario público negativo predeterminado**: el investigador debe aportarlo y
+revisarlo. La construcción se detiene si no permite splits con ambas clases y sin compartir homólogos.
+
+|Acción|Entrada|Decisión o salida|
+|---|---|---|
+|`ZincDiscovery`|JSONL negativo revisado y nombre de la captura|Consulta RCSB congelada y candidatos con secuencia/ensamblaje/copia|
+|`ZincSelection`|JSONL de candidatos congelado|Coordinación verificada, grupos de fuga RAW, fenotipos separados, balanceo y splits fijos|
+|`ZincPreprocessing`|Diseño portable exacto y captura mmCIF|El mismo NPZ universal sin ligandos que para ADN y referencias de Zn separadas|
+|`ZincValidation`|DatasetVersion gestionada|Veredicto legible y errores científicos ordenados por proteína|
+
+Antes de ejecutar discovery, crea `data/zinc/negative-evidence.jsonl`. Cada registro necesita
+`identifier` (`PDB_AQ` significa una cadena llamada AQ), `sequence`, `label: 0`, `assembly_id`,
+`protein_copy` comenzando en uno, `origin` y `label_evidence`. La evidencia experimental contiene
+`kind: experimental_non_binding`, `scope: zinc_binding`, `reference`, `assay` y `sequence_sha256`.
+Una negación experimental curada utiliza `kind: curated_not_annotation`, el mismo alcance/referencia/
+digest, `qualifier: NOT`, `term: GO:0008270` y `evidence_code` EXP, IDA, IPI, IMP, IGI o IEP. Son
+categorías de evidencia experimental, no una garantía de cobertura del ensayo. Una secuencia distinta
+provoca un error; la evidencia contradictoria sobre una identidad o secuencia exacta queda en
+cuarentena, nunca se resuelve cambiando la etiqueta silenciosamente.
+
+```bash
+# Revisa los negativos explícitos y elige un release_id nuevo en este YAML primero.
+lf run experiments/zinc_discovery.yaml
+# Fija la decisión del benchmark, genera geometría y publica wisdom-zinc@1.
+lf run experiments/zinc_preprocess.yaml
+lf datasets verify wisdom-zinc@1
+lf run experiments/validate_zinc.yaml
+```
+
+Discovery examina los ensamblajes biológicos declarados y cada copia de cadena, incluidas cadenas
+de varios caracteres; no confunde la unidad asimétrica depositada con el objeto biológico. Registra
+las alternativas y elige, por cadena depositada, la copia con más donantes de sitios aceptados;
+desempata por ensamblaje/copia de forma determinista. Es una regla estructural auditable, no una
+inferencia de relevancia fisiológica. Las cadenas sin coordinación aceptada permanecen como
+candidatos RAW para conservar sus conexiones de secuencia/estructura antes de excluirlas.
+
+Por defecto se exige ocupación del Zn y sus donantes ≥0,5, al menos dos átomos N/O/S proteicos de
+la copia seleccionada a ≤3 Å del Zn y al menos dos residuos coordinantes. La ocupación expresa la
+fracción depositada del sitio representada por ese átomo. Agua y ligandos no proteicos no satisfacen
+el criterio. No se exige que los residuos sean exclusivamente Cys/His/Glu/Asp. Se conservan socios
+entre cadenas, posiciones metálicas, identidades y recuentos; varios sitios de Zn forman una unión,
+no un sitio único forzado. El primer conformero de Gemmi es una simplificación determinista, no
+un conjunto de estados alternativos. La geometría no resuelve oxidación, protonación, afinidad
+fisiológica ni especificidad metálica; hay que revisar los umbrales para el benchmark previsto.
+
+MMseqs2 y Foldseek trabajan sobre **toda la población RAW interpretable**, incluidos descartes
+científicos. Sus pares filtrados y las conexiones de secuencia exacta/depósito forman los grupos
+transitivos de fuga de la sección 3.4. Se filtra después. Los fenotipos de sitios positivos y de
+morfología negativa se ajustan por separado, con escalado mediana/IQR y HDBSCAN/stability nativos
+de LambdaForge. Inicialmente se describen los positivos por número de sitios, donantes, residuos
+coordinantes, fracción entre cadenas, media/desviación de distancia de coordinación en Å y
+fracciones de donantes N/O/S: un resumen de coordinación, no una descripción completa de
+la cavidad. Para conservar una interpretación multicluster se exigen al menos dos clusters sin
+contar ruido y ARI mínimo 0,7 entre ajustes de la rejilla. ARI mide acuerdo entre asignaciones
+(1: idénticas; cerca de 0: acuerdo esperado por azar). El acuerdo cuando todo es ruido no aporta
+evidencia útil. Esta comprobación perturba parámetros, no hace bootstrap de la población.
+
+Selection conserva negativos fiables y reparte la cuota positiva entre grupos de fuga, fenotipos
+y fuentes. Los splits por grupos son 70/15/15% por defecto; grupos indivisibles pueden impedir
+el balanceo exacto, que se informa en vez de afirmarlo. Las diluciones solo reducen train una vez
+fijados los grupos; validation/test permanecen iguales. `report.md`, `audit.json`, `split-counts.csv`,
+tablas de pares, TXT etiquetados, `selection.jsonl` y `dilutions.json` muestran las decisiones. Un
+`diversity.md` explica gráficas de clases y tamaños de grupos, cobertura de fuentes y química,
+y diferencias de medias estandarizadas (SMD) para tamaño, resolución y morfología. SMD compara
+medias de clases en unidades de desviación combinada; |SMD|≥0,5 señala un posible atajo, no
+significancia estadística. Soporte ausente o constante queda no disponible, no cero. Las familias
+funcionales se cuentan solo si se aportan; los grupos de fuga no son familias biológicas. Un
+TXT de dos columnas no recupera ensamblaje ni coordinación. Preprocessing no debe redescubrir ni
+repartir las proteínas a partir de él.
+
+La referencia local de Zn mide el mínimo **gap a un átomo proteico coordinante**: distancia euclídea
+del punto al centro del donante menos su radio de van der Waals. El mínimo considera los radios
+de todos los donantes relevantes. La región positiva une los sitios verificados. Por defecto los
+gaps ≤1,4 Å son positivos, ≥3 Å negativos y los intermedios ambiguos; una transición coseno produce
+etiquetas suaves. `zinc_gap` conserva aparte la distancia al centro del Zn menos el radio diagnóstico
+1,39 Å; no define la etiqueta principal. Sensibilidades a 1/1,4/2 Å permiten evaluar dependencia del
+umbral sin regenerar geometría. Son referencias por proximidad, no probabilidades experimentales
+medidas sobre la superficie.
+
+Las coordenadas reales de Zn solo aparecen en evidencia y sidecars de evaluación, nunca en el NPZ
+universal ni en la entrada del modelo. Un positivo sin puntos de referencia positivos queda no
+disponible, no todo-negativo: puede permanecer en train/clasificación global, pero bloquea publicar
+si pertenece a validation/test. No se filtra por comodidad del área positiva o número de fragmentos.
+`ZincValidation` comprueba bytes, secuencia, coordinación reproducible, arrays universales completos,
+alineación local, grupos/splits y presencia de ambas clases. Una ampliación posterior de campos
+explícitos sirve para ambas tareas. También informa cobertura de fuentes/fenotipos/familias, SMD
+y química coordinante rara sobre miembros verificados. Tamaños superficiales fuera del intervalo
+de 1,5 IQR (cuartiles ampliados 1,5 veces su separación) y fracciones de puntos positivos ≥0,5
+piden inspección, no exclusión. Son avisos descriptivos, no pruebas de invalidez física; la fracción
+de puntos no estima área ponderada. Las referencias locales ausentes quedan no disponibles y se
+informa el soporte del análisis. Este cambio no ha producido un benchmark real de Zn ni resultados
+de rendimiento sobre él.
 
 ## 4. Preprocesado estructural
 
@@ -2200,10 +2314,77 @@ Estos límites determinan qué conclusiones pueden extraerse de la salida:
 - Solo se representa un modelo de coordenadas. Un ensemble de varios modelos o una trayectoria de
   dinámica molecular dependiente del tiempo necesitaría otra dimensión y no está soportado.
 
+### 4.10. Campos físico-químicos superficiales fijos y opcionales
+
+La forma superficial no identifica por sí sola la química cercana. Los campos fijos opcionales
+sitúan propiedades proteicas interpretables sobre la superficie existente sin modificar coordenadas,
+orden de vecinos ni NPZ universal. Un sidecar sin pickle contiene `feature_values[M,K]`, nombres
+ordenados `feature_names[K]`, digest del NPZ exacto y metadatos versionados. M cuenta puntos y K campos.
+Los metadatos registran unidades, anchura del kernel, radio/límite de vecinos, reglas y aproximaciones.
+El esquema de campos 1.0 es independiente del estructural universal 3.0 y de las anotaciones de tarea.
+
+```bash
+# Elige familia/versión nueva y campos antes de ejecutar.
+lf run experiments/surface_features.yaml
+# Cinco alternativas: control aprendido, dos conjuntos explícitos y dos híbridos tardíos.
+lf run experiments/surface_representation_ablation.yaml
+```
+
+`generic_basic` incluye carga formal, donante/aceptor de puentes de hidrógeno, aromaticidad,
+hidropatía, polaridad y campos N/O/S. `generic_minimal` contiene carga/donante/aceptor;
+`generic_chemistry`, los seis primeros; `generic_elemental`, los tres últimos. Las reglas de átomo/
+residuo aproximan la capacidad de donar/aceptar un puente de hidrógeno, no afinidad por Zn. La carga
+formal no es carga parcial ni potencial electrostático. La hidropatía utiliza la escala de residuos
+Kyte–Doolittle existente dividida por 4,5: una convención intrínseca, no un ajuste sobre el dataset.
+`feature_names` añade campos individuales y `exclude` retira nombres conocidos. Un nombre desconocido
+falla, en lugar de generar silenciosamente un canal de ceros.
+
+Para el punto p, el átomo vecino válido a está a distancia d en Å. Con anchura positiva σ
+(2 Å por defecto), su peso gaussiano fijo es:
+
+$$w_{pa}=\exp[-d_{pa}^{2}/(2\sigma^{2})].$$
+
+Solo interviene la vecindad inmutable de radio/Jmax. Hidropatía y polaridad utilizan
+`sum(w*f)/sum(w)`, cero si la vecindad está vacía. Los campos químicos de recuento usan `sum(w*f)`:
+son proxies de recuento ponderado, **no densidades físicas normalizadas por volumen**. Jmax puede
+truncar vecindades densas. Las curvaturas mantienen su recorrido aprendido original.
+
+`zinc_interpretable` añade `zn_lewis_strict`, campos N/O/S motivados por Zn, densidad donante CHED,
+`zn_specificity_ratio`, `ched_ca_compactness` y `ched_constellation_score`. CHED significa residuos
+Cys, His, Glu y Asp. La elegibilidad Lewis estricta incluye sus sitios N/O/S nombrados y O/OXT del
+esqueleto con carga formal no positiva; excluye N amida, pero desconoce tautomería/protonación de His
+y pKa de Cys. Es una heurística conservadora de identidad, no fuerza donante medida. El cociente de
+especificidad divide el recuento N/O/S de CHED por el total N/O/S, cero si no tiene soporte. Metadatos
+distintos separan los campos generales y motivados por Zn; ninguno contiene Zn observado ni GT.
+
+La compacidad CA considera al menos dos carbonos alfa CHED almacenados, su dispersión espacial
+gaussiana R en Å y devuelve `sigma/(sigma+R)`; con menos de dos devuelve cero. El score de
+constelación multiplica esa cantidad por la fracción presente de los cuatro tipos CHED. Son hipótesis
+geométricas acotadas, no puntuaciones de sitios Zn validadas. Dependen de la vecindad almacenada,
+pueden tener poco soporte superficial y requieren ablación. No se incluye silenciosamente AAindex
+(base de escalas de propiedades de residuos), predicción de protonación ni electrostática continua.
+
+La ampliación congela las medias μ y desviaciones típicas poblacionales s de los puntos de train.
+Todos los splits utilizan la misma transformación, con ε=10⁻⁸:
+
+$$\widehat{x}_{pk}=(x_{pk}-\mu_k^{train})/(s_k^{train}+\varepsilon).$$
+
+k identifica un campo; media/desviación se calculan solo sobre puntos de la partición train publicada.
+Superficies grandes aportan más puntos: es una ponderación explícita por puntos, no igualdad entre
+proteínas. Validation/test no ajustan transformaciones propias. El JSON conserva IDs/digests de
+train, recuentos y orden de campos. Las vistas diluidas reutilizan el ajuste de train completo de
+esa versión; si debe ajustarse solo sobre la población reducida, publica primero la versión reducida.
+Épsilon evita dividir por cero: un campo constante en train queda centrado a cero allí, pero
+un valor distinto en validación puede producir una magnitud grande que debe revisarse. No se
+reescala por proteína. Los assets
+opcionales requieren una DatasetVersion nueva; las anteriores siguen funcionando en modo aprendido.
+
 ## 5. Modelos entrenables de WISDOM
 
-WISDOM recibe una etiqueta para la proteína completa: `1` significa que se une al ADN y `0` que es
-negativa según la definición del benchmark de la sección 3. Durante el entrenamiento no recibe la
+WISDOM recibe una etiqueta para la proteína completa: `1` significa positiva según la política de
+evidencia de la tarea y `0` negativa con respaldo explícito. La tarea histórica por defecto es unión
+al ADN; Zn utiliza el mismo predictor con sus propios metadatos de etiqueta y anotación (sección 3).
+Durante el entrenamiento no recibe la
 etiqueta correcta de cada punto superficial. Aun así, produce una puntuación por punto y las combina
 en la predicción de la proteína. Esto se llama **supervisión débil**: la etiqueta disponible indica
 qué hace la proteína, pero no qué punto lo explica. Las puntuaciones pueden compararse con contactos
@@ -2769,8 +2950,8 @@ poda competitiva ni selección adaptativa de semillas. Sigue activa la paciencia
 30 épocas: completar un candidato no obliga a entrenarlo durante 500 épocas.
 
 **Orden de estudios.** V5a compara ahora las once familias implementadas, los dos scorers de
-attention y LSE fijo/curriculum. V5b ya no repite esas comparaciones: estudia cómo cambia el
-entrenamiento al inicializar un escalar aprendido. Sus cinco familias son LSE, regional, AutoPool,
+attention y LSE fijo/curriculum. V5b no repite esas rejillas: compara un escalar aprendido con
+la referencia fija de V5a escogida por el investigador en cada familia. Son LSE, regional, AutoPool,
 GeM y MAX–MEAN aprendidos. Los pesos de attention y del operador multiescala son partes aprendidas
 intrínsecas de sus operadores de V5a, no un nuevo encoder ni un experimento de inicialización escalar.
 
@@ -2887,18 +3068,25 @@ longitud y potencia GeM interpolan entre sus límites en coordenadas logarítmic
 lo hacen en coordenadas ordinarias. Nunca salen de sus intervalos, usan el AdamW normal y se
 guardan en `state_dict`.
 
-| Configuración pública | Dominio aprendido | Inicializaciones comparadas |
+| Familia / parámetro público de límites | Dominio por defecto del constructor | Dominio V5b / valor inicial |
 |---|---|---|
-| `log_sum_exp_mode=learned`, `log_sum_exp_beta_init` | beta ∈ [0.25, 200] | 0.3, 0.5, 1, 5, 20, 80, 160, 190 |
-| `regional_scale_mode=learned`, `regional_diffusion_scale_init` | ell ∈ [0.05, 12] Å | 0.075, 0.1, 0.25, 0.5, 1.5, 3, 6, 10, 11.5 Å |
-| `autopool_alpha_mode=learned`, `autopool_alpha_init` | alpha ∈ [0, 50] | 0.01, 0.1, 1, 5, 10, 25, 45, 49 |
-| `gem_power_mode=learned`, `gem_power_init` | r ∈ [1, 32] | 1.01, 1.25, 2, 4, 8, 16, 28, 31 |
-| `max_mean_lambda_mode=learned`, `max_mean_lambda_init` | lambda ∈ [0, 1] | 0.01, 0.05, 0.1, 0.25, 0.5, 0.75, 0.9, 0.95, 0.99 |
+| LSE / `log_sum_exp_beta_bounds` | beta ∈ [0.25, 200] | [0.005, 2560] / beta=0.25, medida por área |
+| Regional / `regional_diffusion_scale_bounds` | ell ∈ [0.05, 12] Å | [0.05, 128] Å / ell=16 Å |
+| AutoPool / `autopool_alpha_bounds` | alpha ∈ [0, 50] | [0, 2000] / alpha=500, medida por puntos |
+| GeM / `gem_power_bounds` | r ∈ [1, 32] | [1, 2048] / r=2, medida por puntos |
+| MAX–MEAN / dominio convexo propio | lambda ∈ [0, 1] | [0, 1] / lambda=0.95, medida por puntos |
 
-Las inicializaciones están estrictamente dentro del intervalo. Acercarse a los límites prueba
-la sensibilidad del optimizador: no fija el valor final ni amplía el dominio aprendido. Si un
-escalar aprendido se acumula en un límite y V5a mejora con valores fijos mayores, ese límite queda
-pendiente de otro experimento; no demuestra que aprenderlo sea peor. Los modos fijos usan
+V5b usa `*_mode=learned` y un único `*_init` por familia. El valor inicial no fija el resultado:
+la BCE de proteína propaga gradientes por el pooling y actualiza ese escalar junto al backbone.
+Las inicializaciones reproducen las referencias declaradas de V5a, en vez de sustituir 16 Å por
+6 Å o alpha=500 por 5. Los límites son restricciones fijas deliberadas, no nuevos factores HPO.
+Los intervalos ampliados incluyen los valores no triviales de V5a y margen por encima de sus
+extremos; los casos exactos de identidad/media quedan como controles fijos de V5a. La inicialización
+debe estar estrictamente dentro del intervalo. Los límites de longitud/beta deben ser positivos,
+los de AutoPool no negativos y los de GeM al menos uno. Cambiar límites también cambia las
+coordenadas de optimización: no se deben modificar durante un estudio. WISDOM guarda los cuatro
+límites en `model_parameters` del checkpoint; hay que restaurarlos junto con `state_dict`.
+Los checkpoints históricos sin estos campos mantienen los límites anteriores. Los modos fijos usan
 `log_sum_exp_beta`, `regional_diffusion_scale`, `autopool_alpha`, `gem_power`
 o `max_mean_lambda`. `log_sum_exp_mode=curriculum` empieza con beta en 1 y lo aumenta
 linealmente hacia `pooling_curriculum_end_beta`. El valor por defecto de Python mantiene beta
@@ -2914,9 +3102,28 @@ constructor permanece en `model_parameters`.
 
 **Cobertura y diseño de rangos.** V5a reúne las once familias implementadas en un único Study.
 Sus **206 candidatos × cuatro semillas = 824 Runs requeridos** incluyen las dos variantes de
-attention y LSE fijo/curriculum. V5b contiene ahora solo **75 candidatos de escalares aprendidos /
-300 Runs**: LSE 16, regional 9, AutoPool 16, GeM 16 y MAX–MEAN 18. Ninguna familia aparece por
-primera vez en V5b.
+attention y LSE fijo/curriculum. V5b contiene **cinco candidatos aprendidos × cuatro semillas =
+20 Runs**, uno por LSE, regional, AutoPool, GeM y MAX–MEAN. Ninguna familia aparece por primera
+vez en V5b. Reutiliza los resultados de las referencias declaradas: no reentrena controles ni busca
+inicializaciones. Es una inicialización escalar informada por validación, no una reutilización de
+los pesos del backbone de V5a. El backbone comienza con las mismas semillas emparejadas.
+Se comprueba si adaptar el escalar mejora el ajuste escogido, no si cualquier inicio sustituye al HPO.
+
+**¿Qué recibe el pooling aprendido?** Regional, LSE y MAX–MEAN agregan logits locales;
+AutoPool y GeM agregan sus probabilidades sigmoides. Cada escalar V5b es compartido por todas las
+proteínas: no hay una red que produzca una temperatura distinta según el embedding de cada una.
+En AutoPool, la derivada de la probabilidad agregada respecto a alpha es la varianza ponderada
+de las probabilidades puntuales: `dP_b/dalpha=sum_p w_p*p_p²-P_b²`. Es no negativa y pequeña
+cuando las probabilidades coinciden o domina un peso. Por eso un alpha alto puede dejar de moverse
+porque el operador ya es casi MAX, no porque falle autograd. Las longitudes regionales grandes
+también suprimen modos espectrales no constantes y pueden dejar un gradiente débil.
+AdamW recibe el parámetro escalar libre con el mismo learning rate y weight decay que los pesos
+ordinarios no asociados a gates. El decaimiento actúa sobre esa coordenada, no directamente sobre
+la longitud física. Revisa las curvas `pooling_*` y `final_pooling_*` del checkpoint restaurado.
+Attention es distinto: puntúa embeddings, pero sigue ponderando logits locales. Ya aprende en V5a,
+igual que los pesos regionales multiescala; repetirlos en V5b no aislaría fijo frente a escalar aprendido.
+Temperaturas condicionadas por embeddings o agregación de vectores cambiarían la hipótesis y
+requieren otro experimento.
 
 | Familia de V5a | Rango o control | Candidatos |
 |---|---|---:|
@@ -2952,24 +3159,25 @@ extensión antes de afirmar que existe una meseta. Se revisan equivalencia prác
 en varios valores vecinos, incertidumbre emparejada, calidad superficial y coste; dos resultados
 planos pero ruidosos no bastan. No amplíes la rejilla a mitad del estudio tras mirar el test.
 El límite real de Top-K es 1: no puede cubrir más superficie, y ya se prueba la media completa.
-Los límites aprendidos de V5b tampoco cambian; alcanzar uno exige interpretación, no ampliarlo
-silenciosamente.
+V5b usa los límites ampliados explícitos de la tabla; alcanzar uno sigue siendo una limitación
+que interpretar, no permiso para ampliarlo a mitad del estudio.
 
 Cada YAML sigue siendo **un único Study nativo**. `when: {pooling_type: {in: [...]}}` activa el
 área solo en familias aplicables; la igualdad activa los parámetros propios de familia/protocolo.
 Los parámetros inactivos no aparecen, ni se rellenan con valores de Python. V5a conserva su único
 MAX de referencia; V5b no tiene un candidato MAX. Se mantienen las semillas `[4, 7, 32, 54]`,
-el backbone, el objetivo y `Training.analysis_profile`. El YAML solo ajusta cuatro prioridades de
-métricas: no implementa otro planificador ni motor de análisis. `wisdom_v5.yaml` sigue siendo
-histórico. V5b refina parámetros aprendidos, no guarda familias pendientes de comparar; se revisa
-V5a antes de reducir su rejilla de inicializaciones.
+el backbone, el objetivo y `Training.analysis_profile`. El YAML solo añade pequeños ajustes de
+métricas: no implementa otro planificador ni motor de análisis. `wisdom_v5.yaml` se ha retirado;
+V5a/V5b son los estudios vigentes. V5b refina parámetros aprendidos, no guarda familias pendientes de comparar.
+Sus inicios y medidas son decisiones declaradas a partir de V5a, no evidencia independiente ni
+una elección automática de ganador científico.
 
 La asignación operativa actual de V5a es de tres GPU, 42 CPU, 96 GiB de RAM y 1000 horas;
-V5b solicita dos GPU, 36 CPU, 96 GiB de RAM y 168 horas. Sus presupuestos de lanzamiento son de
+V5b solicita tres GPU, 36 CPU, 96 GiB de RAM y 168 horas. Sus presupuestos de lanzamiento son de
 1000 y 168 horas respectivamente; nunca amplían el límite del scheduler. Cambiar recursos no
 cambia las rejillas científicas ni las semillas emparejadas. Estos diseños mayores pueden
 no terminar dentro del límite: cobertura incompleta o detenida por presupuesto no es un sweep
-completo. Los 824/300 Runs requeridos no son una estimación de duración.
+completo. Los 824/20 Runs requeridos no son una estimación de duración.
 
 En cada familia se revisan los mejores representantes fijos y aprendidos, diferencias punto/área,
 variación entre semillas emparejadas, G, S, coupling, regret, fidelidad y tiempo (la sección 5.5
@@ -2992,6 +3200,177 @@ rellenados. Los mapas conservan el orden original del NPZ. `localization_scores`
 un diagnóstico común por área, no el peso interno de todas las familias; `positive_area_fraction`,
 `maximum_surface_probability` y `localization_entropy` resumen el mapa sin crear etiquetas
 de entrenamiento. Solo la evaluación de desarrollo lo compara con los sidecars de ADN inmutables.
+
+#### 5.3.1. V5c: refinamiento espacial de la evidencia superficial
+
+Una puntuación global alta no garantiza una zona de unión coherente: un punto positivo aislado
+puede dominar MAX. V5c inserta un operador diferenciable entre la cabeza local y el pooling,
+**dentro del forward de entrenamiento**, para comprobar si la coherencia espacial mejora la
+localización o clasificación. No cambia el preprocesado, el backbone ni las pérdidas débiles.
+
+El flujo es embeddings H → cabeza local → logits crudos r → refinador → logits refinados →
+pooling existente → BCE de proteína. Un logit es una puntuación real cuya sigmoide es una
+probabilidad. Los gradientes de BCE atraviesan el refinador hasta la cabeza local y el backbone,
+incluso si el operador no tiene parámetros. Attention sigue calculando pesos desde H; solo refina
+los valores agregados. DiffusionNet difunde embeddings, V5c refina evidencia escalar y las pérdidas
+de suavidad V6 penalizan el campo en la pérdida. Son mecanismos distintos; V5c no activa V6.
+
+**Contexto geométrico compartido.** Posiciones x_i en Å, normales unitarias n_i, áreas a_i,
+curvaturas, embeddings y operadores espectrales existentes entran por referencia en un contexto
+inmutable sin etiquetas. Los refinadores de grafo usan la unión no dirigida E de vecinos acotados
+almacenados, eliminan aristas recíprocas duplicadas y descartan relleno, conexiones consigo mismo
+y entre proteínas. No calculan otro KNN ni matrices de distancias entre todos los pares ni
+requieren regenerar el dataset. r_i es la evidencia cruda y z_i un campo intermedio.
+
+| Refinador | Forward | Parámetros aprendibles |
+|---|---|---|
+| `none` | Identidad exacta | Ninguno |
+| `heat` | Calor espectral de longitud fija | Ninguno |
+| `learned_heat` | El mismo calor con una longitud global | Una coordenada escalar acotada |
+| `geometric_anisotropic` | Conductancia geométrica y medias vecinales convexas | Ninguno |
+| `embedding_anisotropic` | Conductancia espacial/de coseno y medias vecinales | Ninguno |
+| `learned_anisotropic` | Pequeño scorer de conductancia simétrico y medias vecinales | Proyección de puntos y MLP de aristas |
+| `graph_tv` | Descenso estabilizado truncado de variación total sobre grafo | Ninguno |
+| `crf` | Campo medio Potts binario, truncado y amortiguado | Ninguno |
+
+**Calor e identidad.** Phi contiene autovectores superficiales retenidos, ortonormales respecto
+a la masa; Lambda es la diagonal de autovalores en Å⁻², A la diagonal de áreas y ell una longitud
+en Å. La primitiva compartida DiffusionSurfaceEncoder calcula
+
+$$
+\widetilde r=\Phi\exp(-\ell^2\Lambda)\Phi^T A r.
+$$
+
+ell=0 fijo devuelve el propio tensor: una longitud **positiva** pequeña sigue proyectando al
+espectro truncado y no es identidad exacta. El calor aprendido usa BoundedScalar logarítmico en
+[0.05,12] Å con inicio estrictamente interior; la saturación numérica puede alcanzar un extremo.
+El forward conserva ell como tensor para que el gradiente llegue a su coordenada cruda.
+local_mean_max histórico sigue siendo calor seguido de MAX, sin cambiar sus checkpoints;
+equivale conceptualmente a heat-refiner + MAX y no es un cuarto pooling de V5c.
+
+**Refinamiento anisotrópico local.** Cada canal de curvatura se divide por uno en sus propias
+unidades basadas en Å y se transforma con log1p con signo; las escalas/canales forman k_i.
+d_ij es la distancia euclídea y delta_k² la media de diferencias cuadradas entre k_i y k_j.
+Con anchos positivos sigma_x, sigma_n y sigma_k, la conductancia geométrica es
+
+$$
+w_{ij}=\exp\left(-\frac{d_{ij}^2}{2\sigma_x^2}
+-\frac{1-n_i\cdot n_j}{\sigma_n}
+-\frac{\operatorname{mean}((k_i-k_j)^2)}{2\sigma_k^2}\right).
+$$
+
+Los defaults son sigma_x=2 Å, sigma_n=0.25 y sigma_k=1. Son pesos de geometría física genérica,
+nunca de GT de unión. Con D_i=sum_j w_ij, se parte de z=r y se repite
+
+$$
+m_i=\frac{\sum_j w_{ij}z_j}{D_i},\qquad
+z_i^{new}=(1-\alpha)z_i+\alpha m_i.
+$$
+
+Alpha en [0,1] mantiene actualizaciones convexas. Los puntos de grado cero conservan su evidencia.
+La conductancia por embeddings usa exp(-d²/(2 sigma_x²)-(1-cos(H_i,H_j))/tau), con H normalizado.
+Por defecto se desconecta del gradiente solo la construcción de esta guía: los logits crudos
+siguen transmitiendo gradientes a H. embedding_detach=false permite gradientes por la guía.
+
+La conductancia aprendible usa u=tanh(Linear(H)), ocho canales proyectados por punto. La entrada
+simétrica de arista de 19 componentes es
+[|u_i-u_j|,u_i*u_j,d_ij/sigma_x,1-dot(n_i,n_j),delta_k²].
+Una MLP tanh de anchura 32 y una sigmoide producen pesos en [0,1], con la misma normalización
+local. Tanto el scorer como los embeddings reciben gradientes. La media/desviación registrada
+de conductancia corresponde al **último batch evaluado**, no a una media de epoch.
+
+**Graph-TV.** La variación total mide diferencias vecinales. Las áreas a_bar_i se normalizan
+a media uno por proteína. La energía suavizada implementada es
+
+$$
+E(z)=\frac12\sum_i\bar a_i(z_i-r_i)^2+
+\lambda_{TV}\sum_{(i,j)\in E}w_{ij}\sqrt{(z_i-z_j)^2+\epsilon^2}.
+$$
+
+Partiendo de z=r, cinco pasos diferenciables calculan
+z_i ← z_i - eta*grad_i(E)/(a_bar_i+2 lambda_TV D_i/epsilon).
+La diagonal positiva acota la curvatura de la energía: eta en (0,1] es una relajación conservadora.
+Los defaults son eta=0.5 y epsilon=0.1 en unidades de logit; lambda=0 es identidad exacta.
+Es una aproximación desplegada sobre grafo inspirada en eliminación de ruido por TV [41],
+no un mínimo exacto ni el algoritmo original de imágenes.
+
+**CRF disperso.** Un campo aleatorio condicional expresa preferencia por que estados binarios
+vecinos coincidan. Los pesos se normalizan simétricamente como c_ij=w_ij/max(D_i,D_j), con sumas
+por fila como máximo uno. Para estados y_i en {0,1}, la energía Potts atractiva es
+
+$$
+E(y)=-\sum_i r_i y_i+\lambda_{CRF}\sum_{(i,j)\in E}c_{ij}[y_i\ne y_j].
+$$
+
+El corchete vale uno si discrepan. Se parte de q_i=sigmoid(r_i) y se sustituyen los estados
+vecinos inciertos por sus probabilidades en cinco iteraciones de campo medio amortiguadas:
+
+$$
+q_i^{proposal}=\operatorname{sigmoid}\left(r_i+
+\lambda_{CRF}\sum_j c_{ij}(2q_j-1)\right),\qquad
+q_i^{new}=(1-\delta)q_i+\delta q_i^{proposal}.
+$$
+
+El signo fomenta acuerdo, y delta=0.5 modera la actualización. Se devuelve logit(q), acotando q
+con epsilon FP32 para obtener aritmética finita; puntos aislados e intensidad cero conservan
+los logits crudos. Es campo medio Potts disperso y truncado, no DenseCRF [42], y no garantiza
+convergencia.
+
+**Configuración pública.** Todos los sufijos siguientes llevan el prefijo surface_refiner_.
+Son defaults reales de Training/modelo, no dimensiones adicionales del sweep.
+
+| Sufijo | Default | Significado / restricción |
+|---|---:|---|
+| type | none | Uno de los ocho operadores |
+| heat_length / heat_length_init | 3 / 3 | Longitud fija no negativa / aprendida interior, en Å |
+| strength / steps | 0.5 / 2 | Fracción anisotrópica convexa / número no negativo de pasos |
+| geometry_sigma / normal_sigma / curvature_sigma | 2 / 0.25 / 1 | Anchos positivos de conductancia |
+| embedding_temperature / embedding_detach | 0.5 / true | Ancho positivo de coseno / desconectar solo la guía |
+| learned_hidden_dim | 32 | Anchura positiva de la MLP de aristas |
+| tv_lambda / tv_steps / tv_step_size / tv_epsilon | 0.05 / 5 / 0.5 / 0.1 | Peso/pasos no negativos, relajación en (0,1], suavizado positivo |
+| crf_strength / crf_steps / crf_damping | 0.5 / 5 / 0.5 | Peso/pasos no negativos, amortiguación en (0,1] |
+
+El YAML V5c conserva el backbone revisado V5a/V5b y las semillas [4,7,32,54]. Cruza tres poolings
+provisionales: MAX, LSE por área con beta fija 0.25 y Attention por área con scorer simple de
+anchura 256. Sustituye los valores marcados de LSE/Attention por representantes revisados antes
+de una campaña definitiva, sin abrir otro grid de pooling.
+
+Refinamientos: none=1; heat=3 longitudes [1.5,3,6] Å; learned heat=3 inicios [1.5,3,6] Å;
+geometric=2 y embedding=2 intensidades [0.35,0.65]; anisotropía aprendible=1; TV=3 pesos
+[0.01,0.05,0.1]; CRF=3 intensidades [0.25,0.5,1].
+Así, 18 opciones × 3 poolings = **54 candidatos y 216 Runs requeridos**.
+Los parámetros hijos inactivos están ausentes, la paciencia no cambia y test permanece cerrado.
+El presupuesto de siete días puede censurar cobertura: no garantiza completar el sweep.
+
+**Evidencia e interpretación.** surface_logits/surface_probabilities representan el campo
+refinado realmente agregado; raw_surface_logits/raw_surface_probabilities exponen la cabeza
+local. refined_surface_logits/refined_surface_probabilities también identifican el mapa
+operativo explícitamente. Con none, raw/refined son el mismo tensor y no aparecen claves nuevas
+en el state_dict.
+
+Las métricas superficiales principales y el acoplamiento usan evidencia refinada.
+val_surface_raw_positive_macro_auprc, AUPRC normalizada, masa/pico negativos y métricas top-k
+usan exactamente los mismos puntos GT válidos y proteínas de soporte.
+val_surface_refinement_gain es AUPRC macro positiva refinada menos cruda, **sin recortar**:
+negativo significa peor ordenación. Con none se reutilizan las métricas principales y la ganancia
+es cero cuando está definida, sin otra evaluación. Los valores indefinidos siguen no disponibles
+con recuentos de soporte. No son pérdidas ni selectores de checkpoint. G global sigue seleccionando checkpoints
+y W sigue siendo el objetivo de desarrollo existente. Revisa S, G, ganancia raw/refined,
+negativos, top-k, regret, estabilidad entre semillas y coste medido por separado.
+
+Los artefactos best-model conservan configuración, pesos aprendidos, parámetros físicos del
+refinador y métricas raw/refined de esos pesos. Los modelos anteriores usan none por defecto y
+siguen siendo cargables estrictamente. El borrado de vértices no está disponible con refinadores
+activos porque cambia su operador; agregar un subconjunto ya refinado omitiría la intervención
+sobre el modelo completo. El sweep fija faithfulness_audit=false y visualization.mode=none.
+
+Después, experiments/visualization/wisdom_v5c.yaml reutiliza la revisión sin entrenamiento
+(sección 5.10). Elige IDs explícitos para comparar la **misma proteína** entre poolings/refinadores
+seleccionados; filtra estudios grandes para respetar el presupuesto del informe. Los canales
+HTML/PLY compartidos incluyen logits/probabilidades crudos, logits/predicción refinados,
+diferencia refined-minus-raw y GT soft/hard. El NPZ completo de predicción es opcional.
+El muestreo visual nunca limita las métricas científicas.
+
 
 ### 5.4. Comparación aplazada de encoders superficiales
 
@@ -3459,7 +3838,7 @@ se mide en ångströms cuadrados y corresponde a una longitud característica ap
 `sqrt(t)` ångströms; comparar ambas distribuciones muestra si distintas inicializaciones
 multiescala convergen hacia escalas físicas parecidas.
 
-Los estudios autoritativos de pooling son V5a (206 candidatos de todas las familias) y V5b (75 de escalares aprendidos),
+Los estudios autoritativos de pooling son V5a (206 candidatos de todas las familias) y V5b (cinco de escalares aprendidos),
 descritos en la sección 5.3. Cada candidato recibe las mismas cuatro semillas. Sus curvas y las
 trayectorias de parámetros aprendidos se revisan junto a las métricas locales y globales para
 proponer una shortlist, no un ganador universal.
@@ -3980,11 +4359,200 @@ lf export WORK_ID --output ./exports
 YAML VVAL separados. La API pública de LF verificada no ofrece actualmente un hook posterior
 al estudio para hacer inferencia solo con el candidato y la semilla ganadores finales.
 WISDOM no presenta la generación por Run como si fuera ese comportamiento ni añade un coordinador
-de ranking oculto. Mantén `mode: none` en HPO grandes hasta que exista ese ciclo.
+de ranking oculto. Mantén `mode: none` en HPO grandes y usa la revisión explícita posterior
+de §5.10 cuando necesites mapas después del estudio.
 Los informes activados siguen siendo por Run/semilla: no sustituyen las estadísticas de semillas
 repetidas, cambian HPO, eligen un nuevo checkpoint ni abren test sin autorización.
 
+### 5.10. Revisión posterior de modelos existentes
+
+Ahora puedes crear mapas de proteínas **después** del entrenamiento sin iniciar otro entreno.
+Un checkpoint es un archivo con los pesos guardados y su configuración de inferencia. La revisión
+restaura ese archivo exacto, congela sus pesos y hace pasar proteínas por él. No elige otro epoch,
+modifica el HPO original ni convierte imágenes descriptivas en un ganador científico.
+
+| Flujo | Evidencia científica disponible | Acción de WISDOM |
+|---|---|---|
+| Exportar estudio → importar con LF → ResultStore | Configuraciones y repeticiones elegibles | StudyReview permite elegir Trials, filtrar parámetros, examinar compromisos G/S y seleccionar semillas medianas o extremas |
+| Selección nativa de producto → exportar/importar ModelSet | Solo checkpoints promovidos deliberadamente | ModelSetReview evalúa esos archivos independientes; el estudio productor puede haberse borrado |
+
+Un **Trial** es una configuración de hiperparámetros, una **semilla** identifica una repetición
+estocástica y una **Execution** una ejecución concreta de LF. ResultStore es el índice local de
+ejecuciones registradas por LF. Un ModelSet es un producto científico duradero que contiene pesos
+seleccionados, sus métricas exactas y las identidades de las entradas; no es un acceso indirecto
+a las rutas de la máquina original.
+
+**Empieza con un estudio importado.** Exporta desde un host con acceso al estudio, transfiere el
+directorio indicado y regístralo localmente. Sustituye los dos marcadores por los nombres reales:
+
+~~~bash
+lf export SOURCE_EXECUTION_ID --output ./exports
+lf import ./exports/PRINTED_PACKAGE_DIRECTORY --apply
+lf results list
+~~~
+
+Pon el ID registrado en source_execution de experiments/visualization/wisdom_v1a.yaml. Su política
+muestra juntas las semillas mejor/mediana/peor; usa mode: median para una repetición típica o all
+para todas las elegibles. El DatasetVersion exacto del entrenamiento también necesita una
+ubicación local registrada en LF.
+
+~~~bash
+lf validate experiments/visualization/wisdom_v1a.yaml
+lf explain experiments/visualization/wisdom_v1a.yaml
+lf run experiments/visualization/wisdom_v1a.yaml --dry-run
+lf run experiments/visualization/wisdom_v1a.yaml
+lf results report REVIEW_EXECUTION_ID --output review.html
+~~~
+
+Abre review.html y entra en **WISDOM proteins**. review-audit.json y los proteins.csv por modelo
+y partición conservan la cobertura numérica y el motivo de selección de cada imagen.
+Los Runs fallidos o recortados se excluyen, no se convierten en modelos de puntuación cero.
+Un estudio fallido puede contener Runs completados que sí se pueden revisar.
+
+**Elige qué inspeccionar.** Si hay varios Trials, hace falta una política explícita: all, índices
+explicit, parameter_filter, best_by_metric, top_k_by_metric o pareto. Los rankings agregan las
+métricas del checkpoint entre semillas mediante la mediana por defecto; se puede escoger mean.
+Pareto conserva configuraciones que no son peores en todas las métricas solicitadas: muestra
+compromisos entre clasificación y superficie, sin sustituirlos por la puntuación combinada.
+Las políticas de semillas incluyen median, worst, best, representative, all y explicit.
+Una semilla mediana es una repetición central observada, no unos pesos promediados.
+
+La importación histórica de V5a no tiene métricas asociadas al artefacto best-model. Su YAML usa
+`trial_selection: {mode: all}` y `seed_selection: {mode: explicit, seeds: [4]}`: todas las configuraciones,
+una repetición fijada deliberadamente, sin afirmar que la semilla sea la mejor o la mediana. Esta
+importación tiene 206 configuraciones, por lo que la revisión hace 206 evaluaciones sin entrenar.
+Puedes reducir el coste mediante índices de Trial explícitos o los filtros comentados. El límite
+de bytes del visor puede omitir imágenes, no la evaluación numérica. Pareto y mediana quedan como
+ejemplos comentados para checkpoints nuevos con las métricas asociadas necesarias; las métricas
+más recientes del Run no las sustituyen porque pueden describir otro epoch.
+V5b revisa cinco escalares aprendidos informados por V5a;
+LSE fijo o curriculum pertenece a V5a. Un parámetro condicional inactivo no equivale a uno activo
+con valor null. Los V1b y V1c actuales son estudios separados con un Work: sus controles de azar
+no deben inventarse como dos Trials de un mismo estudio.
+
+Para revisar rápidamente tres proteínas, edita templates/explicit_proteins.yaml: elige Trial,
+semilla y tres identificadores exactos. evaluation_scope: explicit filtra **antes** de que el
+modelo reciba un batch. Solo se evalúan esas proteínas y las métricas agregadas indican que
+describen ese subconjunto. El modo full por defecto evalúa toda la partición y después selecciona
+imágenes contrastantes. Los casos diagnósticos incluyen extremos de localización positiva,
+falsos positivos/negativos globales, picos en negativos y discordancia global/local.
+Estas imágenes deliberadamente inusuales no estiman la precisión biológica media.
+
+**Transfiere solo modelos seleccionados.** La selección nativa crea copias independientes:
+
+~~~bash
+lf products select SOURCE_EXECUTION_ID \
+  --name review-models --contract wisdom/review-models:v1 \
+  --policy experiments/visualization/policies/top3-wisdom-score.yaml --apply
+lf products export review-models --output ./modelset-export --apply
+lf products import ./modelset-export --apply
+lf products verify review-models
+lf validate experiments/visualization/templates/modelset_review.yaml
+lf run experiments/visualization/templates/modelset_review.yaml
+lf results report REVIEW_EXECUTION_ID --output modelset-review.html
+~~~
+
+El Work receptor usa metadatos tipados ProductInput y acceso verificado a los archivos, sin buscar
+el productor. La selección nativa admite top-k y agrupación exacta, no semillas medianas ni Pareto;
+para eso está StudyReview. La política de familias agrupa solo pooling_type, no todos sus parámetros.
+No se añade una StudyDecision automática a los diagnósticos del baseline.
+
+**¿Qué puntuaciones pertenecen a los pesos guardados?** Los nuevos artefactos best-model registran
+su epoch exacto, AP/AUROC globales y G, AP superficial y S del modelo restaurado cuando existen,
+y W/C con el contexto de la curva observada. El regret usa el máximo S observado menos el S de
+**este** checkpoint, no un último epoch distinto. Las definiciones G/S/C/W siguen siendo las de
+§5.5. No se inventan coupling ni W con menos de dos observaciones emparejadas: usa global_score
+o selección explícita en ese caso. Los checkpoints históricos sin estos metadatos se pueden
+revisar con políticas all/explicit tanto de Trials como de semillas; las últimas métricas del
+Run no permiten llamarlos honestamente «mejor» o «mediano».
+ModelValidation conserva únicamente la compatibilidad con lectura directa de exports.
+
+Valores por defecto: solo validación, test bloqueado, semilla mediana por wisdom_score,
+cobertura numérica completa, imágenes diagnósticas (dos por categoría), predicción/logit/GT,
+2.000 puntos de representación, 12 visores por modelo/partición, umbral 0,5,
+14 MiB por documento y sin copias NPZ de predicciones. Los ejemplos limitan los visores a ocho.
+Los límites visuales no reducen puntos ni precisión de las métricas; las omisiones y GT ausente
+se indican. Test requiere allow_test: true y sigue siendo descriptivo, nunca una nueva fuente
+para seleccionar hiperparámetros. Si faltan pesos, se necesita recuperación nativa, no reentrenado
+oculto. La identidad del dataset debe coincidir aunque cambie su ubicación.
+
+**Requisito de build.** Estas APIs existen en el main de LF inspeccionado, que aún declara 0.17.0
+aunque las documenta como Unreleased. El número de versión no basta: comprueba ProductInput,
+SelectionPolicy, importación/execution_directory de ResultStore y outputs.html_section.
+WISDOM no inventa un mínimo de dependencia publicado. La
+[guía completa de revisión y configuración](experiments/visualization/README.md), en inglés,
+explica ambos flujos, las limitaciones históricas y los ejemplos de cada estudio.
+
+
+### 5.11. Evidencia superficial aprendida, explícita e híbrida
+
+La cabeza local tiene ahora un contrato de evidencia explícito. Para el punto p, h es la salida
+aprendida de H componentes de DiffusionNet y x contiene K campos fijos normalizados con train. Recibe z:
+
+$$z_p=h_p\quad\text{(learned)},\qquad z_p=x_p\quad\text{(explicit)},\qquad
+z_p=[h_p\Vert x_p]\quad\text{(hybrid)}.$$
+
+Concatenar añade componentes; no suma cantidades físicas distintas. `learned` sigue siendo el
+predeterminado, K=0, y no carga assets opcionales. `explicit` omite por completo encoder atómico,
+transferencia átomo→superficie y DiffusionNet, congelando sus parámetros no usados; no simula H=0
+dentro de capas que exigen anchuras positivas. Su cabeza entrenable recibe K campos. `hybrid`
+conserva el recorrido aprendido y añade x **después** de DiffusionNet, antes de la cabeza local.
+No introduce fusión temprana, arquitectura vectorial, otro pooling ni pérdida local supervisada.
+
+```yaml
+surface_representation_mode: hybrid  # learned (default), explicit, or hybrid.
+surface_feature_group: generic_minimal  # Optional group; default null.
+surface_features: [hydropathy]  # Ordered appended names; default empty.
+surface_feature_exclude: []  # Remove selected known names; default empty.
+```
+
+`surface_evidence_features` es siempre el tensor real H, K o H+K. Attention lo puntúa con una
+anchura de entrada correspondiente, sin rellenar ni truncar para ocultar discrepancias. Los demás
+poolings agregan los logits locales resultantes. Los checkpoints guardan modo, K, orden de campos,
+estadísticas de train y descriptor de tarea para reconstruir la misma representación. Campos y
+etiquetas superficiales tienen claves separadas; las etiquetas no están en la lista de entradas del
+forward. Los metadatos de tarea nombran etiqueta global y asset local; índices antiguos de ADN
+conservan su interpretación histórica.
+
+El sweep pareado fija arquitectura, pérdida, pooling y datos. Prueba la fuente de información,
+no demuestra una mejora científica general. Hay que comparar métricas proteicas, localización,
+fallos, tiempo y parámetros activos entre semillas repetidas. No se presume un resultado de Zn
+ni una mejora híbrida. Integridad, tests y configuración válida solo establecen ejecutabilidad.
+
+### 5.12. Predicción frente a descubrimiento de regiones estructuradas
+
+El predictor produce evidencia puntual y decisión proteica. Un sistema de descubrimiento futuro
+compararía **regiones de distintas proteínas** para proponer patrones reutilizables. Una clasificación
+alta o un mapa vistoso no demuestran conceptos biológicos descubiertos. El flujo existente de
+conceptos sparse sigue separado; las siguientes alternativas son investigación, no nuevos backends
+de clustering implementados.
+
+Una región puede representarse como conjunto ponderado de features puntuales y distancias internas
+sobre su superficie. Resumirla con una media pierde organización espacial. El transporte óptimo (OT)
+ordinario empareja masa entre vectores según costes de features entre regiones. Gromov–Wasserstein
+(GW) empareja mediante **relaciones internas de distancia**, admitiendo marcos de coordenadas
+distintos. Fused GW combina química/features y distancias estructurales. Ninguno elimina por sí solo
+confusión por procedencia, tamaño u homología: hacen falta controles de solo geometría y solo features.
+Matrices densas de distancias y acoplamiento pueden dominar tiempo/memoria; corresponde a un estudio
+post-hoc acotado de regiones, no al preprocesado disperso ni al recorrido crítico del entrenamiento.
+
+Se pueden comparar química fija, evidencia aprendida, combinaciones y representaciones de conjuntos
+aprendidas e invariantes al orden (Deep Sets). Los representantes de clusters deben incluir medoides:
+regiones reales que minimizan la distancia interna del grupo, no solo una media quizá inexistente.
+Hay que comprobar estabilidad ante semillas, umbrales de extracción y definiciones próximas de región,
+y comparar con homología/procedencia antes de interpretar biología. OT/GW/FGW y métricas aprendidas
+de conjuntos **no se implementan en este cambio**. La memoria desarrolla sus alternativas matemáticas
+y limitaciones sin inventar resultados.
+
 ## 6. Bibliografía
+
+Fuentes adicionales para campos opcionales/Zn: [RCSB Search API](https://search.rcsb.org/),
+[calificadores de anotación Gene Ontology](https://geneontology.org/docs/go-annotations/),
+[MetalPDB](https://metalpdb.cerm.unifi.it/),
+[ZincBind](https://pmc.ncbi.nlm.nih.gov/articles/PMC6361820/),
+[transporte óptimo estructurado / FGW](https://proceedings.mlr.press/v97/titouan19a.html) y
+[Deep Sets](https://papers.nips.cc/paper/6931-deep-sets). Las bases metálicas pueden ayudar a curar
+sitios positivos, pero no aportan automáticamente inventarios de negativos explícitos.
 
 1. Berman, H. M. et al. (2000). “The Protein Data Bank.” *Nucleic Acids Research*, 28(1),
    235–242. [doi:10.1093/nar/28.1.235](https://doi.org/10.1093/nar/28.1.235).
@@ -4094,6 +4662,12 @@ repetidas, cambian HPO, eligen un nuevo checkpoint ni abren test sin autorizaci�
     sound event detection.” [Prepublicación de los autores](https://arxiv.org/abs/1804.10070).
 40. Radenović, F., Tolias, G. & Chum, O. “Fine-tuning CNN Image Retrieval with No Human
     Annotation.” [Prepublicación de los autores](https://arxiv.org/abs/1711.02512).
+41. Rudin, L. I., Osher, S. & Fatemi, E. (1992). “Nonlinear total variation based noise
+    removal algorithms.” *Physica D*, 60, 259–268.
+    [doi:10.1016/0167-2789(92)90242-F](https://doi.org/10.1016/0167-2789(92)90242-F).
+42. Krähenbühl, P. & Koltun, V. (2011). “Efficient Inference in Fully Connected CRFs with
+    Gaussian Edge Potentials.” *NeurIPS 2011*.
+    [Artículo en actas](https://papers.nips.cc/paper_files/paper/2011/hash/beda24c1e1b46055dff2c39c98fd6fc1-Abstract.html).
 
 Las implementaciones superficiales de WISDOM se escribieron de forma independiente. Los encoders v3
 prueban versiones compactas de mecanismos motivados por dMaSIF, DeltaConv, PTv3 y PointMamba;

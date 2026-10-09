@@ -1,0 +1,31 @@
+# Durable selected checkpoints: no producer Study or ResultStore lookup is required.
+run: wisdom.visualization.ModelSetReview.ModelSetReview # Typed inference-only product consumer.
+
+with:                                                # Exact product and original dataset.
+  models:                                            # LF checks the contract before execution.
+    product:                                         # Native ProductInput selector, not a directory.
+      name: review-models                            # Replace with the imported immutable product alias.
+      contract: wisdom/review-models:v1               # Versioned scientific selection/input contract.
+  dataset: {dataset: wisdom-dna-reduced@6}             # Exact training DatasetVersion, locally placed.
+  maximum_proteins: 8                                 # Deliberate bounded override per model/split.
+
+# ModelSetReview argument reference:
+# models and dataset are required; models must be a ModelSet with the declared contract.
+# Every promoted model is reviewed; no Trial/seed reranking or producer lookup occurs.
+# evaluation_scope="full" or "explicit" (nonempty explicit identifiers required).
+# protein_selection=null means automatic/diagnostic/cases_per_category=2; modes automatic,
+# explicit/identifiers=[], all; automatic strategies diagnostic/best/worst/mixed.
+# splits=["val"], allow_test=false; test remains descriptive, not a selection criterion.
+# content="predictions" (or "full"), maximum_surface_points=2000 (>0), maximum_proteins=12 (>=0).
+# prediction_threshold=0.5 in [0,1], report_maximum_mib=14.0 in (0,16], save_predictions=false.
+# batch_size=4 (>0), data_workers=0 (>=0), strict_checkpoints=true.
+# Native product integrity errors (including missing promoted bytes) always fail verification.
+
+resources:                                           # Allocation for inference only, not training.
+  cpu: 4                                             # Host decoding and CPU fallback.
+  memory: 16GiB                                      # Bounded host-memory request.
+
+# LF resource defaults: cpu=1, gpu=0; memory, gpu_memory, storage, time, processes are unset.
+# cpu>=1, gpu>=0; memory/gpu_memory/storage accept sizes, time accepts durations;
+# processes<=cpu. Add gpu: 1 explicitly for accelerator inference if useful.
+# name defaults to the YAML stem; no seeds/search/sweep is needed for this frozen review.

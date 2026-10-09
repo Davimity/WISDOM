@@ -1,9 +1,9 @@
-# OBJECTIVE: refine learned pooling scalars after V5a's all-family characterization.
-# PREREQUISITES: inspect V5a; keep the same reviewed backbone and benchmark.
-# VARIES: learned-scalar family, point/area measure, and bounded initialization.
+# OBJECTIVE: compare one learned scalar per family against its archived V5a fixed reference.
+# PREREQUISITES: use the completed V5a export (2026-10-08), identical data and reviewed backbone.
+# VARIES: pooling family only; each family has one frozen measure and one frozen scalar start.
 # FIXED: backbone, four paired seeds, protein BCE, validation objective, sealed test.
-# DECISION: test whether learned parameters improve shortlisted fixed protocols; review V6 separately.
-name: wisdom-v5b-pooling-refinement  # One native Study, not a family-step composition.
+# DECISION: compare paired G, S, B, W, scalar trajectories and costs; do not repeat fixed controls.
+name: wisdom-v5b-learned-pooling  # Five learned configurations, four paired seeds each, no HPO search.
 run: wisdom.Training.Training  # Existing model, training loop, and central analysis profile.
 
 with:  # Exact reviewed V5 backbone; only the sweep below varies.
@@ -28,6 +28,7 @@ with:  # Exact reviewed V5 backbone; only the sweep below varies.
   gate_lambda: 0.04                                    # Expected L0 semantic-gate penalty.
   weak_loss_profile: "baseline"                        # Protein BCE only; no local-GT training.
   architecture_spike: "baseline"                       # Do not change the backbone.
+  pooling_area_mode: "point"                           # V5a-selected measure for AutoPool, GeM and MAX-MEAN; LSE overrides it below.
   head_type: "single"                                  # One surface-to-protein head.
   batch_size: 16                                       # Proteins per update.
   epochs: 500                                          # Epoch ceiling; validation patience may stop earlier.
@@ -66,50 +67,83 @@ with:  # Exact reviewed V5 backbone; only the sweep below varies.
 
 seeds: [4, 7, 32, 54]  # Four paired repetitions for every finite candidate; no seed racing.
 
-sweep:  # Learned-scalar refinement only; all pooling families are first screened in V5a.
-  space:  # Keep each initialization strictly inside the existing bounded scalar domain.
-    pooling_type:  # The five families with an existing learned physical/probability scalar.
-      values: [log_sum_exp, local_mean_max, autopool, gem, max_mean]  # No duplicated fixed or curriculum screen.
-    pooling_area_mode:  # Represented-area ablation for the four scalar-reduction families.
-      values: [point, area]  # Regional diffusion already uses its mass matrix.
-      when: {pooling_type: {in: [log_sum_exp, autopool, gem, max_mean]}}  # Native membership.
-    log_sum_exp_mode:  # Train the existing bounded beta.
-      values: [learned]  # Fixed/curriculum alternatives now belong to V5a.
-      when: {pooling_type: log_sum_exp}  # Activate only the LSE scalar.
-    log_sum_exp_beta_init:  # Initial beta inside the unchanged (0.25,200) domain.
-      values: [0.3, 0.5, 1.0, 5.0, 20.0, 80.0, 160.0, 190.0]  # Low/intermediate/near-upper-bound starts.
-      when: {log_sum_exp_mode: learned}  # Never supply an initialization outside its family.
-    regional_scale_mode:  # Train the existing bounded smoothing length.
-      values: [learned]  # Fixed lengths are comprehensively screened in V5a.
-      when: {pooling_type: local_mean_max}  # Only regional pooling uses this selector.
-    regional_diffusion_scale_init:  # Initial length inside the unchanged (0.05,12) angstrom domain.
-      values: [0.075, 0.1, 0.25, 0.5, 1.5, 3.0, 6.0, 10.0, 11.5]  # Near both bounds, without saturated endpoint initialization.
-      when: {regional_scale_mode: learned}  # Nine physical initializations.
-    autopool_alpha_mode:  # Train the existing probability-space sharpness.
-      values: [learned]  # Fixed alpha values, including zero, belong to V5a.
-      when: {pooling_type: autopool}  # AutoPool-specific protocol.
-    autopool_alpha_init:  # Initial alpha inside the unchanged (0,50) domain.
-      values: [0.01, 0.1, 1.0, 5.0, 10.0, 25.0, 45.0, 49.0]  # Near both bounds plus interior starts.
-      when: {autopool_alpha_mode: learned}  # No fixed-alpha argument in this branch.
-    gem_power_mode:  # Train the existing generalized-mean exponent.
-      values: [learned]  # Fixed exponents through 1024 belong to V5a.
-      when: {pooling_type: gem}  # GeM-specific protocol.
-    gem_power_init:  # Initial exponent inside the unchanged (1,32) domain.
-      values: [1.01, 1.25, 2.0, 4.0, 8.0, 16.0, 28.0, 31.0]  # Near-MEAN through near-upper-bound initialization.
-      when: {gem_power_mode: learned}  # Eight learned initializations.
-    max_mean_lambda_mode:  # Train the existing convex mixing weight.
-      values: [learned]  # Exact 0/1 controls belong to the fixed V5a grid.
-      when: {pooling_type: max_mean}  # MAX-MEAN-specific protocol.
-    max_mean_lambda_init:  # Initial MAX contribution strictly inside (0,1).
-      values: [0.01, 0.05, 0.1, 0.25, 0.5, 0.75, 0.9, 0.95, 0.99]  # Nearly pure MEAN through nearly pure MAX.
-      when: {max_mean_lambda_mode: learned}  # Do not initialize a sigmoid at an exact bound.
+# Archived V5a references were selected by the report's common balance B, not best-seed W.
+# LSE: area, fixed beta=0.25; regional: fixed length=16 angstroms; AutoPool: point, alpha=500;
+# GeM: point, power=2; MAX-MEAN: point, weight=0.95. Keep their four original seeds/checkpoints.
+# Compare all G/S/W components from the globally selected checkpoint, never mix objectives.
+# Do not retrain these fixed references, add MAX/MEAN controls, or average a family's full V5a grid.
+# This is a validation-stage, V5a-informed comparison, not an independent test or proof that HPO
+# can always be removed. A single frozen initialization does not establish initialization robustness.
+# Top-K has no differentiable fraction mode in the current API. Attention already learns its scorer,
+# and multiscale regional already learned its five weights in V5a; none adds a new scalar test here.
 
-# Native sweep semantics/defaults match V5a. No MAX cell exists here, so no reference is imposed.
-# Branch counts: learned LSE=16, learned regional=9, learned AutoPool=16,
-# learned GeM=16, learned MAX-MEAN=18. Total: 75 candidates x four seeds = 300 required Runs.
-# Near-bound starts test optimizer sensitivity; they do not enlarge the unchanged learned domains.
-# If learned values saturate a bound and V5a supports larger fixed values, the bound is unresolved.
-# Do not reinterpret initialization sweeps as searches of final learned values.
+sweep:  # Native finite comparison, not hyperparameter optimization or initialization search.
+  space:  # Only pooling_type has more than one authored value.
+    pooling_type:  # One configuration for each implemented learned-scalar family.
+      values: [log_sum_exp, local_mean_max, autopool, gem, max_mean]  # Exactly five branches.
+    pooling_area_mode:  # Keep the selected V5a measure; other reduction families use with.point.
+      values: [area]  # LSE's selected fixed reference used represented-area weighting.
+      when: {pooling_type: log_sum_exp}  # Never cross point/area as an additional factor.
+    log_sum_exp_mode:  # Make beta an ordinary model parameter in the unchanged optimizer.
+      values: [learned]  # Neither fixed beta nor a curriculum is re-executed.
+      when: {pooling_type: log_sum_exp}  # No inactive mode on other families.
+    log_sum_exp_beta_init:  # Start at the declared V5a fixed reference, then learn beta by backpropagation.
+      values: [0.25]  # One initial value, not a fixed pooling temperature or HPO factor.
+      when: {pooling_type: log_sum_exp}  # One starting value, not an initialization grid.
+    log_sum_exp_beta_bounds:  # Allow all positive fixed V5a betas with room past both grid edges.
+      values: [[0.005, 2560.0]]  # One log-coordinate domain; the scalar is free to move within it.
+      when: {pooling_type: log_sum_exp}  # Bounds have no effect on other families.
+    regional_scale_mode:  # Learn the existing bounded regional heat length.
+      values: [learned]  # The fixed V5a spectrum, backbone and surface labels are unchanged.
+      when: {pooling_type: local_mean_max}  # Regional pooling only.
+    regional_diffusion_scale_init:  # Start at the declared fixed reference; learn the same heat-length operator.
+      values: [16.0]  # Physical initialization in angstroms, not a fixed final radius.
+      when: {pooling_type: local_mean_max}  # One paired learned-vs-fixed comparison.
+    regional_diffusion_scale_bounds:  # Cover V5a's positive heat lengths, including 16 and 64 angstroms.
+      values: [[0.05, 128.0]]  # One log-coordinate domain; exact zero remains a V5a identity control.
+      when: {pooling_type: local_mean_max}  # Only this family's learned physical length.
+    autopool_alpha_mode:  # Learn probability-space concentration with the existing bounded scalar.
+      values: [learned]  # No fixed AutoPool values are trained again.
+      when: {pooling_type: autopool}  # AutoPool only.
+    autopool_alpha_init:  # Start at the declared fixed alpha with the identical point measure.
+      values: [500.0]  # Learned concentration, not fixed alpha=500 throughout training.
+      when: {pooling_type: autopool}  # One start; no extra measure or initialization search.
+    autopool_alpha_bounds:  # Include the fixed reference and V5a's largest alpha without a 50 ceiling.
+      values: [[0.0, 2000.0]]  # One linear-coordinate domain; large alpha can yield small true gradients.
+      when: {pooling_type: autopool}  # Nonnegative concentration on point probabilities only.
+    gem_power_mode:  # Learn GeM's probability-space exponent.
+      values: [learned]  # Fixed GeM references remain archived in V5a.
+      when: {pooling_type: gem}  # GeM only.
+    gem_power_init:  # Use the selected V5a power within the existing strict domain.
+      values: [2.0]  # Highest-B fixed GeM setting, point measure.
+      when: {pooling_type: gem}  # One starting power.
+    gem_power_bounds:  # Cover V5a's nontrivial powers, with space beyond its upper grid edge.
+      values: [[1.0, 2048.0]]  # Log-coordinate domain; exact power=1 remains a fixed mean control.
+      when: {pooling_type: gem}  # Only the generalized probability mean learns this exponent.
+    max_mean_lambda_mode:  # Learn the convex MAX-MEAN coefficient.
+      values: [learned]  # Do not rerun either endpoint or the fixed best mixture.
+      when: {pooling_type: max_mean}  # MAX-MEAN only.
+    max_mean_lambda_init:  # Use the selected V5a mixture strictly inside (0,1).
+      values: [0.95]  # Highest-B fixed MAX-MEAN setting, point measure.
+      when: {pooling_type: max_mean}  # One starting mixture.
+
+# Native sweep.space accepts finite values and conditional when; it executes every combination.
+# All child dimensions are singleton values. No search, ranges, reference cell or competitive pruning.
+# Branch counts: LSE=1, regional=1, AutoPool=1, GeM=1, MAX-MEAN=1.
+# Total: five configurations x seeds [4,7,32,54] = 20 required Runs, replacing the old 300-run grid.
+# Selected learned domains: beta=(0.005,2560), length=(0.05,128) angstroms,
+# alpha=(0,2000), power=(1,2048), mixture=(0,1); starts must be strictly interior.
+# True constructor defaults remain beta=(0.25,200), length=(0.05,12), alpha=(0,50),
+# power=(1,32), mixture=(0,1). The four *_bounds parameters configure learned modes only;
+# exact bounds are saved in model_parameters so old checkpoints keep their original interpretation.
+# Positive bounds are required for log-coordinate beta/length; alpha must remain nonnegative,
+# power at least one. Maximum/minimum limits are fixed constraints, not another search factor.
+# Starts now reproduce all five declared V5a references exactly, rather than interior proxies.
+# These are warm-start scalar comparisons: the backbone still trains from the same paired seeds,
+# not from V5a weights. They do not establish that learning from an arbitrary start replaces HPO.
+# The fixed reference is selected by B; inspect G, S, AUROC, W, regret and costs separately.
+# Log the learned scalar at each epoch and at the restored globally selected checkpoint.
+# Report saturation, movement from the start and seed dispersion; an unchanged scalar is informative.
 
 objective:  # Unchanged development utility, never held-out test performance.
   metric: val_wisdom_hpo_score  # Existing protein/surface/coupling utility.
@@ -121,7 +155,7 @@ objective:  # Unchanged development utility, never held-out test performance.
 # Keep the existing utility and 0.015 margin; analysis never changes selection/pruning.
 
 resources:  # One enclosing allocation for this complete Study, not one per family.
-  gpu: 2  # Match the two-GPU ctgpgpu12 target.
+  gpu: 3  # Match the two-GPU ctgpgpu12 target.
   cpu: 36  # Shared host decoding/orchestration budget.
   memory: 96GiB  # Shared host-memory ceiling.
   time: 168h  # Scheduler wall-time ceiling for the enclosing allocation.
@@ -139,11 +173,10 @@ execution:  # Explicit logical budget, independently of the scheduler's allocati
 
 analysis:  # Small native overrides of Training.analysis_profile for this entire Study.
   metrics:  # Priorities order research interest only; objectives remain unchanged.
-    val_surface_attention_positive_macro_auprc: {priority: 75}  # Attention versus local evidence.
     val_faithfulness_deletion_top_minus_random_10: {priority: 65}  # Equal-area deletion control.
     val_faithfulness_insertion_top_minus_random_10: {priority: 65}  # Equal-area insertion control.
     train_cuda_peak_gib: {priority: 35}  # Epoch memory, not the whole-Run maximum.
 
 # Analysis defaults to {}; metrics merge with the class profile. Priority defaults to 0 in LF;
-# the central WISDOM profile defines 40/55/55/15 for these four metrics. Families, optional
+# the central WISDOM profile defines 55/55/15 for these three metrics. Families, optional
 # questions, discovery, and curve/outcome semantics remain owned by the shared native profile.

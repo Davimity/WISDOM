@@ -221,7 +221,11 @@ class ModelValidation(lf.Work):
                         dataset,
                         split,
                         include_surface_targets=True,
-                        include_surface_geometry=int(state["model_version"]) == 3,
+                        include_surface_geometry=(
+                            int(state["model_version"]) == 3
+                            or state["model_parameters"].get("surface_refiner_type", "none")
+                            not in {"none", "heat", "learned_heat"}
+                        ),
                         include_atom_geometry=state["model_parameters"].get(
                             "vector_atomic_channels", 0
                         )
