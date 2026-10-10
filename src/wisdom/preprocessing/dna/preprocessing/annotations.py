@@ -6,11 +6,10 @@ from typing import Any
 from pathlib import Path
 from functools import partial
 from collections.abc import Mapping, Sequence
-
 from wisdom.preprocessing.dna.DNAAnnotationSink import DNAAnnotationSink
+from wisdom.preprocessing.common.ProgressHeartbeat import ProgressHeartbeat
 from wisdom.preprocessing.dna.preprocessing.manifests import annotation_records
 from wisdom.preprocessing.dna.DNAAnnotationTransform import DNAAnnotationTransform
-from wisdom.preprocessing.dna.preprocessing.ProgressHeartbeat import ProgressHeartbeat
 
 
 def generate_annotations(

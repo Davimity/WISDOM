@@ -1,9 +1,9 @@
 """Shared-backbone global classifier and optional context-conditioned localizer."""
 
 import torch
-from lambdaforge.nn import Scatter
-from torch import Tensor, nn
 
+from torch import Tensor, nn
+from lambdaforge.nn import Scatter
 from wisdom.models.HeadType import HeadType
 
 
@@ -21,7 +21,7 @@ class GlobalSurfaceHeads(nn.Module):
         """Construct the direct global head and one controlled local conditioning mechanism.
 
         Args:
-            hidden_dim: Shared surface embedding width ``H``.
+            hidden_dim: Actual surface evidence width D (H, K or H+K); parameter name retained.
             head_type: ``dual`` (D1), ``global_context`` (D2), or ``film`` (D2b).
             context_dim: Small global context bottleneck width.
             dropout: Direct-head dropout probability.
@@ -60,7 +60,7 @@ class GlobalSurfaceHeads(nn.Module):
 
     def forward(
         self,
-        surface_embeddings: Tensor,
+        surface_evidence_features: Tensor,
         area_weights      : Tensor,
         owners           : Tensor,
         protein_count    : int,
@@ -74,21 +74,21 @@ class GlobalSurfaceHeads(nn.Module):
         established local head unchanged.
 
         Args:
-            surface_embeddings: Shared surface states ``[M,H]``.
+            surface_evidence_features: Actual Z point states ``[M,D]``: H, X or [H,X].
             area_weights: Positive represented-area weights ``[M]``.
             owners: Point-to-protein owner IDs ``[M]``.
             protein_count: Number of proteins ``B``.
 
         Returns:
-            ``direct_logits[B]``, ``global_context[B,H]``, and optional
+            ``direct_logits[B]``, ``global_context[B,D]``, and optional
             ``conditioned_surface_logits[M]``.
         """
         area_sum = Scatter.sum(area_weights, owners, protein_count)
         area     = area_weights / area_sum[owners].clamp_min(
-            torch.finfo(surface_embeddings.dtype).eps
+            torch.finfo(surface_evidence_features.dtype).eps
         )
         global_context = Scatter.sum(
-            surface_embeddings * area[:, None],
+            surface_evidence_features * area[:, None],
             owners,
             protein_count,
         )
@@ -105,11 +105,11 @@ class GlobalSurfaceHeads(nn.Module):
         point_context = context[owners]
         if self.head_type is HeadType.GLOBAL_CONTEXT:
             conditioned = self.context_local_head(
-                torch.cat((surface_embeddings, point_context), dim=1)
+                torch.cat((surface_evidence_features, point_context), dim=1)
             ).squeeze(-1)
         else:
             gamma, beta = self.film_head(point_context).chunk(2, dim=1)
-            conditioned_state = (1.0 + gamma) * surface_embeddings + beta
+            conditioned_state = (1.0 + gamma) * surface_evidence_features + beta
             conditioned = self.film_local_head(conditioned_state).squeeze(-1)
         output["conditioned_surface_logits"] = conditioned
         return output

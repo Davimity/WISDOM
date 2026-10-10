@@ -375,8 +375,8 @@ def test_v5_grids_use_exact_frozen_values_and_four_seeds():
         "gate_lambda": 0.04, "weak_loss_profile": "baseline", "architecture_spike": "baseline",
     }
     expected = {
-        "wisdom_v5a.yaml": [1, 2, 32, 26, 16, 54, 2, 26, 24, 22, 1],
-        "wisdom_v5b.yaml": [1, 1, 1, 1, 1],
+        "v5/wisdom_v5a.yaml": [1, 2, 32, 26, 16, 54, 2, 26, 24, 22, 1],
+        "v5/wisdom_v5b.yaml": [1, 1, 1, 1, 1],
     }
     for name, counts in expected.items():
         raw = safe_load((root / name).read_text())
@@ -430,7 +430,7 @@ def test_v5_inactive_parameters_are_absent_from_native_candidates():
         "max_mean": {"max_mean_lambda_mode"},
     }
     for name, branches in [("v5a", characterization), ("v5b", adaptive)]:
-        config = WorkConfig.from_yaml(root / f"wisdom_{name}.yaml")
+        config = WorkConfig.from_yaml(root / "v5" / f"wisdom_{name}.yaml")
         run = config.levels[0].runs[0]
         for candidate in run.variants:
             family = candidate["pooling_type"]
@@ -468,7 +468,7 @@ def test_v5_inactive_parameters_are_absent_from_native_candidates():
 def test_v5a_curriculum_changes_before_validation_patience_can_expire():
     """Ensure the configured schedule has a chance to act without disabling early stopping."""
     root = Path(__file__).parents[1] / "experiments"
-    run = WorkConfig.from_yaml(root / "wisdom_v5a.yaml").levels[0].runs[0]
+    run = WorkConfig.from_yaml(root / "v5/wisdom_v5a.yaml").levels[0].runs[0]
     curriculum = [c for c in run.variants if c.get("log_sum_exp_mode") == "curriculum"]
     assert len(curriculum) == 22
     assert run.parameters["epochs"] == 500 and run.parameters["patience"] == 30
@@ -486,7 +486,7 @@ def test_v5a_curriculum_changes_before_validation_patience_can_expire():
 def test_v5a_covers_every_family_and_expands_old_upper_edges():
     """Require both mathematical endpoints and substantial continuation past old grid edges."""
     root = Path(__file__).parents[1] / "experiments"
-    raw = safe_load((root / "wisdom_v5a.yaml").read_text())
+    raw = safe_load((root / "v5/wisdom_v5a.yaml").read_text())
     space = raw["sweep"]["space"]
     assert set(space["pooling_type"]["values"]) == {family.value for family in PoolingType}
     assert set(space["attention_variant"]["values"]) == {"simple", "gated"}
@@ -516,7 +516,7 @@ def test_every_authored_pooling_candidate_has_finite_forward_and_backward(name):
     These synthetic numerical checks establish executability, not scientific superiority.
     """
     root = Path(__file__).parents[1] / "experiments"
-    run = WorkConfig.from_yaml(root / f"wisdom_{name}.yaml").levels[0].runs[0]
+    run = WorkConfig.from_yaml(root / "v5" / f"wisdom_{name}.yaml").levels[0].runs[0]
     accepted = set(inspect.signature(ProteinPoolingHead).parameters)
     for candidate in run.variants:
         parameters = {key: value for key, value in candidate.items() if key in accepted}

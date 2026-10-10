@@ -13,9 +13,8 @@ from collections.abc import Mapping
 from torch.utils.data import Dataset
 from lambdaforge.data import DatasetIndex
 from wisdom.data.TaskSpecification import TaskSpecification
-from wisdom.features.SurfaceFeatureSidecar import SurfaceFeatureSidecar
-
 from wisdom.utils.structure.AtomicDescriptors import AtomicDescriptors
+from wisdom.features.SurfaceFeatureSidecar import SurfaceFeatureSidecar
 
 
 class WisdomDataset(Dataset[Mapping[str, Tensor | str]]):
@@ -39,6 +38,7 @@ class WisdomDataset(Dataset[Mapping[str, Tensor | str]]):
         include_surface_geometry: bool = False,
         include_atom_geometry  : bool = False,
         surface_features       : tuple[str, ...] = (),
+        normalization_subset   : str | None = None,
     ) -> None:
         """Read and validate a compact ``file,label,split`` CSV manifest.
 
@@ -64,6 +64,8 @@ class WisdomDataset(Dataset[Mapping[str, Tensor | str]]):
                 scalar-plus-vector atomic spike.
             surface_features: Ordered optional fields; empty leaves feature sidecars unopened.
                 Nonempty requires frozen train statistics and aligned assets on every member.
+            normalization_subset: Training population whose frozen transform all splits reuse.
+                None uses subset, including when validation/test membership is unfiltered.
 
         Raises:
             ValueError: If the split, header, label, row split, path, or selected subset is invalid.
@@ -79,6 +81,9 @@ class WisdomDataset(Dataset[Mapping[str, Tensor | str]]):
         self.include_surface_geometry = include_surface_geometry
         self.include_atom_geometry    = include_atom_geometry
         self.surface_features         = surface_features
+        self.normalization_subset = (
+            subset if normalization_subset is None else normalization_subset
+        )
         self.feature_assets: dict[str, list[Path]] = {}
         self.feature_statistics: Mapping[str, object] | None = None
         self.task_specification = TaskSpecification()
@@ -197,15 +202,29 @@ class WisdomDataset(Dataset[Mapping[str, Tensor | str]]):
             task = specification
             self.task_specification = specification
             if self.surface_features and member.partitions.get("split") == "train":
-                checksum = member.assets["universal_npz"].sha256
-                normalization_population[member.member_id] = (
-                    checksum.removeprefix("sha256:") if checksum else None
-                )
+                view = self.normalization_subset
+                if view == "full" or view in member.metadata.get("dilutions", ()):
+                    checksum = member.assets["universal_npz"].sha256
+                    normalization_population[member.member_id] = (
+                        checksum.removeprefix("sha256:") if checksum else None
+                    )
             if self.surface_features and "surface_feature_statistics" in member.assets:
                 statistics_path = root / member.assets["surface_feature_statistics"].path
                 if statistics_path not in statistics_by_path:
                     statistics_by_path[statistics_path] = json.loads(statistics_path.read_text())
-                statistics = statistics_by_path[statistics_path]
+                stored = statistics_by_path[statistics_path]
+                if stored.get("schema_version") == "2.0":
+                    populations = stored["populations"]
+                    assert isinstance(populations, dict)
+                    if self.normalization_subset not in populations:
+                        raise ValueError("feature statistics lack training population: "
+                                         + self.normalization_subset)
+                    statistics = populations[self.normalization_subset]
+                else:
+                    if self.normalization_subset != "full":
+                        raise ValueError("historical full-train statistics cannot normalize "
+                                         "a dilution; republish SurfaceFeatures with per-view fits")
+                    statistics = stored
                 if self.feature_statistics is not None and statistics != self.feature_statistics:
                     raise ValueError("conflicting dataset feature normalization statistics")
                 self.feature_statistics = statistics
@@ -269,7 +288,8 @@ class WisdomDataset(Dataset[Mapping[str, Tensor | str]]):
                     str(member.partitions.get("tier", "unspecified")),
                     str(member.partitions.get("leakage_group", "unspecified")),
                     str(member.partitions.get("global_phenotype", "unspecified")),
-                    str(member.partitions.get("interface_phenotype", "unspecified")),
+                    str(member.partitions.get("local_phenotype",
+                        member.partitions.get("interface_phenotype", "unspecified"))),
                 )
             )
             if self.surface_features:
@@ -366,7 +386,7 @@ class WisdomDataset(Dataset[Mapping[str, Tensor | str]]):
             tier,
             leakage_group,
             global_phenotype,
-            interface_phenotype,
+            local_phenotype,
         ) = self.records[index]
         required = {
             "metadata_json",
@@ -744,5 +764,5 @@ class WisdomDataset(Dataset[Mapping[str, Tensor | str]]):
         output["tier"]       = tier
         output["leakage_group"]       = leakage_group
         output["global_phenotype"]    = global_phenotype
-        output["interface_phenotype"] = interface_phenotype
+        output["local_phenotype"] = local_phenotype
         return output

@@ -18,8 +18,8 @@ from plotly.offline import get_plotlyjs
 from collections.abc import Mapping, Sequence
 from wisdom.data.WisdomDataset import WisdomDataset
 from wisdom.evaluation.PointCloudExporter import PointCloudExporter
-from wisdom.preprocessing.structure.ProteinArchive import ProteinArchive
-from wisdom.preprocessing.structure.ProteinVisualizer import ProteinVisualizer
+from wisdom.preprocessing.common.structure.ProteinArchive import ProteinArchive
+from wisdom.preprocessing.common.structure.ProteinVisualizer import ProteinVisualizer
 
 
 class SurfacePredictionReport:
@@ -115,6 +115,7 @@ class SurfacePredictionReport:
         self.predictions            : dict[str, np.ndarray] = {}
         self.logits                 : dict[str, np.ndarray] = {}
         self.raw_evidence           : dict[str, np.ndarray] = {}
+        self.representations        : dict[str, dict[str, np.ndarray]] = {}
         self.protein_probabilities  : dict[str, float] = {}
         self.report_documents       : list[dict[str, Any]] = []
 
@@ -178,6 +179,15 @@ class SurfacePredictionReport:
             self.logits[name]      = raw_logits[start:stop].copy()
             if original_logits is not None:
                 self.raw_evidence[name] = original_logits[start:stop].copy()
+            if self.content == "full" and name in self._selected_identifiers():
+                # Keep real H/X/Z only for the bounded selected viewer sample. Lightweight
+                # prediction reports neither copy nor retain these potentially large matrices.
+
+                self.representations[name] = {
+                    key: output[key][start:stop].detach().float().cpu().numpy().copy()
+                    for key in ("surface_learned_embeddings", "surface_explicit_features",
+                                "surface_evidence_features") if key in output
+                }
             if global_scores is not None:
                 self.protein_probabilities[name] = float(global_scores[index])
 
@@ -266,6 +276,9 @@ class SurfacePredictionReport:
                     "model_prediction_hard":        hard_prediction.astype(np.uint8),
                     "model_prediction_logit":       self.logits[identifier],
                 }
+                for key, matrix in self.representations.get(identifier, {}).items():
+                    for column in range(matrix.shape[1]):
+                        channels[f"{key}_{column}"] = matrix[:, column]
                 if identifier in self.raw_evidence:
                     raw = self.raw_evidence[identifier]
                     raw_probability = 1.0 / (1.0 + np.exp(-np.clip(raw, -80.0, 80.0)))
@@ -443,6 +456,7 @@ class SurfacePredictionReport:
         temporary = path.with_name(f".{path.name}.{os.getpid()}.tmp.npz")
         try:
             evidence: dict[str, Any] = {"surface_prediction_logit": self.logits[identifier]}
+            evidence.update(self.representations.get(identifier, {}))
             if identifier in self.raw_evidence:
                 evidence["raw_surface_logits"] = self.raw_evidence[identifier]
             np.savez_compressed(

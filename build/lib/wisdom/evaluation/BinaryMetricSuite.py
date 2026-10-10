@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import math
-from collections.abc import Callable, Sequence
-
 import torch
+
+from torch import Tensor
 from lambdaforge.metrics import (
     BinaryAccuracy,
     BinaryAUPRC,
@@ -19,7 +19,7 @@ from lambdaforge.metrics import (
     BinarySpecificity,
 )
 from lambdaforge.metrics.Metric import Metric
-from torch import Tensor
+from collections.abc import Callable, Sequence
 
 
 class BinaryMetricSuite:

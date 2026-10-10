@@ -2,12 +2,11 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
-
 import torch
+
 from torch import Tensor, nn
 from torch.nn import functional as F
-
+from collections.abc import Mapping, Sequence
 from wisdom.models.DiffusionSurfaceEncoder import DiffusionSurfaceEncoder
 
 

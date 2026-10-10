@@ -54,7 +54,7 @@ class ProteinPoolingHead(nn.Module):
         """Construct only the parameters used by the selected family.
 
         Args:
-            hidden_dim: Point embedding width H.
+            hidden_dim: Actual Z width D=H, K or H+K; only Attention uses these features.
             pooling_type: Family in PoolingType; no new encoder is introduced.
             dropout: Attention scorer dropout probability, shared with the frozen backbone.
             topk_fraction: Point or represented-area fraction in (0, 1].
@@ -175,7 +175,7 @@ class ProteinPoolingHead(nn.Module):
     def forward(
         self,
         logits       : Tensor,
-        embeddings   : Tensor,
+        evidence_features   : Tensor,
         area_weights : Tensor,
         owners       : Tensor,
         operators    : Sequence[Mapping[str, Tensor]],
@@ -183,10 +183,10 @@ class ProteinPoolingHead(nn.Module):
     ) -> dict[str, Tensor]:
         """Pool an ordered disjoint batch without mixing proteins.
 
-        For a protein's points p, let l_p be a local logit, h_p its embedding, and m_p a
+        For a protein's points p, let l_p be a local logit, z_p its evidence vector, and m_p a
         normalized measure (1/N for point mode, A_p/sum(A) for area mode). MAX returns
         max(l); mean returns sum(m*l); attention returns sum(softmax(s+log(m))*l), with
-        s=w^T tanh(Vh) or w^T[tanh(Vh)*sigmoid(Uh)]. Point Top-K averages ceil(f*N) logits;
+        s=w^T tanh(Vz) or w^T[tanh(Vz)*sigmoid(Uz)]. Point Top-K averages ceil(f*N) logits;
         area Top-K integrates the sorted logits over exactly f of normalized area, dividing
         by f. Regional variants use heat time length^2 before MAX, optionally mixed across
         five fixed lengths with learned convex weights. LSE returns log(sum(m*exp(beta*l)))/beta.
@@ -198,7 +198,7 @@ class ProteinPoolingHead(nn.Module):
 
         Args:
             logits: Local real-valued evidence [M], with differentiable FP32/BF16 values.
-            embeddings: Local features [M,H], used only by attention.
+            evidence_features: Actual Z features [M,D], used only by Attention; D=H, K or H+K.
             area_weights: Positive represented areas [M]; normalized within each protein.
             owners: Integer point-to-protein indices [M].
             operators: Per-protein mass-orthonormal diffusion eigenpairs.
@@ -228,9 +228,9 @@ class ProteinPoolingHead(nn.Module):
         if self.pooling_type is PoolingType.ATTENTION:
             if self.attention is not None:
                 dtype  = next(self.attention.parameters()).dtype
-                scores = self.attention.scorer(embeddings.to(dtype)).squeeze(-1)
+                scores = self.attention.scorer(evidence_features.to(dtype)).squeeze(-1)
             else:
-                local  = embeddings.to(self.attention_value.weight.dtype)
+                local  = evidence_features.to(self.attention_value.weight.dtype)
                 gated  = (
                     torch.tanh(self.attention_value(local))
                     * torch.sigmoid(self.attention_gate(local))

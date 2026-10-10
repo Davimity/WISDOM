@@ -2,8 +2,8 @@
 
 import torch
 
-from collections.abc import Mapping
 from torch import Tensor, nn
+from collections.abc import Mapping
 
 
 class GatedAtomicEncoder(nn.Module):

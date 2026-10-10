@@ -8,10 +8,10 @@ from typing import Any
 from pathlib import Path
 from functools import partial
 from collections.abc import Sequence
+from wisdom.preprocessing.common.geometry import generate_geometry
 from wisdom.preprocessing.zinc.ZincAnnotation import ZincAnnotation
 from wisdom.preprocessing.zinc.ZincValidation import ZincValidation
-from wisdom.preprocessing.dna.preprocessing.geometry import generate_geometry
-from wisdom.preprocessing.dna.preprocessing.structures import validate_structure_snapshot
+from wisdom.preprocessing.common.snapshots import validate_structure_snapshot
 
 
 class ZincPreprocessing(lf.Work):
@@ -71,6 +71,9 @@ class ZincPreprocessing(lf.Work):
         # A labelled TXT alone cannot reconstruct assembly/copy or coordinating-site evidence.
 
         rows = [json.loads(line) for line in (design / "selection.jsonl").read_text().splitlines()]
+        for row in rows:
+            if "local_phenotype" not in row and "interface_phenotype" in row:
+                row["local_phenotype"] = row.pop("interface_phenotype")
         dilutions = json.loads((design / "dilutions.json").read_text())
         if training_subset != "full":
             replicate, subset = training_subset.split("/", 1)
@@ -129,7 +132,7 @@ class ZincPreprocessing(lf.Work):
                 "id": row["identifier"], "targets": {"zinc_binding": int(row["label"]),
                                                      "local_ground_truth": local},
                 "partitions": {key: str(row[key]) for key in (
-                    "split", "leakage_group", "global_phenotype", "interface_phenotype")},
+                    "split", "leakage_group", "global_phenotype", "local_phenotype")},
                 "metadata": {"task_specification": {"task_name": "zinc_binding",
                                                  "global_target_key": "zinc_binding",
                                                  "local_annotation_asset": "zinc_annotation"},
@@ -161,7 +164,7 @@ class ZincPreprocessing(lf.Work):
         return dict(self.outputs.dataset(
             name=dataset_name, version=dataset_version, members=members,
             metadata={"task": "zinc_binding", "structural_schema": "3.0",
-                      "annotation_schema": "1.0", "supervision": "protein-level-only",
+                      "annotation_schema": "2.0", "supervision": "protein-level-only",
                       "physiological_specificity_claimed": False},
             target_schema={"type": "object", "properties": {
                 "zinc_binding": {"type": "integer", "enum": [0, 1]},

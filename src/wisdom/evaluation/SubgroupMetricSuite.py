@@ -6,7 +6,6 @@ import torch
 
 from torch import Tensor
 from collections.abc import Sequence
-
 from wisdom.evaluation.BinaryMetricSuite import BinaryMetricSuite
 
 
@@ -27,7 +26,7 @@ class SubgroupMetricSuite:
         surface_validity      : Tensor,
         surface_owners        : Tensor,
         global_phenotypes     : Sequence[str],
-        interface_phenotypes  : Sequence[str],
+        local_phenotypes  : Sequence[str],
         tiers                 : Sequence[str],
     ) -> dict[str, float | None]:
         """Compute size, surface-size, prevalence, phenotype, and tier strata.
@@ -54,7 +53,7 @@ class SubgroupMetricSuite:
             surface_validity: Boolean ambiguity/availability mask with shape ``[M]``.
             surface_owners: Protein index for each point with shape ``[M]``.
             global_phenotypes: Dataset global-shape phenotype for every protein.
-            interface_phenotypes: Positive-interface phenotype for every protein.
+            local_phenotypes: Positive-interface phenotype for every protein.
             tiers: Dataset difficulty tier for every protein.
 
         Returns:
@@ -86,7 +85,7 @@ class SubgroupMetricSuite:
             raise ValueError("subgroup metrics require aligned point arrays")
         if any(
             len(values) != protein_count
-            for values in (global_phenotypes, interface_phenotypes, tiers)
+            for values in (global_phenotypes, local_phenotypes, tiers)
         ):
             raise ValueError("subgroup metadata must align with proteins")
         if (
@@ -149,8 +148,8 @@ class SubgroupMetricSuite:
         )
         groups.update(
             self._categorical_groups(
-                "interface_phenotype",
-                interface_phenotypes,
+                "local_phenotype",
+                local_phenotypes,
                 minimum=self.MINIMUM_PHENOTYPE_MEMBERS,
                 local_scores=surface_auprc,
             )

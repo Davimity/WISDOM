@@ -110,8 +110,8 @@ def write_design(
         [
             {
                 "identifier":          row["identifier"],
-                "interface_phenotype": row["interface_phenotype"],
-                "probability":         row["interface_phenotype_probability"],
+                "local_phenotype": row["local_phenotype"],
+                "probability":         row["local_phenotype_probability"],
             }
             for row in raw
             if int(row["label"]) == 1
@@ -249,7 +249,7 @@ def _write_preprocessing_manifests(
         "split",
         "leakage_group",
         "global_phenotype",
-        "interface_phenotype",
+        "local_phenotype",
         "origin",
         "label_evidence",
         "pdb_id",

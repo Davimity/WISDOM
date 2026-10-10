@@ -18,8 +18,8 @@ from lambdaforge.data import DatasetIndex, DatasetMember
 from wisdom.data.TaskSpecification import TaskSpecification
 from wisdom.evaluation.PointCloudExporter import PointCloudExporter
 from wisdom.visualization.ProteinReportPage import ProteinReportPage
-from wisdom.preprocessing.structure.ProteinArchive import ProteinArchive
-from wisdom.preprocessing.structure.ProteinVisualizer import ProteinVisualizer
+from wisdom.preprocessing.common.structure.ProteinArchive import ProteinArchive
+from wisdom.preprocessing.common.structure.ProteinVisualizer import ProteinVisualizer
 
 
 class Visualization(lf.Work):
@@ -65,7 +65,7 @@ class Visualization(lf.Work):
             overwrite_output: Replace a different existing visualization directory after success.
             identifiers: Optional exact member IDs to render; empty selects a stratified sample.
             splits: Dataset ``split`` partition values eligible for automatic sampling.
-            labels: Protein-level ``dna_binding`` targets eligible for automatic sampling.
+            labels: Binary protein targets for the member's task (DNA or Zn) eligible for sampling.
             maximum_proteins: Largest automatic sample size; zero renders every eligible member
                 and explicit identifiers are never truncated.
             maximum_surface_points: Largest deterministic point subset embedded in each HTML.
@@ -289,7 +289,7 @@ class Visualization(lf.Work):
         visualizer  : ProteinVisualizer,
         exporter    : PointCloudExporter,
     ) -> dict[str, Any]:
-        """Render one indexed member from its universal and DNA sidecar assets.
+        """Render one indexed member from its universal and task-specific sidecar assets.
 
         Args:
             dataset_root: Resolved immutable DatasetVersion placement.

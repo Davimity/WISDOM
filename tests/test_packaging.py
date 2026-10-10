@@ -21,7 +21,7 @@ def test_wheel_uses_current_source_despite_newer_stale_build_files(tmp_path):
 
     # Reproduce the deployed failure: an obsolete cached viewer looks newer than its source.
 
-    viewer = project / "build/lib/wisdom/preprocessing/structure/ProteinVisualizer.py"
+    viewer = project / "build/lib/wisdom/preprocessing/common/structure/ProteinVisualizer.py"
     viewer.write_text(viewer.read_text().replace("def render(", "def retired_render("))
     future = time.time() + 3600
     for cached in (project / "build/lib/wisdom").rglob("*.py"):
@@ -50,5 +50,5 @@ def test_wheel_uses_current_source_despite_newer_stale_build_files(tmp_path):
             name = source.relative_to(project / "src").as_posix()
             assert archive.read(name) == source.read_bytes(), name
         assert b"def render(" in archive.read(
-            "wisdom/preprocessing/structure/ProteinVisualizer.py"
+            "wisdom/preprocessing/common/structure/ProteinVisualizer.py"
         )

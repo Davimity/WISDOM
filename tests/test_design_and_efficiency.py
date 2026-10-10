@@ -17,20 +17,20 @@ from lambdaforge.data import DatasetRegistry
 from lambdaforge.work import Work, WorkConfig, WorkRunner
 from yaml import safe_load
 
-from wisdom.preprocessing.dna.preprocessing.DatasetManifests import DatasetManifests
-from wisdom.preprocessing.dna.preprocessing.geometry import _process_geometry, generate_geometry
-from wisdom.preprocessing.dna.preprocessing.Preprocessing import Preprocessing
-from wisdom.preprocessing.dna.preprocessing.structures import (
+from wisdom.preprocessing.common.geometry import _process_geometry, generate_geometry
+from wisdom.preprocessing.common.snapshots import (
     _validate_structure,
     validate_structure_snapshot,
 )
+from wisdom.preprocessing.common.structure.PreprocessConfig import PreprocessConfig
+from wisdom.preprocessing.common.structure.ProteinPreprocessor import ProteinPreprocessor
+from wisdom.preprocessing.common.structure.ProteinReader import ProteinReader
+from wisdom.preprocessing.common.structure.ProteinSink import ProteinSink
+from wisdom.preprocessing.common.structure.ProteinSource import ProteinSource
+from wisdom.preprocessing.common.structure.StructureResolver import StructureResolver
+from wisdom.preprocessing.dna.preprocessing.DatasetManifests import DatasetManifests
+from wisdom.preprocessing.dna.preprocessing.Preprocessing import Preprocessing
 from wisdom.preprocessing.dna.selection.Selection import Selection
-from wisdom.preprocessing.structure.PreprocessConfig import PreprocessConfig
-from wisdom.preprocessing.structure.ProteinPreprocessor import ProteinPreprocessor
-from wisdom.preprocessing.structure.ProteinReader import ProteinReader
-from wisdom.preprocessing.structure.ProteinSink import ProteinSink
-from wisdom.preprocessing.structure.ProteinSource import ProteinSource
-from wisdom.preprocessing.structure.StructureResolver import StructureResolver
 from wisdom.visualization.Visualization import Visualization
 
 
@@ -168,6 +168,7 @@ def test_one_class_per_source_file_and_reader_public_api() -> None:
         / "Preprocessing.py",
     }
     simple_stage_directories = {
+        source_dir / "wisdom" / "preprocessing" / "common",
         source_dir / "wisdom" / "preprocessing" / "dna" / "selection",
         source_dir / "wisdom" / "preprocessing" / "dna" / "preprocessing",
         source_dir / "wisdom" / "preprocessing" / "zinc",
@@ -416,7 +417,8 @@ def test_geometry_worker_returns_a_non_reusable_failure_record(tmp_path: Path) -
 def test_preprocessing_configuration_reuses_complete_design() -> None:
     project_root = Path(__file__).parents[1]
     values = safe_load(
-        (project_root / "experiments" / "dna_preprocess.yaml").read_text(encoding="utf-8")
+        (project_root / "experiments" / "preprocess/dna/dna_preprocess.yaml").read_text(
+            encoding="utf-8")
     )
     design_values, preprocess_values, visualization_values = values["steps"]
 
@@ -431,9 +433,9 @@ def test_preprocessing_configuration_reuses_complete_design() -> None:
     assert design_values["resources"]["cpu"] >= 1
     assert {"memory", "storage", "time"}.issubset(design_values["resources"])
     assert design_values["with"]["skip"] is True
-    assert design_values["with"]["existing_design"] == {"file": "../data/dna/design"}
+    assert design_values["with"]["existing_design"] == {"file": "../../../data/dna/design"}
     assert design_values["with"]["raw_path"] is None
-    assert design_values["with"]["output_directory"] == "../data/dna/design"
+    assert design_values["with"]["output_directory"] == "../../../data/dna/design"
     assert design_values["with"]["overwrite_output"] is True
     assert design_values["with"]["maximum_resolution"] == 4.0
     assert design_values["with"]["dilution_fractions"] == [1.0, 0.75, 0.5, 0.25, 0.1]
@@ -452,7 +454,7 @@ def test_preprocessing_configuration_reuses_complete_design() -> None:
     assert preprocess_values["with"]["dilutions"] == {"from": "select.dilutions"}
     assert preprocess_values["with"]["structures"] == {"from": "select.structures"}
     assert preprocess_values["with"]["dataset_name"] == "wisdom-dna-reduced"
-    assert preprocess_values["with"]["dataset_version"] == "6"
+    assert preprocess_values["with"]["dataset_version"] == "7"
     assert preprocess_values["with"]["include_full_train"] is False
     assert preprocess_values["with"]["train_dilutions"] == ["replicate-00/train-25"]
     assert preprocess_values["with"]["include_validation"] is True
@@ -501,7 +503,7 @@ def test_preprocessing_reads_only_three_self_contained_manifests(tmp_path: Path)
             "split": split,
             "leakage_group": f"group-{identifier}",
             "global_phenotype": "G_NOISE",
-            "interface_phenotype": "I_NOISE",
+            "local_phenotype": "I_NOISE",
             "origin": "fixture",
             "label_evidence": "fixture",
             "pdb_id": identifier[:4],
@@ -628,7 +630,7 @@ def test_preprocessing_selects_train_dilution_before_geometry(tmp_path: Path) ->
             "split": split,
             "leakage_group": f"group-{identifier}",
             "global_phenotype": "G_NOISE",
-            "interface_phenotype": "I_NOISE",
+            "local_phenotype": "I_NOISE",
             "origin": "fixture",
             "label_evidence": "fixture",
             "pdb_id": identifier[:4],
@@ -694,9 +696,9 @@ def test_preprocessing_selects_train_dilution_before_geometry(tmp_path: Path) ->
 @pytest.mark.parametrize(
     "filename",
     (
-        "wisdom_v1a.yaml",
-        "wisdom_v2.yaml",
-        "wisdom_v4.yaml",
+        "v1/wisdom_v1a.yaml",
+        "v2/wisdom_v2.yaml",
+        "v4/wisdom_v4.yaml",
     ),
 )
 def test_training_catalog_resolves_before_every_dry_run(
@@ -722,7 +724,7 @@ def test_training_catalog_resolves_before_every_dry_run(
     # the same application-defined global/surface objective.
     assert plan.levels
     assert plan.levels[0]
-    assert config.raw["objective"] == {
+    assert {key: config.raw["objective"][key] for key in ("metric", "mode", "range")} == {
         "metric": "val_wisdom_hpo_score",
         "mode":   "max",
         "range":  [0.0, 1.0],
@@ -733,27 +735,27 @@ def test_experiment_campaign_uses_ordered_names_and_traceability_headers() -> No
     """Require every ordered campaign YAML to state its scientific decision contract."""
     experiment_root = Path(__file__).parents[1] / "experiments"
     stage_names = (
-        "wisdom_v1a.yaml",
-        "wisdom_v1b.yaml",
-        "wisdom_v1c.yaml",
-        "wisdom_v2.yaml",
-        "wisdom_v3.yaml",
-        "wisdom_v4.yaml",
-        "wisdom_v5a.yaml",
-        "wisdom_v5b.yaml",
-        "wisdom_v5c.yaml",
-        "wisdom_v6a.yaml",
-        "wisdom_v6b.yaml",
-        "wisdom_v6b2.yaml",
-        "wisdom_v6b3.yaml",
-        "wisdom_v6c.yaml",
-        "wisdom_v6c2.yaml",
-        "wisdom_v6c3.yaml",
-        "wisdom_v6d.yaml",
-        "wisdom_v7.yaml",
-        "wisdom_v8.yaml",
-        "wisdom_v9.yaml",
-        "wisdom_v10.yaml",
+        "v1/wisdom_v1a.yaml",
+        "v1/wisdom_v1b.yaml",
+        "v1/wisdom_v1c.yaml",
+        "v2/wisdom_v2.yaml",
+        "v3/wisdom_v3.yaml",
+        "v4/wisdom_v4.yaml",
+        "v5/wisdom_v5a.yaml",
+        "v5/wisdom_v5b.yaml",
+        "v5/wisdom_v5c.yaml",
+        "v6/wisdom_v6a.yaml",
+        "v6/wisdom_v6b.yaml",
+        "v6/wisdom_v6b2.yaml",
+        "v6/wisdom_v6b3.yaml",
+        "v6/wisdom_v6c.yaml",
+        "v6/wisdom_v6c2.yaml",
+        "v6/wisdom_v6c3.yaml",
+        "v6/wisdom_v6d.yaml",
+        "v7/wisdom_v7.yaml",
+        "v8/wisdom_v8.yaml",
+        "v9/wisdom_v9.yaml",
+        "v10/wisdom_v10.yaml",
     )
     required_headers = ("OBJECTIVE:", "PREREQUISITES:", "VARIES:", "FIXED:", "DECISION:")
 
@@ -764,27 +766,27 @@ def test_experiment_campaign_uses_ordered_names_and_traceability_headers() -> No
         assert all(header in first_lines for header in required_headers)
         assert "steps" not in safe_load(text)
 
-    assert tuple(sorted(path.name for path in experiment_root.glob("wisdom_v*.yaml"))) == tuple(
-        sorted(stage_names)
-    )
+    actual = sorted(str(path.relative_to(experiment_root))
+                    for path in experiment_root.glob("v*/wisdom_v*.yaml"))
+    assert actual == sorted(stage_names)
 
 
 def test_one_factor_comparisons_use_automatic_fixed_sweeps() -> None:
     """Finite screens must use LambdaForge's paired, non-pruned sweep contract."""
     experiment_root = Path(__file__).parents[1] / "experiments"
     single_studies  = (
-        "wisdom_v2.yaml",
-        "wisdom_v3.yaml",
-        "wisdom_v5a.yaml",
-        "wisdom_v6a.yaml",
-        "wisdom_v6b.yaml",
-        "wisdom_v6b2.yaml",
-        "wisdom_v6b3.yaml",
-        "wisdom_v6c.yaml",
-        "wisdom_v6c2.yaml",
-        "wisdom_v6c3.yaml",
-        "wisdom_v7.yaml",
-        "wisdom_v8.yaml",
+        "v2/wisdom_v2.yaml",
+        "v3/wisdom_v3.yaml",
+        "v5/wisdom_v5a.yaml",
+        "v6/wisdom_v6a.yaml",
+        "v6/wisdom_v6b.yaml",
+        "v6/wisdom_v6b2.yaml",
+        "v6/wisdom_v6b3.yaml",
+        "v6/wisdom_v6c.yaml",
+        "v6/wisdom_v6c2.yaml",
+        "v6/wisdom_v6c3.yaml",
+        "v7/wisdom_v7.yaml",
+        "v8/wisdom_v8.yaml",
     )
 
     for name in single_studies:
@@ -804,7 +806,7 @@ def test_one_factor_comparisons_use_automatic_fixed_sweeps() -> None:
 
 def test_loss_combination_keeps_adaptive_interaction_search() -> None:
     """The three-loss mixture should use automatic optimize-mode HPO, not a fixed sweep."""
-    experiment = Path(__file__).parents[1] / "experiments" / "wisdom_v6d.yaml"
+    experiment = Path(__file__).parents[1] / "experiments" / "v6/wisdom_v6d.yaml"
     study      = safe_load(experiment.read_text(encoding="utf-8"))
     search     = study["search"]
 

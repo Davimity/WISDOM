@@ -1,7 +1,6 @@
 """Parser-independent chain domain value."""
 
 from dataclasses import dataclass
-
 from wisdom.utils.structure.models.Residue import Residue
 
 

@@ -1,8 +1,8 @@
 """Shared Gemmi representation of one deposited protein structure."""
 
+import math
 import gemmi
 import hashlib
-import math
 
 from pathlib import Path
 from wisdom.utils.structure.BiologicalAssembly import BiologicalAssembly

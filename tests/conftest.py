@@ -26,3 +26,22 @@ def gz_pdb_path(tmp_path: Path, pdb_path: Path) -> Path:
     with pdb_path.open("rb") as source, gzip.open(output, "wb") as target:
         target.write(source.read())
     return output
+
+
+def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
+    """Keep production-data, GPU and browser checks distinct from offline CPU contracts.
+
+    Args:
+        items: Collected tests; markers affect selection, not scientific failure handling.
+    """
+    production = {
+        "test_dataset_splits_are_disjoint_and_cover_master_manifest",
+        "test_training_catalog_resolves_before_every_dry_run",
+    }
+    for item in items:
+        if item.originalname in production:
+            item.add_marker(pytest.mark.slow)
+        if item.originalname == "test_cuda_forward_backward_when_available":
+            item.add_marker(pytest.mark.gpu)
+        if "browser" in item.name or "chromium" in item.name:
+            item.add_marker(pytest.mark.browser)

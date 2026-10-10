@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-from typing import Any
-from collections.abc import Mapping, Sequence
-
 import torch
+
+from typing import Any
 from torch import Tensor
+from collections.abc import Mapping, Sequence
 
 
 class WisdomCollator:
@@ -115,7 +115,7 @@ class WisdomCollator:
         tiers               : list[str] = []
         leakage_groups      : list[str] = []
         global_phenotypes   : list[str] = []
-        interface_phenotypes: list[str] = []
+        local_phenotypes: list[str] = []
         surface_ptr                     = [0]
 
         has_surface_targets = all(
@@ -257,7 +257,7 @@ class WisdomCollator:
                 tiers.append(str(sample["tier"]))
                 leakage_groups.append(str(sample["leakage_group"]))
                 global_phenotypes.append(str(sample["global_phenotype"]))
-                interface_phenotypes.append(str(sample["interface_phenotype"]))
+                local_phenotypes.append(str(sample["local_phenotype"]))
             if has_surface_targets:
                 for name in annotation_names[:2]:
                     annotations[name].append(self._tensor(sample, name))
@@ -332,7 +332,7 @@ class WisdomCollator:
             batch["tier"]                = tiers
             batch["leakage_group"]       = leakage_groups
             batch["global_phenotype"]    = global_phenotypes
-            batch["interface_phenotype"] = interface_phenotypes
+            batch["local_phenotype"] = local_phenotypes
         if has_surface_targets:
             for name in annotation_names[:2]:
                 batch[name] = torch.cat(annotations[name])

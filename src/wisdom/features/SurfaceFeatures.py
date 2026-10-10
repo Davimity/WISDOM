@@ -25,6 +25,7 @@ class SurfaceFeatures(lf.Work):
         feature_group: str | None = "generic_basic",
         exclude: Sequence[str] = (),
         sigma: float = 2.0,
+        normalization_weighting: str = "pooled_points",
         workers: int = 4,
     ) -> dict[str, Any]:
         """Project protein-only chemistry, fit train normalization, and publish new members.
@@ -37,6 +38,8 @@ class SurfaceFeatures(lf.Work):
             feature_group: Named default group, or None for explicit feature_names only.
             exclude: Known channels to omit after group expansion.
             sigma: Positive Gaussian distance width in ångströms, default 2.
+            normalization_weighting: pooled_points (default), pooled_area or equal_protein.
+                Each published train dilution receives its own frozen fit.
             workers: Bounded concurrent independent projections, default 4.
 
         Returns:
@@ -89,9 +92,62 @@ class SurfaceFeatures(lf.Work):
         train = [(member.member_id, dataset / member.assets["universal_npz"].path, Path(path))
                  for member, path in zip(members, paths, strict=True)
                  if member.partitions.get("split") == "train"]
-        statistics = SurfaceFeatureSidecar.fit_statistics(train, names)
+        populations = {"full": train}
+        for member, path in zip(members, paths, strict=True):
+            if member.partitions.get("split") == "train":
+                for view in member.metadata.get("dilutions", ()):
+                    populations.setdefault(str(view), []).append(
+                        (member.member_id,
+                         dataset / member.assets["universal_npz"].path, Path(path))
+                    )
+        statistics: dict[str, Any] = {
+            "schema_version": "2.0",
+            "populations": {
+                view: SurfaceFeatureSidecar.fit_statistics(records, names,
+                    weighting=normalization_weighting, population=view)
+                for view, records in sorted(populations.items())
+            },
+        }
         stats_path = Path(self.outputs.file("surface-feature-statistics.json", role="report"))
         stats_path.write_text(json.dumps(statistics, indent=2), encoding="utf-8")
+        audit_path = Path(self.outputs.file("surface-feature-audit.md", role="report"))
+        sections = ["# Surface feature audit", "",
+                    "Only the named training population contributes to each fit. Validation and "
+                    "test reuse that frozen transform. No channel is removed automatically.", ""]
+        for view, fitted in statistics["populations"].items():
+            audit = fitted["audit"]
+            sections.extend([f"## {view}", "", f"Proteins: {len(fitted['sources'])}; "
+                f"points: {fitted['count']}; weighting: {normalization_weighting}.", "",
+                "| Channel | Mean | Standard deviation | Minimum | Maximum | Zero fraction |",
+                "| --- | ---: | ---: | ---: | ---: | ---: |"])
+            for i, name in enumerate(names):
+                sections.append(f"| {name} | {fitted['mean'][i]:.6g} | {fitted['std'][i]:.6g} | "
+                    f"{audit['minimum'][i]:.6g} | {audit['maximum'][i]:.6g} | "
+                    f"{audit['zero_fraction'][i]:.3f} |")
+            sections.extend(["", "Constant channels cannot discriminate within this training "
+                "population. Zero-only channels have no measured support. Correlations near "
+                "±1 flag possible redundancy; they do not establish scientific irrelevance.",
+                "", f"Flags: `{json.dumps(audit['highly_correlated_pairs'])}`", ""])
+            sections.extend([
+                "Mean and standard deviation use the chosen statistical weights. Zero/nonzero "
+                "and finite fractions describe unweighted point support, not physical area.", "",
+                "| Channel | Nonzero fraction | Finite fraction |",
+                "| --- | ---: | ---: |",
+            ])
+            for i, name in enumerate(names):
+                sections.append(f"| {name} | {audit['nonzero_fraction'][i]:.3f} | "
+                                f"{audit['finite_fraction'][i]:.3f} |")
+            sections.extend(["", "Pairwise correlation describes co-variation on this training "
+                "population. A constant channel has undefined correlation (unavailable), "
+                "not evidence of independence. No validation/test point contributes.", "",
+                "| Channel | " + " | ".join(names) + " |",
+                "| --- | " + " | ".join("---:" for _ in names) + " |"])
+            for name, correlations in zip(names, audit["correlation"], strict=True):
+                rendered = ["unavailable" if value is None else f"{value:.3f}"
+                            for value in correlations]
+                sections.append(f"| {name} | " + " | ".join(rendered) + " |")
+            sections.append("")
+        audit_path.write_text("\n".join(sections), encoding="utf-8")
 
         # Native publication accepts only Run-owned assets. Import the immutable input once;
         # LF owns copying, hashing and containment checks, including reconstructible cache files.
@@ -110,6 +166,8 @@ class SurfaceFeatures(lf.Work):
                               })
         return dict(self.outputs.dataset(
             name=dataset_name, version=dataset_version, members=published,
-            metadata={"optional_surface_fields": list(names), "field_schema": "1.0",
-                      "normalization": "pooled train points only"},
+            metadata={"optional_surface_fields": list(names),
+                      "field_schema": SurfaceFeatureSchema.VERSION,
+                      "normalization": normalization_weighting,
+                      "normalization_populations": sorted(populations)},
         ))

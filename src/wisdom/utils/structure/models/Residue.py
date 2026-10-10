@@ -1,7 +1,6 @@
 """Parser-independent residue domain value."""
 
 from dataclasses import dataclass
-
 from wisdom.utils.structure.models.Atom import Atom
 
 

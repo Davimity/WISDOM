@@ -8,15 +8,16 @@ from pathlib import Path
 
 import numpy as np
 
-from wisdom.preprocessing.dna.selection.audit import audit_dataset
-from wisdom.preprocessing.dna.selection.dilutions import create_dilutions
+from wisdom.preprocessing.common.audit import audit_dataset
+from wisdom.preprocessing.common.dilutions import create_dilutions
+from wisdom.preprocessing.common.leakage import assign_leakage_groups
+from wisdom.preprocessing.common.population import select_population
+from wisdom.preprocessing.common.similarity import _sequence_edges, _structure_edges
+from wisdom.preprocessing.common.snapshots import snapshot_structures
+from wisdom.preprocessing.common.splits import assign_splits
 from wisdom.preprocessing.dna.selection.evidence import load_evidence
-from wisdom.preprocessing.dna.selection.leakage import assign_leakage_groups
-from wisdom.preprocessing.dna.selection.population import select_population
 from wisdom.preprocessing.dna.selection.report import write_design
-from wisdom.preprocessing.dna.selection.similarity import _sequence_edges, _structure_edges
-from wisdom.preprocessing.dna.selection.splits import assign_splits
-from wisdom.preprocessing.dna.selection.structures import _contacts, snapshot_structures
+from wisdom.preprocessing.dna.selection.structures import _contacts
 
 
 class Log:
@@ -132,7 +133,7 @@ def test_leakage_balance_splits_and_dilutions_are_consistent() -> None:
                 "quality_eligible": True,
                 "origin": "btd_core" if label else "btd_combo",
                 "global_phenotype": f"G{index % 3}",
-                "interface_phenotype": f"I{index % 2}" if label else "not_applicable",
+                "local_phenotype": f"I{index % 2}" if label else "not_applicable",
             }
         )
     similarity = {"sequence_edges": {("P000_A", "P002_A")}, "structure_edges": set()}
@@ -313,8 +314,8 @@ def _catalog_row(identifier: str, label: int, split: str) -> dict[str, object]:
         "leakage_group": f"L-{identifier}",
         "global_phenotype": "G_NOISE",
         "global_phenotype_probability": 0.0,
-        "interface_phenotype": "I_NOISE" if label else "not_applicable",
-        "interface_phenotype_probability": 0.0,
+        "local_phenotype": "I_NOISE" if label else "not_applicable",
+        "local_phenotype_probability": 0.0,
         "origin": "fixture",
         "label_evidence": "fixture",
         "pdb_id": pdb_id,

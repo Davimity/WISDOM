@@ -11,13 +11,14 @@ from collections.abc import Mapping, Sequence
 class SurfaceEvidenceContext:
     """Borrow batch tensors without copying geometry or exposing ground truth to refiners.
 
-    Embeddings are [M,H], areas/owners [M], pointers [B+1], positions/normals [M,3],
+    Evidence Z is [M,D] (H, X or [H,X] according to representation mode).
+    Areas/owners are [M], pointers [B+1], positions/normals [M,3],
     curvatures [M,S,3], and stored neighbor IDs/masks [M,K]. Coordinates use Å; operators
     contain mass-orthonormal eigenvectors and eigenvalues in Å^-2 for each protein.
     Optional geometry is unnecessary for identity and spectral heat.
     """
 
-    embeddings   : Tensor
+    evidence_features: Tensor
     area_weights : Tensor
     owners       : Tensor
     surface_ptr  : Tensor

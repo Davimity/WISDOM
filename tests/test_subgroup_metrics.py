@@ -40,7 +40,7 @@ def test_subgroup_metrics_preserve_definition_aware_scores() -> None:
     assert metrics["subgroup_global_phenotype_g_shared_global_score"] == pytest.approx(1.0)
     assert metrics["subgroup_global_phenotype_g_shared_surface_auprc"] == pytest.approx(1.0)
     assert metrics["subgroup_surface_prevalence_q1_global_score"] is None
-    assert metrics["subgroup_interface_phenotype_i_shared_surface_count"] == pytest.approx(4.0)
+    assert metrics["subgroup_local_phenotype_i_shared_surface_count"] == pytest.approx(4.0)
 
 
 def test_subgroup_coupling_tracks_each_stratum_without_affecting_global_selection() -> None:

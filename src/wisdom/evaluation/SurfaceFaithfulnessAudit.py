@@ -63,7 +63,7 @@ class SurfaceFaithfulnessAudit:
             return {}, 0
 
         logits      = output["surface_logits"].reshape(-1)
-        embeddings  = output["surface_embeddings"]
+        embeddings  = output["surface_evidence_features"]
         areas       = cast(Tensor, batch["surface_area_weights"]).reshape(-1)
         owners      = cast(Tensor, batch["surface_batch"]).reshape(-1).long()
         surface_ptr = cast(Tensor, batch["surface_ptr"]).reshape(-1).long()

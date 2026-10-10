@@ -3,10 +3,10 @@
 import torch
 
 from torch import Tensor
-from wisdom.models.refinement.SurfaceEvidenceContext import SurfaceEvidenceContext
 from wisdom.models.refinement.GeometricAnisotropicEvidenceRefiner import (
     GeometricAnisotropicEvidenceRefiner,
 )
+from wisdom.models.refinement.SurfaceEvidenceContext import SurfaceEvidenceContext
 
 
 class EmbeddingAnisotropicEvidenceRefiner(GeometricAnisotropicEvidenceRefiner):
@@ -59,7 +59,8 @@ class EmbeddingAnisotropicEvidenceRefiner(GeometricAnisotropicEvidenceRefiner):
 
         # stopgrad applies to the guide only; logits still connect the local head to the backbone.
 
-        embeddings = context.embeddings.detach() if self.embedding_detach else context.embeddings
+        embeddings = (context.evidence_features.detach() if self.embedding_detach
+                      else context.evidence_features)
         guide = torch.nn.functional.normalize(embeddings.float(), dim=-1)
         cosine = (guide[left] * guide[right]).sum(-1).clamp(-1.0, 1.0)
         distance = (context.positions[left].float() - context.positions[right].float())

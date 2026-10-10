@@ -1,10 +1,9 @@
 """Evaluation-only exponential or stochastic averaging of trainable model state."""
 
-from collections import OrderedDict
-
 import torch
-from torch import Tensor, nn
 
+from torch import Tensor, nn
+from collections import OrderedDict
 from wisdom.models.WeightAveragingMode import WeightAveragingMode
 
 

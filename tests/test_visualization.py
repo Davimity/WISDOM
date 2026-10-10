@@ -6,7 +6,7 @@ from __future__ import annotations
 from lambdaforge.data import DatasetMember
 
 from wisdom.visualization.Visualization import Visualization
-from wisdom.preprocessing.structure.ProteinVisualizer import ProteinVisualizer
+from wisdom.preprocessing.common.structure.ProteinVisualizer import ProteinVisualizer
 
 
 def test_visualization_sampling_cycles_through_split_and_label_strata() -> None:

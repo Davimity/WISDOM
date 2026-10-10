@@ -36,6 +36,13 @@ include = ["wisdom*"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-ra"
+markers = [
+  "network: requires live external services, excluded from offline CI",
+  "external_tools: requires specialist binaries, excluded from offline CI",
+  "gpu: requires CUDA hardware, excluded from CPU CI",
+  "slow: requires production datasets or long scientific computation",
+  "browser: optional interactive browser verification",
+]
 
 [tool.ruff]
 line-length = 100

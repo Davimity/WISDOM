@@ -119,13 +119,16 @@ project contract, not optional style suggestions.
   Work classes or graphs of trivial service objects.
   The adjacent stateless zinc evidence, structure, phenotype, and audit stages follow the same
   exception; zinc-specific coordination and annotation remain cohesive domain classes.
+  Task-independent algorithms live in `wisdom.preprocessing.common` and must not import DNA/Zn
+  orchestration or evidence. Universal structural algorithms live under `common/structure`;
+  do not restore the retired `preprocessing/structure` aliases.
 - Prefer a small number of meaningful domain and service classes. Do not introduce factories,
   adapters, managers, builders, DTOs, wrappers, or interfaces unless they remove real complexity.
 - Put a class in `wisdom/utils` only when the same cohesive domain operation is genuinely reused by
   independent workflows. Do not create generic helper collections or move single-use logic there.
 - Keep the shared deposited-structure object model under `wisdom/utils/structure`: a structure owns
   its digest, sequences, metadata, and assembly construction; a biological assembly owns chain-copy
-  selection and DNA atoms. Keep universal-NPZ algorithms under `wisdom.preprocessing.structure`.
+  selection and DNA atoms. Keep universal-NPZ algorithms under `wisdom.preprocessing.common.structure`.
 - At LambdaForge Work boundaries, prefer JSON-compatible mappings and explicit `Path` arguments.
   Do not wrap records, inputs, outputs, or checkpoint roots in project-owned adapter classes unless
   the wrapper enforces a scientific invariant that cannot remain clear in the calling flow.
@@ -134,7 +137,7 @@ project contract, not optional style suggestions.
   domain entities.
 - Keep parser-independent `Protein`, `Chain`, `Residue`, and `Atom` models and shared chemical enums
   under `wisdom.utils.structure`. Keep source resolution, filtering, centering, graph/surface
-  construction, NPZ persistence, and validation under `wisdom.preprocessing.structure` because
+  construction, NPZ persistence, and validation under `wisdom.preprocessing.common.structure` because
   those operations belong specifically to the preprocessing representation.
 - Use enums instead of magic strings or unscoped numeric categories whenever the values form a
   closed semantic set.
@@ -169,13 +172,13 @@ project contract, not optional style suggestions.
   design, generates only universal geometry and DNA sidecars, validates the joined result, and then
   publishes it through LambdaForge 0.15 `self.outputs.dataset(...)`. It must never rediscover,
   rebalance, recluster, repartition, or dilute proteins.
-- Expose one `experiments/dna_preprocess.yaml` with sequential Selection and Preprocessing steps.
+- Expose one `experiments/preprocess/dna/dna_preprocess.yaml` with sequential Selection and Preprocessing steps.
   The first public parameter of each Work is `skip`: a skipped Selection performs no scientific
   computation and forwards explicitly staged labelled TXT/catalog/dilution inputs; a skipped
   Preprocessing publishes no dataset. Never infer missing assembly/contact provenance from a
   two-column TXT.
 - Keep all code under one top-level `wisdom` package. Put preprocessing below
-  `wisdom.preprocessing`, structural internals under `wisdom.preprocessing.structure`, DNA-specific
+  `wisdom.preprocessing`, structural internals under `wisdom.preprocessing.common.structure`, DNA-specific
   internals under `wisdom.preprocessing.dna`, and trainable data/models/evaluation in their named
   sibling packages. Do not restore parallel top-level packages with cross-cutting imports.
 - Create dilutions only after final leakage groups and phenotype clusters exist. Reduce training
@@ -247,6 +250,11 @@ project contract, not optional style suggestions.
   functional meaning. Positive phenotype clusters describe local physical DNA-binding-site shape;
   negative phenotype clusters describe global protein morphology. Neither phenotype may define a
   leakage edge.
+  Use `local_phenotype` for generic local metadata; read historical `interface_phenotype` only at
+  compatibility boundaries. For Zn, global morphology covers both classes; local phenotypes cover
+  individual accepted sites with residue multiplicities and multisite compositions preserved.
+  Buried coordination positives stay positive but their whole leakage groups are train-only.
+  Frozen external functional/site metadata enriches audits, never labels or leakage edges.
 - Compute sequence pair evidence with a versioned external MMseqs2 installation and structure pair
   evidence with a versioned external Foldseek installation after geometry exists. Retain thresholded
   pair tables, join all similarity/identity edges transitively, and assign each connected leakage
@@ -377,12 +385,12 @@ project contract, not optional style suggestions.
   ruff check .
   mypy src/wisdom
   pytest -q
-  lf validate experiments/dna_preprocess.yaml
-  lf explain experiments/dna_preprocess.yaml
-  lf run experiments/dna_preprocess.yaml --dry-run
-  lf validate experiments/validate_dna.yaml
-  lf validate experiments/wisdom_v1a.yaml
-  lf validate experiments/wisdom_v2.yaml
+  lf validate experiments/preprocess/dna/dna_preprocess.yaml
+  lf explain experiments/preprocess/dna/dna_preprocess.yaml
+  lf run experiments/preprocess/dna/dna_preprocess.yaml --dry-run
+  lf validate experiments/preprocess/dna/validate_dna.yaml
+  lf validate experiments/v1/wisdom_v1a.yaml
+  lf validate experiments/v2/wisdom_v2.yaml
   ```
 
 - Also run relevant focused tests while iterating. Multiprocessing tests may require execution

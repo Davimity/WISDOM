@@ -1,6 +1,7 @@
 """Small equivariant vector-state augmentation for the pre-freeze atomic spike."""
 
 import torch
+
 from torch import Tensor, nn
 
 

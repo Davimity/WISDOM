@@ -1,0 +1,206 @@
+# OBJECTIVE: test differentiable spatial coherence between local evidence and MIL pooling.
+# PREREQUISITES: the registered V5 benchmark and unchanged reviewed V5a/V5b backbone.
+# VARIES: three evidence-selected poolers crossed with eight independent evidence operators.
+# FIXED: backbone, optimizer, weak_loss_profile=baseline, gates, data and four paired seeds.
+# DECISION: inspect refined S, G, raw S/gain, negative mass/peak, top-k, coupling, seeds and cost.
+# W remains the compatibility objective; it is not the sole scientific decision criterion.
+name: wisdom-v5c-surface-evidence-refinement  # One complete native finite Study.
+run: wisdom.Training.Training  # No new Work, runner, data representation or GT loss.
+
+with:  # Exact reviewed V5 backbone; pooling and evidence refinement vary below.
+  dataset: {dataset: wisdom-dna-reduced@6}  # Exact version; verify the expected content below on the execution target.
+  # Required V5a/V5b content_id: sha256:ac1745504422cf60b84e57b90efc99206dea039dc36d0c1359782062cb10e202.
+  # The local same-name registry entry is older (sha256:ff8eec6...); it is not this control.
+  # Current LF Work markers accept one key only, so content_id is not a YAML marker field.
+  # Before dispatch, verify the target registry resolves the required content; do not
+  # silently run this comparison on the older record or publish a synthetic substitute.
+  model_version: 2                                     # Existing generation exposing pooling alternatives.
+  subset: "full"                                       # Use the complete reduced training population.
+  initialization_profile: "baseline"                   # Reviewed initialization, unchanged across families.
+  optimization_profile: "baseline"                     # Reviewed optimization, unchanged across families.
+  hidden_dim: 128                                      # Shared atom/surface latent width.
+  embedding_dim: 32                                    # Element embedding width.
+  residue_embedding_dim: 64                            # Residue embedding width.
+  atomic_layers: 2                                     # Atomic propagation depth.
+  projection_depth: 3                                  # Atom-to-surface MLP depth.
+  surface_layers: 4                                    # DiffusionNet depth.
+  atom_spatial_k: 8                                    # Active spatial atom neighbors.
+  surface_atom_k: 16                                   # Nearest transfer atoms per point.
+  diffusion_spectral_modes: 32                         # Retained surface spectral modes.
+  surface_atom_radius: 4                               # Transfer cutoff in angstroms.
+  dropout: 0.2                                         # Training dropout probability.
+  learning_rate: 0.001                                 # AdamW learning rate.
+  weight_decay: 0.0005                                 # AdamW decoupled decay.
+  gate_lambda: 0.04                                    # Expected L0 semantic-gate penalty.
+  weak_loss_profile: "baseline"                        # Protein BCE only; no local-GT training.
+  architecture_spike: "baseline"                       # Do not change the backbone.
+  pooling_area_mode: "point"                           # Point MAX control; LSE and Attention select area measure below.
+  head_type: "single"                                  # One surface-to-protein head.
+  batch_size: 16                                       # Proteins per update.
+  epochs: 500                                          # Epoch ceiling; validation patience may stop earlier.
+  patience: 30                                         # Stop after 30 non-improving validation epochs.
+  minimum_delta: 0.001                                 # Minimum validation-utility improvement.
+  precision: "auto"                                    # Use supported mixed precision.
+  surface_metrics: true                                # Evaluation-only local ground truth.
+  surface_metrics_interval: 1                          # Record local metrics each validation epoch.
+  visualization:                                    # Presentation only; generated once at this Run's best checkpoint.
+    mode: none                                      # none disables all viewers; report embeds HTML without duplicate files.
+    content: predictions                            # Probability, original logits and soft/hard GT only; full adds structural layers.
+    maximum_points: 2000                            # Deterministic display-only sample; metrics retain every point.
+    maximum_proteins: 4                             # Balanced proteins per evaluated split; zero displays all.
+    report_budget_mib: 4.0                          # Maximum embedded document size, not evaluation coverage.
+    # identifiers: [1ABC_A]                         # Optional exact evaluated IDs instead of automatic balanced sampling.
+
+  # Visualization defaults: mode=none (none/report/viewer/full), content=predictions
+  # (predictions/full), maximum_points=2000 (>0), maximum_proteins=12 (>=0),
+  # report_budget_mib=4.0 in (0,16], identifiers=(), threshold=0.5 in [0,1],
+  # embed_report=true. report writes embedded pages only; viewer adds HTML/PLY;
+  # full additionally saves prediction NPZ. none overrides embed_report completely.
+  # This is per completed Run, not per epoch or a post-Study best-seed callback.
+  # LF has a 64 MiB combined report limit: keep mode=none for large sweeps/HPO.
+  faithfulness_audit: false                            # Vertex deletion changes refiner operators; the audit is unavailable.
+  evaluate_test: false                                 # Keep held-out test sealed.
+  data_workers: 4                                      # Persistent NPZ-decoding workers per Run.
+
+# Training defaults differ from this reviewed ledger; see Training.run and README section 5.3.
+# Pooling defaults: type=max, area=legacy, attention width=32/variant=simple, topk=0.05,
+# regional length=2.5 angstroms/mode=fixed/init=1.5, LSE beta=5/mode=fixed/init=5,
+# AutoPool alpha=1/mode=fixed/init=1, GeM power=1/mode=fixed/init=4,
+# MAX-MEAN weight=0.5/mode=fixed/init=0.5. Curriculum end=null, hold=0.30.
+# Lengths/beta/powers are positive (regional zero is identity); fractions/weights are in
+# (0,1] / [0,1], alpha is non-negative. Learned bounds are documented in README 5.3.
+# An inactive child is absent from the Trial; its Python default is not an active factor.
+
+
+seeds: [4, 7, 32, 54]  # Four mandatory paired Runs per candidate; no seed racing.
+
+# V5a/V5b decision: retain fixed area LSE beta=0.25; learned beta reduced mean G/S.
+# Attention simple/256/area is the balanced V5a representative; V5b did not rerun it.
+# MAX is the extreme-evidence control. No extra poolers or pooling HPO in this campaign.
+# This is a first characterization of eight mechanisms, not exhaustive refiner tuning.
+# Each mechanism has one predeclared setting except fixed heat's three physical scales.
+# A positive result motivates a separate focused parameter study, not an implicit winner.
+
+sweep:  # Native complete Cartesian crossing with conditional child parameters.
+  space:  # Pooler choices and independent refiner choices; inactive children are absent.
+    pooling_type:  # Three distinct MIL philosophies, not redundant regional MAX.
+      values: [max, log_sum_exp, attention]  # Exactly three evidence-selected poolers.
+    pooling_area_mode:  # Represented-area measure for the two non-MAX candidates.
+      values: [area]  # One measure, not another search factor.
+      when: {pooling_type: {in: [log_sum_exp, attention]}}  # MAX uses the fixed point control.
+    log_sum_exp_mode:  # Frozen characterized temperature, not a second learned scalar.
+      values: [fixed]  # Learn the refiner without reopening pooling HPO.
+      when: {pooling_type: log_sum_exp}  # LSE only.
+    log_sum_exp_beta:  # Frozen V5a representative after the paired V5b comparison.
+      values: [0.25]  # Fixed beta retained because V5b did not improve mean G/S.
+      when: {pooling_type: log_sum_exp}  # No beta on MAX/Attention.
+    attention_variant:  # Frozen V5a representative after the paired V5b comparison.
+      values: [simple]  # Existing embedding-derived tanh attention scorer.
+      when: {pooling_type: attention}  # Refine values, never attention weights.
+    attention_hidden_dim:  # Frozen V5a representative after the paired V5b comparison.
+      values: [256]  # Balanced V5a simple-attention scorer width; no width search.
+      when: {pooling_type: attention}  # No width sweep.
+    surface_refiner_type:  # Independent operator between local head and pooling.
+      values: [none, heat, learned_heat, geometric_anisotropic, embedding_anisotropic, learned_anisotropic, graph_tv, crf]  # Eight mandatory mechanisms.
+    surface_refiner_heat_length:  # Fixed physical heat length.
+      values: [1.5, 3.0, 6.0]  # Angstroms; zero identity is covered by none.
+      when: {surface_refiner_type: heat}  # Fixed heat only.
+    surface_refiner_heat_length_init:  # Initial length subsequently learned by protein BCE.
+      values: [3.0]  # One interior start in (0.05,12) angstroms; no initialization search.
+      when: {surface_refiner_type: learned_heat}  # One global scale, not per-point scales.
+    surface_refiner_strength:  # Fixed convex neighbor-mean mixing coefficient.
+      values: [0.5]  # Common convex strength; characterize mechanisms before tuning.
+      when: {surface_refiner_type: {in: [geometric_anisotropic, embedding_anisotropic]}}  # Other operators use their own controls.
+    surface_refiner_steps:  # Two conservative residual updates.
+      values: [2]  # A fixed count, not an additional sweep.
+      when: {surface_refiner_type: {in: [geometric_anisotropic, embedding_anisotropic, learned_anisotropic]}}  # Local residual refiners only.
+    surface_refiner_embedding_temperature:  # Cosine-distance conductance scale.
+      values: [0.5]  # Fixed positive bandwidth.
+      when: {surface_refiner_type: embedding_anisotropic}  # Embedding guides only.
+    surface_refiner_embedding_detach:  # Detach guide construction, never raw logits.
+      values: [true]  # Backbone still receives gradients through the local head.
+      when: {surface_refiner_type: embedding_anisotropic}  # Learned scorer remains fully differentiable.
+    surface_refiner_learned_hidden_dim:  # Tiny shared symmetric edge scorer.
+      values: [32]  # Eight projected point channels and a 32-wide pair MLP.
+      when: {surface_refiner_type: learned_anisotropic}  # One learned conductance configuration.
+    surface_refiner_tv_lambda:  # Coefficient of area-weighted smoothed graph TV.
+      values: [0.05]  # One predeclared denoising strength, not an auxiliary loss.
+      when: {surface_refiner_type: graph_tv}  # Unrolled forward solver only.
+    surface_refiner_tv_steps:  # Fixed truncated descent count.
+      values: [5]  # Not a converged variational solve.
+      when: {surface_refiner_type: graph_tv}  # TV only.
+    surface_refiner_tv_step_size:  # Fraction of the conservative diagonal step.
+      values: [0.5]  # Stable relaxation; permitted domain (0,1].
+      when: {surface_refiner_type: graph_tv}  # TV only.
+    surface_refiner_tv_epsilon:  # Smooth absolute-value approximation in logit units.
+      values: [0.1]  # Positive epsilon bounds the descent curvature.
+      when: {surface_refiner_type: graph_tv}  # TV only.
+    surface_refiner_crf_strength:  # Attractive binary Potts coefficient.
+      values: [0.5]  # One predeclared attractive strength; not a pairwise search.
+      when: {surface_refiner_type: crf}  # Sparse mean-field only, not DenseCRF.
+    surface_refiner_crf_steps:  # Fixed truncated mean-field count.
+      values: [5]  # No convergence claim.
+      when: {surface_refiner_type: crf}  # CRF only.
+    surface_refiner_crf_damping:  # Fraction of new mean-field probability each update.
+      values: [0.5]  # Equal old/new mixing for stability.
+      when: {surface_refiner_type: crf}  # CRF only.
+
+# Refiner run defaults (these are not extra factors in the Trial):
+# surface_refiner_type="none": Evidence operator: none, heat, learned_heat, geometric_anisotropic, embedding_anisotropic, learned_anisotropic, graph_tv or crf.
+# surface_refiner_heat_length=3.0: Fixed heat length in Å; zero is exact identity.
+# surface_refiner_heat_length_init=3.0: Learned heat initial length strictly inside (0.05,12) Å.
+# surface_refiner_strength=0.5: Anisotropic convex mixing fraction in [0,1].
+# surface_refiner_steps=2: Nonnegative anisotropic update count.
+# surface_refiner_geometry_sigma=2.0: Positive spatial conductance bandwidth in Å.
+# surface_refiner_normal_sigma=0.25: Positive dimensionless normal-misalignment bandwidth.
+# surface_refiner_curvature_sigma=1.0: Positive signed-log curvature conductance bandwidth.
+# surface_refiner_embedding_temperature=0.5: Positive cosine-distance bandwidth.
+# surface_refiner_embedding_detach=True: Detach only embedding guides, not the logit/backbone gradient path.
+# surface_refiner_learned_hidden_dim=32: Positive hidden width of the small learned symmetric edge scorer.
+# surface_refiner_tv_lambda=0.05: Nonnegative coefficient of smoothed graph TV.
+# surface_refiner_tv_steps=5: Nonnegative unrolled TV descent count.
+# surface_refiner_tv_step_size=0.5: Relaxation in (0,1] of the stabilized diagonal descent step.
+# surface_refiner_tv_epsilon=0.1: Positive smoothed-absolute-value scale in logit units.
+# surface_refiner_crf_strength=0.5: Nonnegative attractive Potts coefficient.
+# surface_refiner_crf_steps=5: Nonnegative mean-field iteration count.
+# surface_refiner_crf_damping=0.5: New-proposal fraction in (0,1].
+# learned_anisotropic uses the default strength=0.5; geometry sigmas stay at their defaults.
+# TV/CRF use fixed geometric weights with sigma_x=2 Å, sigma_n=0.25, sigma_k=1.
+# none=1, heat=3, learned_heat=1, geometric=1, embedding=1, learned_anisotropic=1,
+# graph_tv=1, crf=1: 10 refiner configurations x 3 poolers = 30 candidates.
+# 30 candidates x four complete seeds = 120 required Runs. No test or GT backward.
+# The 12 identity-control Runs are intentional: they share this code/refiner boundary,
+# disabled faithfulness audit, scheduling context and evaluation contract with V5c.
+# Reusing historical controls alone would confound mechanism and campaign changes.
+# Compare every active refiner against its own same-seed, same-pooler none control.
+# Raw/refined local metrics describe a single trained model; they do not replace controls.
+# Keep all four paired seeds per candidate; reduced settings are not seed racing.
+# Native sweep defaults have no adaptive racing/pruning; each child when refers to its parent.
+# No viewers during the sweep: use experiments/v5/visualization/wisdom_v5c.yaml afterwards.
+
+objective:  # Unchanged development utility, never held-out test performance.
+  metric: val_wisdom_hpo_score  # Existing protein/surface/coupling utility.
+  mode: max  # Larger utility is better.
+  range: [0.0, 1.0]  # Known bounded scale.
+  practical_margin: 0.015  # Smaller differences are practically negligible.
+
+# Objective requires metric; mode defaults to max; range/practical_margin are optional.
+# Keep the existing utility and 0.015 margin; analysis never changes selection/pruning.
+
+resources:  # One enclosing allocation for this complete Study, not one per family.
+  gpu: 2  # Same enclosing accelerator allocation as V5b.
+  cpu: 36  # Shared host decoding/orchestration budget.
+  memory: 96GiB  # Shared host-memory ceiling.
+  time: 168h  # Scheduler wall-time ceiling for the enclosing allocation.
+
+# Resource defaults: cpu=1, gpu=0, processes=1; memory/gpu_memory/storage=0, time=null.
+# Counts are non-negative (cpu/processes >= 1, processes <= cpu); time must be positive. GPU packing is native
+# automatic planning; no runs_per_gpu, max_parallel, or hard-coded VRAM reservations.
+
+execution:  # Explicit logical budget, independently of the scheduler's allocation ceiling.
+  max_time: 168h  # Stop dispatching new Runs after seven days; coverage may be incomplete.
+
+# Execution defaults: max_time/max_runs/max_parallel/runs_per_gpu=null, failure_retries=1.
+# A time budget does not grant extra scheduler time or guarantee full sweep completion.
+# Omit max_time for an unbounded logical budget; resources.time still limits the allocation.
+

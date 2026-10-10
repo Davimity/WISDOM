@@ -5,16 +5,19 @@ import lambdaforge as lf
 from typing import Any
 from pathlib import Path
 from collections.abc import Sequence
-from wisdom.preprocessing.dna.selection.audit import audit_dataset
+from wisdom.preprocessing.common.audit import audit_dataset
+from wisdom.preprocessing.common.splits import assign_splits
 from wisdom.preprocessing.dna.selection.report import write_design
-from wisdom.preprocessing.dna.selection.splits import assign_splits
+from wisdom.preprocessing.common.dilutions import create_dilutions
+from wisdom.preprocessing.common.shortcut import shortcut_baseline
+from wisdom.preprocessing.common.population import select_population
 from wisdom.preprocessing.dna.selection.evidence import load_evidence
-from wisdom.preprocessing.dna.selection.dilutions import create_dilutions
-from wisdom.preprocessing.dna.selection.population import select_population
+from wisdom.preprocessing.common.leakage import assign_leakage_groups
+from wisdom.preprocessing.common.similarity import compute_similarity
+from wisdom.preprocessing.common.snapshots import snapshot_structures
 from wisdom.preprocessing.dna.selection.phenotypes import assign_phenotypes
-from wisdom.preprocessing.dna.selection.leakage import assign_leakage_groups
-from wisdom.preprocessing.dna.selection.similarity import compute_similarity
-from wisdom.preprocessing.dna.selection.structures import analyse_structures, snapshot_structures
+from wisdom.preprocessing.dna.selection.structures import analyse_structures
+from wisdom.preprocessing.common.functional_metadata import annotate_functions
 
 
 class Selection(lf.Work):
@@ -73,6 +76,8 @@ class Selection(lf.Work):
 
         mmseqs_executable           : str               = "mmseqs",
         foldseek_executable         : str               = "foldseek",
+        functional_metadata: Path | None = None,
+        evaluate_shortcuts: bool = False,
         verbose                     : bool              = False,
     ) -> dict[str, Any]:
         """Execute the complete selection as ten explicit scientific stages.
@@ -113,6 +118,8 @@ class Selection(lf.Work):
             seed: Reproducible tie-breaking seed.
             mmseqs_executable: MMseqs2 binary name or path.
             foldseek_executable: Foldseek binary name or path.
+            functional_metadata: Optional frozen sequence-bound functional JSONL, audit only.
+            evaluate_shortcuts: Fit a train-only covariate baseline; default false.
             verbose: Log every evidence/PDB item instead of periodic summaries.
 
         Returns:
@@ -298,12 +305,16 @@ class Selection(lf.Work):
         #   choices over dependency groups, phenotypes, and evidence sources.
         # ================================================================================
 
+        if functional_metadata is not None:
+            rows = annotate_functions(rows, functional_metadata)
+
         selected, selection_audit = select_population(
             rows,
             positive_negative_ratio = positive_negative_ratio,
             keep_all_negatives       = keep_all_negatives,
             retain_core_positives    = retain_core_positives,
             seed                     = seed,
+            preferred_origin_prefix  = "btd_core",
         )
 
         # ================================================================================
@@ -362,6 +373,8 @@ class Selection(lf.Work):
         # ================================================================================
 
         audit = audit_dataset(rows, selected, dilutions)
+        if evaluate_shortcuts:
+            audit["shortcut_baseline"] = shortcut_baseline(selected, seed)
 
         # ================================================================================
         # 10. Publish one complete and portable design artifact.

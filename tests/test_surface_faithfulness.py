@@ -34,7 +34,7 @@ def test_surface_faithfulness_reports_equal_area_controls_without_ground_truth()
     output = {
         "logits":             torch.tensor([5.0, 4.0]),
         "surface_logits":     logits,
-        "surface_embeddings": torch.zeros(10, 4),
+        "surface_evidence_features": torch.zeros(10, 4),
     }
     batch = {
         "surface_area_weights": torch.ones(10),
@@ -56,7 +56,7 @@ def test_surface_faithfulness_marks_regional_deletion_unavailable(family: str) -
     output = {
         "logits":             torch.tensor([1.0, -1.0]),
         "surface_logits":     torch.tensor([1.0, -1.0]),
-        "surface_embeddings": torch.zeros(2, 4),
+        "surface_evidence_features": torch.zeros(2, 4),
     }
     batch = {
         "surface_area_weights": torch.ones(2),
@@ -77,7 +77,7 @@ def test_surface_faithfulness_recomputes_attention_after_bfloat16_forward(varian
     output = {
         "logits":             torch.tensor([2.0], dtype=torch.bfloat16),
         "surface_logits":     torch.tensor([2.0, 1.0, 0.0, -1.0], dtype=torch.bfloat16),
-        "surface_embeddings": torch.zeros(4, 4, dtype=torch.bfloat16),
+        "surface_evidence_features": torch.zeros(4, 4, dtype=torch.bfloat16),
     }
     batch = {
         "surface_area_weights": torch.ones(4, dtype=torch.bfloat16),

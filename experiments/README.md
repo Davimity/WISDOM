@@ -2,25 +2,35 @@
 
 ## Optional task and surface-representation controls
 
-`zinc_discovery.yaml` freezes public structural candidates only after a researcher supplies
-sequence-bound explicit negative evidence. `zinc_preprocess.yaml` then selects leakage-safe
-membership and publishes universal geometry plus Zn evaluation sidecars. `validate_zinc.yaml`
+`preprocess/zinc/zinc_preprocess.yaml` runs acquire/select → preprocess → visualize without requiring
+a negative-evidence file. QuickGO experimental NOT annotations and exact UniProt/PDB sequence mappings
+provide conservative negatives; a reviewed JSONL may override acquisition. Sparse evidence can still
+prevent both-class independent splits; no ligand-absence fallback exists. It publishes a frozen
+portable design, universal geometry, Zn
+evaluation sidecars and an offline gallery. Selection's `skip`/`existing_design` reuses the exact
+saved decision without downloads or clustering. `preprocess/zinc/zinc_discovery.yaml` remains an
+optional acquisition-only action; its raw evidence can replace fresh acquisition through `raw_path`.
+`preprocess/zinc/validate_zinc.yaml`
 independently audits the published scientific contract. No Zn DatasetVersion is bundled or claimed
 to have been validated experimentally. See both public README versions, section 3.7, for evidence
 requirements, thresholds and limitations.
 
-`surface_features.yaml` adds optional fixed protein-only fields and pooled-train normalization to
+`preprocess/common/surface_features.yaml` adds optional fixed protein-only fields and per-training-view normalization to
 an existing DatasetVersion, without replacing geometry or task annotations.
-`surface_representation_ablation.yaml` compares five configurations: learned control, and explicit
+`ablations/surface_representation/surface_representation_ablation.yaml` compares five configurations: learned control, and explicit
 or late-hybrid evidence with generic_minimal or generic_basic fields, using four paired seeds.
-The attention pooler, backbone configuration, protein-only objective and sealed-test policy remain
+The logit-only MAX pooler, backbone configuration, protein-only objective and sealed-test policy remain
 fixed. Publish the feature-augmented DatasetVersion first; neither missing inputs nor missing
 Registry versions are replaced with fake scientific data. See README sections 4.10 and 5.11.
+The secondary `ablations/surface_representation/attention.yaml` repeats the alternatives with
+Attention, whose scorer parameter count changes with H/X/Z width; it is not the primary control.
+The corrected field release is `wisdom-dna-features@2`; older field sidecars retain their historical
+meaning. DNA preparation proposes version 7, while existing training ledgers remain on reduced @6.
 
 These actions are independent of the ordered architectural campaign below. They do not renumber
 its stages or imply that the historical Zn dataset is a valid transfer benchmark.
 
-Post-hoc inference-only reviews live separately in [visualization/](visualization/README.md).
+Post-hoc inference-only reviews live separately in [reviews/](reviews/README.md).
 They consume registered LF Studies or durable ModelSets, not training orchestration steps.
 No automatic winner product is declared for baseline diagnostics.
 
@@ -31,7 +41,7 @@ This directory distinguishes two different meanings that must never be conflated
 - a **scientific version** is a later, coherent model generation that answers a new biological or
   methodological question.
 
-Files use short ordered names (`wisdom_v1a.yaml`, `wisdom_v1b.yaml`, ..., `wisdom_v10.yaml`) so the
+Files use short ordered names (`v1/wisdom_v1a.yaml`, `v1/wisdom_v1b.yaml`, ..., `v10/wisdom_v10.yaml`) so the
 campaign is easy to scan. Here `v6a`, for example, is only an experiment-order label. The
 `model_version` argument is a separate internal code-capability selector, and neither label claims
 that a formal scientific WISDOM generation has already been validated.
@@ -40,23 +50,23 @@ that a formal scientific WISDOM generation has already been validated.
 
 | Order | File | Scientific question | Prerequisites | What varies | Decision metric | Next experiment |
 |---:|---|---|---|---|---|---|
-| 1a | `wisdom_v1a.yaml` | How variable and failure-prone is the untouched baseline? | Dataset registered | Complete run seed | Distribution of `val_wisdom_hpo_score` plus collapse diagnostics | 1b |
-| 1b | `wisdom_v1b.yaml` | How much variance comes from training randomness with identical initial weights? | Relevant variance in 1a | Training RNG only | Variance decomposition; no winner | 1c |
-| 1c | `wisdom_v1c.yaml` | How much variance comes from initial weights with fixed training randomness? | Same baseline as 1b | Initialization RNG only | Complementary variance control; no winner | 2 |
-| 2 | `wisdom_v2.yaml` | Which initialization policy is stable on the unchanged backbone? | 1a–1b reviewed | `initialization_profile` | `val_wisdom_hpo_score`, collapse rate, diagnostics | 3 |
-| 3 | `wisdom_v3.yaml` | Which optimizer stabilization complements the selected initialization? | Initialization winner | `optimization_profile` | `val_wisdom_hpo_score`, stability, runtime | 4 |
-| 4 | `wisdom_v4.yaml` | Which width, depth, topology, and regularization define the strongest fixed-MAX core? | Initialization and optimizer winners copied into `with` | Core model and AdamW hyperparameters | `val_wisdom_hpo_score` | 5 |
-| 5a | `wisdom_v5a.yaml` | How do fixed pooling families behave across their parameter curves? | Existing V5 ledger frozen exactly | Family, point/area measure, applicable fixed parameter | G, S, coupling, regret, seed stability, faithfulness, cost | 5b |
-| 5b | `wisdom_v5b.yaml` | Does scalar adaptation improve the selected fixed family reference? | Same frozen ledger and four paired seeds as 5a | Five learned scalars, one selected start/measure each | Same metrics plus parameter trajectories | 5c |
-| 5c | `wisdom_v5c.yaml` | Does spatial coherence of evidence before pooling improve localization/classification? | Same frozen V5 ledger; pooling choices currently provisional | Eight refiner types crossed with MAX/LSE/Attention; 54 candidates × 4 seeds = 216 Runs | Refined S, G, raw S/gain, negative controls, ranking, coupling and cost; not W alone | Post-hoc review before adapting 6a |
-| 6a | `wisdom_v6a.yaml` | Do curated negatives provide useful weak local supervision? | Pooling winner copied into `with` | `negative_surface_lambda` | `val_wisdom_hpo_score` and surface diagnostics | 6b only if useful, otherwise 7 |
-| 6b/6b2/6b3 | `wisdom_v6b.yaml`, `wisdom_v6b2.yaml`, `wisdom_v6b3.yaml` | Does existence, regional existence, or ranking add signal over 6a? | Credible 6a signal | One additional loss family per independent Study, respectively | `val_wisdom_hpo_score` | 6c only if a diagnosed failure remains, otherwise 7 |
-| 6c/6c2/6c3 | `wisdom_v6c.yaml`, `wisdom_v6c2.yaml`, `wisdom_v6c3.yaml` | Does an identified map pathology justify cardinality, TV, or Dirichlet regularization? | Reviewed 6a/6b winner and explicit failure mode | One regularizer per independent Study, respectively | `val_wisdom_hpo_score` plus pathology-specific diagnostics | 6d if three families are credible; otherwise 7 |
-| 6d | `wisdom_v6d.yaml` | Do the selected negative, regional, and regularization terms cooperate? | One credible family from each of 6a–6c | Three contribution weights jointly | `val_wisdom_hpo_score`, then fresh-seed confirmation | 7 |
-| 7 | `wisdom_v7.yaml` | Which global/local head relationship is accurate and faithful? | Selected weak-loss policy copied into `with` | `head_type` | `val_wisdom_hpo_score` and faithfulness | 8 |
-| 8 | `wisdom_v8.yaml` | Does one isolated architectural spike beat its proper control? | Head winner copied into `with` | `architecture_spike` | `val_wisdom_hpo_score`, faithfulness, compute | 9 |
-| 9 | `wisdom_v9.yaml` | What small numerical retune best fits the selected final architecture? | Complete winner ledger from 2–8 | Four sensitive continuous parameters | `val_wisdom_hpo_score` | 10 |
-| 10 | `wisdom_v10.yaml` | Does the frozen V1 result replicate on fresh seeds and held-out test data? | Final ledger from 9 | Fresh complete run seed | Uncensored metric distribution and one test evaluation per seed | Freeze V1 or return to the diagnosed experiment |
+| 1a | `v1/wisdom_v1a.yaml` | How variable and failure-prone is the untouched baseline? | Dataset registered | Complete run seed | Distribution of `val_wisdom_hpo_score` plus collapse diagnostics | 1b |
+| 1b | `v1/wisdom_v1b.yaml` | How much variance comes from training randomness with identical initial weights? | Relevant variance in 1a | Training RNG only | Variance decomposition; no winner | 1c |
+| 1c | `v1/wisdom_v1c.yaml` | How much variance comes from initial weights with fixed training randomness? | Same baseline as 1b | Initialization RNG only | Complementary variance control; no winner | 2 |
+| 2 | `v2/wisdom_v2.yaml` | Which initialization policy is stable on the unchanged backbone? | 1a–1b reviewed | `initialization_profile` | `val_wisdom_hpo_score`, collapse rate, diagnostics | 3 |
+| 3 | `v3/wisdom_v3.yaml` | Which optimizer stabilization complements the selected initialization? | Initialization winner | `optimization_profile` | `val_wisdom_hpo_score`, stability, runtime | 4 |
+| 4 | `v4/wisdom_v4.yaml` | Which width, depth, topology, and regularization define the strongest fixed-MAX core? | Initialization and optimizer winners copied into `with` | Core model and AdamW hyperparameters | `val_wisdom_hpo_score` | 5 |
+| 5a | `v5/wisdom_v5a.yaml` | How do fixed pooling families behave across their parameter curves? | Existing V5 ledger frozen exactly | Family, point/area measure, applicable fixed parameter | G, S, coupling, regret, seed stability, faithfulness, cost | 5b |
+| 5b | `v5/wisdom_v5b.yaml` | Does scalar adaptation improve the selected fixed family reference? | Same frozen ledger and four paired seeds as 5a | Five learned scalars, one selected start/measure each | Same metrics plus parameter trajectories | 5c |
+| 5c | `v5/wisdom_v5c.yaml` | Does spatial coherence of evidence before pooling improve localization/classification? | Same frozen V5 ledger; pooling choices currently provisional | Eight refiner types crossed with MAX/LSE/Attention; 54 candidates × 4 seeds = 216 Runs | Refined S, G, raw S/gain, negative controls, ranking, coupling and cost; not W alone | Post-hoc review before adapting 6a |
+| 6a | `v6/wisdom_v6a.yaml` | Do curated negatives provide useful weak local supervision? | Pooling winner copied into `with` | `negative_surface_lambda` | `val_wisdom_hpo_score` and surface diagnostics | 6b only if useful, otherwise 7 |
+| 6b/6b2/6b3 | `v6/wisdom_v6b.yaml`, `v6/wisdom_v6b2.yaml`, `v6/wisdom_v6b3.yaml` | Does existence, regional existence, or ranking add signal over 6a? | Credible 6a signal | One additional loss family per independent Study, respectively | `val_wisdom_hpo_score` | 6c only if a diagnosed failure remains, otherwise 7 |
+| 6c/6c2/6c3 | `v6/wisdom_v6c.yaml`, `v6/wisdom_v6c2.yaml`, `v6/wisdom_v6c3.yaml` | Does an identified map pathology justify cardinality, TV, or Dirichlet regularization? | Reviewed 6a/6b winner and explicit failure mode | One regularizer per independent Study, respectively | `val_wisdom_hpo_score` plus pathology-specific diagnostics | 6d if three families are credible; otherwise 7 |
+| 6d | `v6/wisdom_v6d.yaml` | Do the selected negative, regional, and regularization terms cooperate? | One credible family from each of 6a–6c | Three contribution weights jointly | `val_wisdom_hpo_score`, then fresh-seed confirmation | 7 |
+| 7 | `v7/wisdom_v7.yaml` | Which global/local head relationship is accurate and faithful? | Selected weak-loss policy copied into `with` | `head_type` | `val_wisdom_hpo_score` and faithfulness | 8 |
+| 8 | `v8/wisdom_v8.yaml` | Does one isolated architectural spike beat its proper control? | Head winner copied into `with` | `architecture_spike` | `val_wisdom_hpo_score`, faithfulness, compute | 9 |
+| 9 | `v9/wisdom_v9.yaml` | What small numerical retune best fits the selected final architecture? | Complete winner ledger from 2–8 | Four sensitive continuous parameters | `val_wisdom_hpo_score` | 10 |
+| 10 | `v10/wisdom_v10.yaml` | Does the frozen V1 result replicate on fresh seeds and held-out test data? | Final ledger from 9 | Fresh complete run seed | Uncensored metric distribution and one test evaluation per seed | Freeze V1 or return to the diagnosed experiment |
 
 Run experiments in this order, but do not run a conditional experiment merely because its YAML exists. Each
 file begins with `OBJECTIVE`, `PREREQUISITES`, `VARIES`, `FIXED`, and `DECISION`. Values marked
@@ -95,7 +105,7 @@ variance estimate, so it also has no `search` section.
   requires useful V6a signal; V6c requires a diagnosed remaining map pathology; V6d runs only when
   one credible term from each family should be tested jointly.
 - **Confirmation:** V10 is not HPO. It freezes the ledger, uses fresh seeds, and opens test.
-- **Post-hoc analysis:** `interpretability_sparse_concepts.yaml` analyzes one explicit frozen
+- **Post-hoc analysis:** `interpretability/interpretability_sparse_concepts.yaml` analyzes one explicit frozen
   checkpoint. It is not a scientific WISDOM version and must not influence V1 selection.
 
 The campaign omits `name`, `execution.max_parallel`, `execution.runs_per_gpu`,
@@ -246,13 +256,13 @@ formal V5 has been run.
 Validate an individual stage before submission:
 
 ```bash
-lf validate experiments/wisdom_v4.yaml
-lf explain experiments/wisdom_v4.yaml
-lf run experiments/wisdom_v4.yaml --dry-run
+lf validate experiments/v4/wisdom_v4.yaml
+lf explain experiments/v4/wisdom_v4.yaml
+lf run experiments/v4/wisdom_v4.yaml --dry-run
 ```
 
 The dataset selector must resolve on the target cluster. The interpretability YAML additionally
 requires a real reviewed `best-model.pt`; never create a placeholder checkpoint for an actual run.
-Use `lf config resolve experiments/wisdom_v4.yaml` to inspect the exact automatic policies before
+Use `lf config resolve experiments/v4/wisdom_v4.yaml` to inspect the exact automatic policies before
 submission; omitted execution ceilings mean that ARI derives safe concurrency from allocated
 CPUs, GPUs, live GPU memory, and measured Run envelopes.

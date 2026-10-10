@@ -1,7 +1,6 @@
 """Trainable scalar whose physical value remains inside an interpretable interval."""
 
 import math
-
 import torch
 
 from torch import Tensor, nn

@@ -1,11 +1,9 @@
 """WISDOM v3 surface-encoder study with gated inputs and a fixed v2 pooling."""
 
 from typing import Any
-from collections.abc import Mapping, Sequence
-
 from torch import Tensor
-
 from wisdom.models.WisdomV2 import WisdomV2
+from collections.abc import Mapping, Sequence
 from wisdom.models.SurfaceEncoderType import SurfaceEncoderType
 from wisdom.models.PTV3SurfaceEncoder import PTV3SurfaceEncoder
 from wisdom.models.DMASIFSurfaceEncoder import DMASIFSurfaceEncoder

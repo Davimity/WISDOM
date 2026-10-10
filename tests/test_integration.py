@@ -13,13 +13,13 @@ import pytest
 import torch
 
 from wisdom.evaluation.SurfacePredictionReport import SurfacePredictionReport
-from wisdom.preprocessing.structure.DatasetValidator import DatasetValidator
-from wisdom.preprocessing.structure.PreprocessConfig import PreprocessConfig
-from wisdom.preprocessing.structure.ProteinArchive import ProteinArchive
-from wisdom.preprocessing.structure.ProteinPreprocessor import ProteinPreprocessor
-from wisdom.preprocessing.structure.ProteinSink import ProteinSink
-from wisdom.preprocessing.structure.ProteinSource import ProteinSource
-from wisdom.preprocessing.structure.ProteinVisualizer import ProteinVisualizer
+from wisdom.preprocessing.common.structure.DatasetValidator import DatasetValidator
+from wisdom.preprocessing.common.structure.PreprocessConfig import PreprocessConfig
+from wisdom.preprocessing.common.structure.ProteinArchive import ProteinArchive
+from wisdom.preprocessing.common.structure.ProteinPreprocessor import ProteinPreprocessor
+from wisdom.preprocessing.common.structure.ProteinSink import ProteinSink
+from wisdom.preprocessing.common.structure.ProteinSource import ProteinSource
+from wisdom.preprocessing.common.structure.ProteinVisualizer import ProteinVisualizer
 
 
 def _run(

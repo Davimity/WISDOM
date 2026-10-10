@@ -19,8 +19,8 @@ from wisdom.preprocessing.zinc.ZincAnnotation import ZincAnnotation
 from wisdom.utils.structure.ProteinStructure import ProteinStructure
 from wisdom.features.SurfaceFeatureSidecar import SurfaceFeatureSidecar
 from wisdom.preprocessing.zinc.ZincCoordination import ZincCoordination
-from wisdom.preprocessing.structure.ProteinArchive import ProteinArchive
-from wisdom.preprocessing.structure.PreprocessConfig import PreprocessConfig
+from wisdom.preprocessing.common.structure.ProteinArchive import ProteinArchive
+from wisdom.preprocessing.common.structure.PreprocessConfig import PreprocessConfig
 
 
 class ZincValidation(lf.Work):
@@ -93,6 +93,7 @@ class ZincValidation(lf.Work):
         views: dict[str, set[str]] = defaultdict(set)
         train_groups: dict[str, set[str]] = defaultdict(set)
         train_sources: dict[str, str] = {}
+        normalization_populations: dict[str, dict[str, str]] = {"full": train_sources}
         verified_rows: list[dict[str, Any]] = []
         local_support: list[dict[str, Any]] = []
         if any(member["metadata"].get("optional_surface_feature_assets") for member in members):
@@ -103,6 +104,10 @@ class ZincValidation(lf.Work):
 
                     with suppress(OSError):
                         train_sources[member["id"]] = hashlib.sha256(base.read_bytes()).hexdigest()
+                        for view in member["metadata"].get("dilutions", ()):
+                            normalization_populations.setdefault(str(view), {})[member["id"]] = (
+                                train_sources[member["id"]]
+                            )
         for member in members:
             try:
                 if member["id"] in identities:
@@ -155,11 +160,8 @@ class ZincValidation(lf.Work):
                     feature_names.extend(names)
                 if feature_names:
                     statistics = json.loads(paths["surface_feature_statistics"].read_text())
-                    fitted = {item["id"]: item["base_npz_sha256"] for item in statistics["sources"]}
-                    if fitted != train_sources or len(fitted) != len(statistics["sources"]):
-                        raise ValueError("normalization includes non-train or changed geometry")
-                    SurfaceFeatureSidecar.normalize(np.zeros((1, len(feature_names))),
-                                                    feature_names, statistics)
+                    SurfaceFeatureSidecar.validate_statistics(
+                        statistics, feature_names, normalization_populations)
                 row = member["metadata"]["zinc_evidence"]
                 with np.load(annotation, allow_pickle=False) as sidecar:
                     encoded_metadata = str(sidecar["annotation_metadata_json"].item())
@@ -198,7 +200,7 @@ class ZincValidation(lf.Work):
                 sites = ZincCoordination(**row["coordination_parameters"]).analyse(
                     assembly, row["protein_chain"], int(row["protein_copy"]),
                 )
-                if sites != row["sites"]:
+                if not ZincCoordination.matches(sites, row["sites"]):
                     raise ValueError("assembly coordination evidence does not reproduce")
                 if label == 0 and any(site["selected_donor_count"] for site in sites):
                     raise ValueError("negative evidence contradicts structural Zn contacts")

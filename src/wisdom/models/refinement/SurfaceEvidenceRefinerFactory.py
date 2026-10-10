@@ -2,22 +2,22 @@
 
 from typing import Any
 from collections.abc import Callable
-from wisdom.models.refinement.CRFEvidenceRefiner import CRFEvidenceRefiner
-from wisdom.models.refinement.HeatEvidenceRefiner import HeatEvidenceRefiner
-from wisdom.models.refinement.NoOpEvidenceRefiner import NoOpEvidenceRefiner
-from wisdom.models.refinement.GraphTVEvidenceRefiner import GraphTVEvidenceRefiner
-from wisdom.models.refinement.SurfaceEvidenceRefiner import SurfaceEvidenceRefiner
-from wisdom.models.refinement.LearnedHeatEvidenceRefiner import LearnedHeatEvidenceRefiner
-from wisdom.models.refinement.SurfaceEvidenceRefinerType import SurfaceEvidenceRefinerType
 from wisdom.models.refinement.LearnedAnisotropicEvidenceRefiner import (
     LearnedAnisotropicEvidenceRefiner,
 )
+from wisdom.models.refinement.CRFEvidenceRefiner import CRFEvidenceRefiner
 from wisdom.models.refinement.GeometricAnisotropicEvidenceRefiner import (
     GeometricAnisotropicEvidenceRefiner,
 )
 from wisdom.models.refinement.EmbeddingAnisotropicEvidenceRefiner import (
     EmbeddingAnisotropicEvidenceRefiner,
 )
+from wisdom.models.refinement.HeatEvidenceRefiner import HeatEvidenceRefiner
+from wisdom.models.refinement.NoOpEvidenceRefiner import NoOpEvidenceRefiner
+from wisdom.models.refinement.GraphTVEvidenceRefiner import GraphTVEvidenceRefiner
+from wisdom.models.refinement.SurfaceEvidenceRefiner import SurfaceEvidenceRefiner
+from wisdom.models.refinement.LearnedHeatEvidenceRefiner import LearnedHeatEvidenceRefiner
+from wisdom.models.refinement.SurfaceEvidenceRefinerType import SurfaceEvidenceRefinerType
 
 
 class SurfaceEvidenceRefinerFactory:

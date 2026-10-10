@@ -36,7 +36,7 @@ def write_diversity_report(
     # Sequence/structure groups measure independence, not biological families. External family
     # annotations are counted only when evidence supplies them; unknown is not a new family.
 
-    for field in ("origin", "method", "global_phenotype", "interface_phenotype",
+    for field in ("origin", "method", "global_phenotype", "local_phenotype",
                   "positive_confidence", "negative_confidence", "family", "pfam", "interpro",
                   "cath", "ec"):
         distribution: dict[str, Any] = {}
@@ -72,7 +72,10 @@ def write_diversity_report(
         if smd is not None and abs(smd) >= 0.5:
             warnings.append(f"{field}: |SMD|={abs(smd):.2f}; potential class shortcut, not proof.")
 
-    chemistry = Counter("/".join(site["selected_residue_names"])
+    chemistry = Counter(("/".join(f"{name}{count}" for name, count in
+                        sorted(site["selected_residue_counts"].items()))
+                        if "selected_residue_counts" in site else
+                        "types_only:" + "/".join(site["selected_residue_names"]))
                         for row in selected if int(row["label"]) == 1
                         for site in row["sites"] if site["accepted"])
     rare = sorted(name for name, count in chemistry.items() if count < 5)
@@ -84,6 +87,11 @@ def write_diversity_report(
               "selected_singleton_groups": sum(count == 1 for count in retained.values()),
               "coverage": coverage, "covariates": covariates,
               "site_residue_classes": dict(sorted(chemistry.items())), "warnings": warnings}
+    result["site_topology"] = dict(Counter(
+        "interchain" if site["interchain"] else "intrachain"
+        for row in selected for site in row["sites"] if site["accepted"]))
+    result["surface_evaluability"] = dict(Counter(
+        str(row.get("surface_evaluability", "historical_unavailable")) for row in selected))
     (root / "diversity.json").write_text(json.dumps(result, indent=2), encoding="utf-8")
 
     # One small figure makes imbalance visible. It is not a clustering embedding or evidence

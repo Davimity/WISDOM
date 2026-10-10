@@ -16,15 +16,13 @@ from torch import Tensor
 from copy import deepcopy
 from typing import Any, cast
 from itertools import pairwise
-from collections.abc import Mapping, Sequence
-
-from scipy.optimize import linear_sum_assignment
-
 from wisdom.models.WisdomV1 import WisdomV1
+from collections.abc import Mapping, Sequence
+from scipy.optimize import linear_sum_assignment
 from wisdom.data.WisdomDataset import WisdomDataset
 from wisdom.data.WisdomCollator import WisdomCollator
-from wisdom.Training import _create_model, _device_batch, _model_inputs
 from wisdom.interpretability.EmbeddingScaler import EmbeddingScaler
+from wisdom.Training import _create_model, _device_batch, _model_inputs
 from wisdom.interpretability.SparseConceptModel import SparseConceptModel
 
 plt.switch_backend("Agg")
@@ -448,6 +446,9 @@ class SparseConceptDiscovery(lf.Work):
         parameters = state.get("model_parameters")
         if not isinstance(parameters, Mapping):
             raise ValueError("predictor checkpoint lacks model_parameters")
+        if parameters.get("surface_representation_mode", "learned") != "learned":
+            raise ValueError("SparseConceptDiscovery currently requires learned-only surface H; "
+                             "explicit X and hybrid evidence Z are not learned concept embeddings")
         predictor_module, _ = _create_model(1, parameters)
         if not isinstance(predictor_module, WisdomV1):
             raise ValueError("checkpoint did not reconstruct a WisdomV1 predictor")

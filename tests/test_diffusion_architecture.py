@@ -12,8 +12,8 @@ from wisdom.models.DiffusionSurfaceEncoder import DiffusionSurfaceEncoder
 from wisdom.models.SurfaceAtomTransfer import SurfaceAtomTransfer
 from wisdom.models.WisdomV1 import WisdomV1
 from wisdom.models.WisdomV3 import WisdomV3
-from wisdom.preprocessing.structure.DiffusionOperatorBuilder import DiffusionOperatorBuilder
-from wisdom.preprocessing.structure.SurfaceAtomNeighborhoodBuilder import (
+from wisdom.preprocessing.common.structure.DiffusionOperatorBuilder import DiffusionOperatorBuilder
+from wisdom.preprocessing.common.structure.SurfaceAtomNeighborhoodBuilder import (
     SurfaceAtomNeighborhoodBuilder,
 )
 

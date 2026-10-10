@@ -1,0 +1,32 @@
+# Compare late evidence sources, not new encoders, losses or pooling rules.
+run: wisdom.Training.Training  # Generic typed task/field ingestion; current weak-supervision loop.
+with:  # Fixed backbone and evaluation protocol in every paired alternative.
+  dataset: {dataset: wisdom-dna-features@2}  # Publish corrected schema-2 fields first.
+  model_version: 2  # Existing pooling-capable scalar architecture.
+  subset: full  # Exact same members in each alternative.
+  pooling_type: max  # Primary logit-only control; pooling capacity is unchanged across H/X/Z.
+  architecture_spike: baseline  # No additional architecture hypothesis.
+  weak_loss_profile: baseline  # Protein BCE only; local GT never enters loss or checkpoint choice.
+  evaluate_test: false  # Paired validation screen keeps held-out test sealed.
+  surface_metrics: true  # Diagnose localization with full-resolution evaluation-only sidecars.
+  visualization: {mode: none}  # Do not duplicate protein galleries for this exploratory sweep.
+# New Training defaults: surface_representation_mode="learned" (learned/explicit/hybrid),
+# surface_features=(), surface_feature_group=null, surface_feature_exclude=(). learned requires K=0;
+# explicit/hybrid require selected K>0. Group/list expansion preserves declared order.
+# Other Training defaults are unchanged and documented in README 5.5; maximum epochs=100,
+# patience=30, minimum_delta=.001, precision=auto, batch_size=2, data_workers=4.
+seeds: [4, 7, 32, 54]  # Four paired complete replications; no adaptive winner pruning.
+# LF seeds default to one unspecified seed; explicit seeds keep each finite replication mandatory.
+sweep:  # Explicit finite comparison; no broad hyperparameter search.
+  space:  # Three representations and two optional-field groups.
+    surface_representation_mode:  # Source of each local evidence vector.
+      values: [learned, explicit, hybrid]  # z=h, z=x or z=[h||x], respectively.
+    surface_feature_group:  # Do not load features on the unchanged learned control.
+      values: [generic_minimal, generic_basic]  # Minimal charge/donor/acceptor versus all nine generic fields.
+      when: {surface_representation_mode: {in: [explicit, hybrid]}}  # Five total configurations.
+# Native finite sweep executes all authored variants/seeds; space fields use values or native
+# conditional when constraints. Adaptive search and pruning are intentionally absent.
+objective: {metric: val_selection_utility, mode: max}  # Protein-only checkpoint score; no local/test GT selection.
+# LF objective: metric required, mode=max|min; range optional. It indexes, not alters, these Runs.
+resources: {cpu: 8, gpu: 1, memory: 32GiB}  # Portable allocation; no hidden nested runner.
+# LF resource defaults: cpu=1/gpu=0; optional memory/storage/gpu_memory/time/processes.

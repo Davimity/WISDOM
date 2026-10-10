@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import torch
-from torch import Tensor, nn
 
+from torch import Tensor, nn
 from wisdom.models.PTV3SurfaceEncoder import PTV3SurfaceEncoder
 
 

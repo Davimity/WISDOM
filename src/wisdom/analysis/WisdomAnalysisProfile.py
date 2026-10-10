@@ -54,14 +54,14 @@ class WisdomAnalysisProfile:
     def build(
         self,
         global_phenotypes   : Sequence[str] = (),
-        interface_phenotypes: Sequence[str] = (),
+        local_phenotypes: Sequence[str] = (),
     ) -> dict[str, Any]:
         """Return native class-profile declarations, ready for LambdaForge validation.
 
         Args:
             global_phenotypes: Optional known sanitized strata, e.g. ``g001`` and ``g_noise``.
                 Unspecified dataset-dependent strata receive pattern metadata, not invented members.
-            interface_phenotypes: Optional known sanitized interface strata, e.g. ``i001``.
+            local_phenotypes: Optional known sanitized interface strata, e.g. ``i001``.
 
         Returns:
             Native metrics/defaults/families/questions mapping. The framework merges YAML
@@ -99,7 +99,7 @@ class WisdomAnalysisProfile:
             self._global(prefix, split)
             self._surface(prefix, split)
             self._faithfulness(prefix, split)
-            self._subgroups(prefix, split, global_phenotypes, interface_phenotypes)
+            self._subgroups(prefix, split, global_phenotypes, local_phenotypes)
             self._views(prefix, split)
         self._coupling()
         self._operational()
@@ -416,7 +416,7 @@ class WisdomAnalysisProfile:
 
     def _subgroups(
         self, prefix: str, split: str,
-        global_phenotypes: Sequence[str], interface_phenotypes: Sequence[str],
+        global_phenotypes: Sequence[str], local_phenotypes: Sequence[str],
     ) -> None:
         """Describe stratum support and family coordinates without inventing dataset clusters.
 
@@ -424,7 +424,7 @@ class WisdomAnalysisProfile:
             prefix: Persisted metric prefix.
             split: Native evidence partition.
             global_phenotypes: Known sanitized global phenotype labels, if supplied.
-            interface_phenotypes: Known sanitized interface phenotype labels, if supplied.
+            local_phenotypes: Known sanitized interface phenotype labels, if supplied.
 
         Dynamic phenotype strata receive meaningful patterns even without a declared family.
         Native families cannot discover new coordinate values from logged metric names; explicit
@@ -436,7 +436,7 @@ class WisdomAnalysisProfile:
             "surface_prevalence": ("surface-prevalence", ["q1", "q2", "q3", "q4"]),
             "tier": ("difficulty", ["core", "challenge"]),
             "global_phenotype": ("global-phenotype", list(global_phenotypes)),
-            "interface_phenotype": ("interface-phenotype", list(interface_phenotypes)),
+            "local_phenotype": ("interface-phenotype", list(local_phenotypes)),
         }
         for axis, (category, strata) in axes.items():
             members = {}

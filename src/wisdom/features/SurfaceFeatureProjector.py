@@ -67,7 +67,7 @@ class SurfaceFeatureProjector:
             ("ASP", "OD1"), ("ASP", "OD2"), ("GLU", "OE1"), ("GLU", "OE2"),
         }
         strict = np.asarray([
-            (residue, atom) in strict_pairs or atom in {"O", "OXT"}
+            (residue, atom) in strict_pairs
             for residue, atom in zip(residues, atom_names, strict=True)
         ]) & (charges <= 0)
         ched = np.isin(residues, ["CYS", "HIS", "GLU", "ASP"])
@@ -76,25 +76,29 @@ class SurfaceFeatureProjector:
             "hbond_donor_density": descriptors["atom_hbond_donor"],
             "hbond_acceptor_density": descriptors["atom_hbond_acceptor"],
             "aromatic_density": descriptors["atom_aromaticity"],
-            "hydropathy": descriptors["residue_hydropathy"],
-            "polarity": descriptors["residue_polarity"],
+            "hydropathy": descriptors["residue_hydropathy"] * (atom_names == "CA"),
+            "polarity": descriptors["residue_polarity"] * (atom_names == "CA"),
             "N_density": elements == 7,
             "O_density": elements == 8,
             "S_density": elements == 16,
             "zn_lewis_strict": strict,
-            "zn_N_density": elements == 7,
-            "zn_O_density": elements == 8,
-            "zn_S_density": elements == 16,
-            "zn_ched_density": ched & np.isin(elements, [7, 8, 16]),
+            "zn_donor_N_density": strict & (elements == 7),
+            "zn_donor_O_density": strict & (elements == 8),
+            "zn_donor_S_density": strict & (elements == 16),
+            "ched_residue_density": ched & (atom_names == "CA"),
         }
         fields = {name: (weights * field[indices]).sum(axis=1)
                   for name, field in atom_fields.items()}
         for name in ("hydropathy", "polarity"):
-            fields[name] = np.divide(fields[name], denominator,
-                                     out=np.zeros_like(denominator), where=denominator > 0)
-        donor_density = fields["zn_N_density"] + fields["zn_O_density"] + fields["zn_S_density"]
+            # One CA supplies one residue contribution: large sidechains must not receive
+            # more votes simply because they contain more atoms in the bounded neighborhood.
+
+            ca_denominator = (weights * (atom_names == "CA")[indices]).sum(axis=1)
+            fields[name] = np.divide(fields[name], ca_denominator,
+                                     out=np.zeros_like(denominator), where=ca_denominator > 0)
+        donor_density = fields["N_density"] + fields["O_density"] + fields["S_density"]
         fields["zn_specificity_ratio"] = np.divide(
-            fields["zn_ched_density"], donor_density, out=np.zeros_like(denominator),
+            fields["zn_lewis_strict"], donor_density, out=np.zeros_like(denominator),
             where=donor_density > 0,
         )
         # CA compactness is an interpretable neighborhood hypothesis, not a coordination

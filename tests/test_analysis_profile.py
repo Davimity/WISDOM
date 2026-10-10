@@ -231,7 +231,7 @@ def test_audit_and_optimization_producers_are_separate_from_quality() -> None:
     output = {
         "logits": torch.tensor([2.0]),
         "surface_logits": torch.tensor([-1.0, 0.0, 1.0, 2.0]),
-        "surface_embeddings": torch.zeros(4, 4),
+        "surface_evidence_features": torch.zeros(4, 4),
     }
     batch = {
         "surface_area_weights": torch.ones(4),

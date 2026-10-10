@@ -422,8 +422,14 @@ def test_missing_and_corrupt_checkpoint_native_boundary(native_source, tmp_path,
     assert strict.status == "failed"
 
 
-def test_review_yaml_contracts_fixture_bound(native_source, tmp_path):
-    """Validate/explain/dry-run every review using native typed fixture bindings."""
+def test_authored_yaml_contracts_fixture_bound(native_source, tmp_path):
+    """Validate/explain/dry-run authored YAMLs without production inputs or computation.
+
+    Native temporary bindings establish configuration executability only. A manifest standing
+    in for a frozen evidence file is never read by Selection/Preprocessing in this dry run;
+    scientific file formats have their separate unit tests. Historical .lambdaforge bundles
+    are execution evidence, not current configurations, and must not be rewritten or scanned.
+    """
     store, execution, labels = native_source
     selection = select_models(
         store.select(execution.execution_id),
@@ -433,13 +439,26 @@ def test_review_yaml_contracts_fixture_bound(native_source, tmp_path):
         contract="wisdom/review-models:v1",
     )
     ProductRegistry().publish(selection.product, files=dict(selection.sources), apply=True)
-    folder = Path(__file__).resolve().parents[1] / "experiments/visualization"
-    for path in folder.rglob("*.yaml"):
+    folder = Path(__file__).resolve().parents[1] / "experiments"
+    paths = [path for path in folder.rglob("*.yaml")
+             if not any(part.startswith(".") for part in path.relative_to(folder).parts)]
+    assert paths
+    for path in paths:
         authored = yaml.safe_load(path.read_text())
         if path.parent.name == "policies":
             SelectionPolicy.from_mapping(authored)
             continue
-        authored["with"]["dataset"] = {"file": str(labels)}
+        def bind_inputs(value):
+            """Bind external selectors without changing dependencies or scientific parameters."""
+            if isinstance(value, dict):
+                if set(value) == {"dataset"} or set(value) == {"file"}:
+                    return {"file": str(labels)}
+                return {key: bind_inputs(item) for key, item in value.items()}
+            if isinstance(value, list):
+                return [bind_inputs(item) for item in value]
+            return value
+
+        authored = bind_inputs(authored)
         config = WorkConfig.from_mapping(authored, source=tmp_path / path.name)
         assert not config.validation_errors(check_inputs=True), path
         assert config.explanation()

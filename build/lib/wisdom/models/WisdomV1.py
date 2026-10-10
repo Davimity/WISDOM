@@ -2,27 +2,26 @@
 
 from __future__ import annotations
 
-from typing import Any, ClassVar
-from collections.abc import Mapping, Sequence
-
 import torch
-from lambdaforge.nn.models import MLP, Model
-from lambdaforge.nn.pooling import SparseMaxPooling
-from torch import Tensor, nn
 
+from torch import Tensor, nn
+from typing import Any, ClassVar
+from lambdaforge.nn.models import MLP, Model
+from collections.abc import Mapping, Sequence
+from lambdaforge.nn.pooling import SparseMaxPooling
+from wisdom.models.InteractionRound import InteractionRound
+from wisdom.models.VectorAtomicState import VectorAtomicState
 from wisdom.models.GatedAtomicEncoder import GatedAtomicEncoder
+from wisdom.models.SurfaceAtomTransfer import SurfaceAtomTransfer
+from wisdom.models.SurfaceAtomFeedback import SurfaceAtomFeedback
 from wisdom.models.LinearInitialization import LinearInitialization
 from wisdom.models.ResidualInitialization import ResidualInitialization
 from wisdom.models.EmbeddingInitialization import EmbeddingInitialization
-from wisdom.models.DiffusionTimeInitialization import DiffusionTimeInitialization
-from wisdom.models.InteractionRound import InteractionRound
-from wisdom.models.PhysicalEmbeddingInitializer import PhysicalEmbeddingInitializer
-from wisdom.models.SurfaceAtomTransfer import SurfaceAtomTransfer
-from wisdom.models.SurfaceRepresentationMode import SurfaceRepresentationMode
-from wisdom.models.SurfaceAtomFeedback import SurfaceAtomFeedback
-from wisdom.models.VectorAtomicState import VectorAtomicState
 from wisdom.models.DiffusionSurfaceEncoder import DiffusionSurfaceEncoder
 from wisdom.models.gating.SemanticGateRegistry import SemanticGateRegistry
+from wisdom.models.SurfaceRepresentationMode import SurfaceRepresentationMode
+from wisdom.models.DiffusionTimeInitialization import DiffusionTimeInitialization
+from wisdom.models.PhysicalEmbeddingInitializer import PhysicalEmbeddingInitializer
 
 
 class WisdomV1(Model):
@@ -34,7 +33,7 @@ class WisdomV1(Model):
     output_schema: ClassVar[dict[str, Any]] = {
         "logits":             "Tensor[B]",
         "surface_logits":     "Tensor[M]",
-        "surface_embeddings": "Tensor[M,H]",
+        "surface_evidence_features": "Tensor[M,D]",
     }
 
     def __init__(
@@ -544,7 +543,8 @@ class WisdomV1(Model):
                 never an annotation or a ligand-dependent input.
 
         Returns:
-            Surface embeddings ``[M,H]`` and local logits ``[M]``.
+            Surface evidence Z ``[M,D]`` and local logits ``[M]``. D is H, K or H+K
+            in learned, explicit or hybrid mode respectively.
         """
         if self.surface_representation_mode is not SurfaceRepresentationMode.LEARNED:
             if surface_explicit_features is None or surface_explicit_features.shape != (
@@ -822,7 +822,7 @@ class WisdomV1(Model):
             Essential ``surface_logits[M]`` and ``logits[B]`` outputs.
         """
         del surface_area_weights
-        surface_embeddings, surface_logits = self.encode_surface(
+        surface_evidence_features, surface_logits = self.encode_surface(
             atomic_numbers,
             residue_type_ids,
             atom_edge_index,
@@ -863,6 +863,36 @@ class WisdomV1(Model):
         return {
             "logits":             protein_logits,
             "surface_logits":     surface_logits,
-            "surface_embeddings": surface_embeddings,
-            "surface_evidence_features": surface_embeddings,
+            **self.surface_representation_outputs(
+                surface_evidence_features, surface_explicit_features),
         }
+
+    def surface_representation_outputs(
+        self, evidence: Tensor, explicit: Tensor | None,
+    ) -> dict[str, Tensor]:
+        """Expose the actual H/X/Z representations without creating placeholder features.
+
+        Args:
+            evidence: Point evidence Z [M,D]: H, X, or concatenated [H,X].
+            explicit: Frozen normalized X [M,K] supplied by the batch, or None.
+
+        Returns:
+            Always Z as surface_evidence_features; H as surface_learned_embeddings only when
+            a learned encoder exists; X as surface_explicit_features only when consumed.
+            The deprecated surface_embeddings alias denotes H, never X or concatenated Z.
+
+        Raises:
+            ValueError: Explicit/hybrid mode lacks its real frozen feature matrix.
+        """
+        output = {"surface_evidence_features": evidence}
+        mode   = self.surface_representation_mode
+        if mode is not SurfaceRepresentationMode.EXPLICIT:
+            width = (evidence.shape[1] - self.explicit_feature_dim
+                     if mode is SurfaceRepresentationMode.HYBRID else evidence.shape[1])
+            learned = evidence[:, :width]
+            output.update(surface_learned_embeddings=learned, surface_embeddings=learned)
+        if mode is not SurfaceRepresentationMode.LEARNED:
+            if explicit is None:
+                raise ValueError("explicit/hybrid evidence requires real explicit surface features")
+            output["surface_explicit_features"] = explicit
+        return output

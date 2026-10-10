@@ -50,9 +50,9 @@ class OptimizationDiagnostics:
         Raises:
             ValueError: If expected diagnostic tensors are absent.
         """
-        if "surface_embeddings" not in output or "surface_logits" not in output:
+        if "surface_evidence_features" not in output or "surface_logits" not in output:
             raise ValueError("model output lacks optimization diagnostic tensors")
-        surface = output["surface_embeddings"].detach().float()
+        surface = output["surface_evidence_features"].detach().float()
         logits  = output["surface_logits"].detach().float()
         self._add("activation_surface_mean", float(surface.mean()))
         self._add("activation_surface_std", float(surface.std(unbiased=False)))

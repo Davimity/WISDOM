@@ -7,14 +7,14 @@ from collections.abc import Sequence
 class SurfaceFeatureSchema:
     """Declare channel order, units, and scientific interpretation independently of tasks."""
 
-    VERSION = "1.0"
+    VERSION = "2.0"
     GENERIC = (
         "formal_charge_density", "hbond_donor_density", "hbond_acceptor_density",
         "aromatic_density", "hydropathy", "polarity", "N_density", "O_density", "S_density",
     )
     ZINC = (
-        "zn_lewis_strict", "zn_N_density", "zn_O_density", "zn_S_density",
-        "zn_ched_density", "zn_specificity_ratio",
+        "zn_lewis_strict", "zn_donor_N_density", "zn_donor_O_density", "zn_donor_S_density",
+        "ched_residue_density", "zn_specificity_ratio",
         "ched_ca_compactness", "ched_constellation_score",
     )
     GROUPS: ClassVar[dict[str, tuple[str, ...]]] = {
@@ -24,6 +24,24 @@ class SurfaceFeatureSchema:
         "generic_basic": GENERIC,
         "zinc_interpretable": ZINC,
     }
+    LEGACY_ZINC = ("zn_lewis_strict", "zn_N_density", "zn_O_density", "zn_S_density",
+                   "zn_ched_density", "zn_specificity_ratio", "ched_ca_compactness",
+                   "ched_constellation_score")
+
+    @classmethod
+    def validate_stored(cls, names: Sequence[str], version: str) -> None:
+        """Validate historical channels without relabelling their scientific meaning.
+
+        Args:
+            names: Stored ordered feature names.
+            version: Immutable sidecar schema, either historical 1.0 or corrected 2.0.
+
+        Raises:
+            ValueError: Unsupported schema or names inconsistent with that schema.
+        """
+        known = cls.GENERIC + (cls.LEGACY_ZINC if version == "1.0" else cls.ZINC)
+        if version not in {"1.0", cls.VERSION} or not set(names) <= set(known):
+            raise ValueError("unsupported surface feature schema or stored channels")
 
     @classmethod
     def resolve(
@@ -87,7 +105,11 @@ class SurfaceFeatureSchema:
                 "sigma/(sigma+weighted_CA_radius_of_gyration), >=2 CHED CAs; otherwise zero"
                 if name == "ched_ca_compactness" else (
                     "CHED-type coverage/4 times CA compactness; geometric heuristic, not affinity"
-                    if name == "ched_constellation_score" else "Gaussian weighted atom reduction"
+                    if name == "ched_constellation_score" else (
+                        "Gaussian weighted CA-only residue average" if average else
+                        "Gaussian weighted CHED CA sum" if name == "ched_residue_density" else
+                        "Gaussian weighted protein atom sum; strict Zn donors exclude backbone O"
+                    )
                 )
             ),
         }

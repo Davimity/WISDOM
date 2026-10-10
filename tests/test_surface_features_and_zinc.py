@@ -20,7 +20,7 @@ from wisdom.features.SurfaceFeatureSchema import SurfaceFeatureSchema
 from wisdom.features.SurfaceFeatureSidecar import SurfaceFeatureSidecar
 from wisdom.models.WisdomV1 import WisdomV1
 from wisdom.models.WisdomV2 import WisdomV2
-from wisdom.preprocessing.dna.selection.structures import snapshot_structures
+from wisdom.preprocessing.common.snapshots import snapshot_structures
 from wisdom.preprocessing.zinc.audit import write_diversity_report
 from wisdom.preprocessing.zinc.evidence import load_evidence
 from wisdom.preprocessing.zinc.ZincAnnotation import ZincAnnotation
@@ -85,6 +85,14 @@ def test_attention_consumes_the_actual_evidence_width(mode, width, monkeypatch):
         assert not next(model.atomic_encoder.parameters()).requires_grad
     output = model(**_model_inputs(batch))
     assert output["surface_evidence_features"].shape == (3, width)
+    if mode == "explicit":
+        assert "surface_learned_embeddings" not in output
+        assert "surface_embeddings" not in output
+    else:
+        assert output["surface_learned_embeddings"].shape == (3, 8)
+        assert output["surface_embeddings"] is output["surface_learned_embeddings"]
+    if mode != "learned":
+        assert output["surface_explicit_features"].shape == (3, 3)
     assert torch.isfinite(output["logits"]).all()
     output["logits"].sum().backward()
     assert model.local_head.weight.grad is not None
@@ -130,7 +138,8 @@ def test_normalization_depends_only_on_the_declared_training_population(tmp_path
     stats = SurfaceFeatureSidecar.fit_statistics([("TRAIN", base, sidecar)], names)
     training = SurfaceFeatureSidecar.read(sidecar, base, names)
     assert stats["sources"] == [
-        {"id": "TRAIN", "base_npz_sha256": hashlib.sha256(base.read_bytes()).hexdigest()}
+        {"id": "TRAIN", "base_npz_sha256": hashlib.sha256(base.read_bytes()).hexdigest(),
+         "feature_sha256": hashlib.sha256(sidecar.read_bytes()).hexdigest(), "point_count": 3}
     ]
     assert np.allclose(
         SurfaceFeatureSidecar.normalize(training, names, stats).mean(0), 0, atol=1e-6
@@ -298,11 +307,16 @@ def test_optional_fields_publish_through_native_LF_and_support_inference(tmp_pat
         root / "index.jsonl",
         [
             DatasetMember(
-                member_id="FIXTURE_A",
-                partitions={"split": "train"},
-                targets={"dna_binding": 1},
+                member_id=identifier,
+                partitions={"split": split},
+                targets={"dna_binding": label},
+                metadata={"dilutions": ["replicate-00/train-25"] if identifier == "FIXTURE_A"
+                          else []},
                 assets={"universal_npz": DatasetAsset(path="base.npz")},
             )
+            for identifier, split, label in (("FIXTURE_A", "train", 1),
+                                              ("FIXTURE_B", "train", 0),
+                                              ("FIXTURE_C", "validation", 1))
         ],
     )
     monkeypatch.setenv("LAMBDAFORGE_DATASET_REGISTRY", str(tmp_path / "registry"))
@@ -325,6 +339,12 @@ def test_optional_fields_publish_through_native_LF_and_support_inference(tmp_pat
         surface_features=("formal_charge_density", "hbond_donor_density"),
     )
     assert data[0]["surface_explicit_features"].shape == (3, 2)
+    assert {source["id"] for source in data.feature_statistics["sources"]} == {
+        "FIXTURE_A", "FIXTURE_B"}
+    reduced = WisdomDataset(indexes[0].parent, "val", subset="replicate-00/train-25",
+        include_surface_targets=False, surface_features=("formal_charge_density",))
+    assert len(reduced) == 1  # Validation is not filtered by a training dilution.
+    assert [source["id"] for source in reduced.feature_statistics["sources"]] == ["FIXTURE_A"]
     # Learned mode does not consult or decode optional field files.
     learned = WisdomDataset(indexes[0].parent, "train", include_surface_targets=False)
     assert "surface_explicit_features" not in learned[0]
@@ -407,13 +427,14 @@ def test_zinc_diversity_report_preserves_rare_chemistry_and_unavailable_SMD(tmp_
             "split": "train",
             "origin": "fixture",
             "sequence_length": 10,
-            "sites": [{"accepted": True, "selected_residue_names": ["HIS", "ASP"]}],
+            "sites": [{"accepted": True, "selected_residue_names": ["HIS", "ASP"],
+                       "selected_residue_counts": {"HIS": 2, "ASP": 1}, "interchain": False}],
         }
         for i in range(4)
     ]
     report = write_diversity_report(tmp_path, records, records)
     assert report["covariates"]["sequence_length"]["smd"] is None
-    assert report["site_residue_classes"]["HIS/ASP"] == 2
+    assert report["site_residue_classes"]["ASP1/HIS2"] == 2
     assert report["selected_leakage_groups"] == 4
     assert (tmp_path / "diversity.svg").is_file()
     assert "not a significance test" in (tmp_path / "diversity.md").read_text()
@@ -473,7 +494,7 @@ def test_native_zinc_preprocessing_publication_and_tiny_backward(tmp_path, monke
                     "assembly_translation": [0, 0, 0],
                     "leakage_group": f"TOY{index}",
                     "global_phenotype": "ZN_NOISE",
-                    "interface_phenotype": "ZN_NOISE",
+                    "local_phenotype": "ZN_NOISE",
                     "coordination_parameters": {
                         "cutoff": 3.0,
                         "minimum_occupancy": 0.5,

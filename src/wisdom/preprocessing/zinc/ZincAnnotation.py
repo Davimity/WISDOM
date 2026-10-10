@@ -8,6 +8,7 @@ from typing import Any
 from pathlib import Path
 from scipy.spatial import cKDTree
 from collections.abc import Mapping, Sequence
+from wisdom.preprocessing.zinc.ZincCoordination import ZincCoordination
 
 
 class ZincAnnotation:
@@ -81,15 +82,10 @@ class ZincAnnotation:
                       and atom["chain_index"] == site["selected_chain_index"]}
             coords = np.asarray(list(donors), dtype=np.float64).reshape(-1, 3)
             radii = np.asarray([atom["vdw_radius"] for atom in donors.values()], dtype=np.float64)
-            tree = cKDTree(coords)
-            nearest = tree.query(points)[0]
-            candidates = tree.query_ball_point(points, nearest + radii.max())
             # Reference decisions use persisted float32 gaps, avoiding a boundary disagreement
             # between a float64 construction and a float32 validation after serialization.
 
-            gap = np.asarray([np.min(np.linalg.norm(coords[ids] - point, axis=1) - radii[ids])
-                              for point, ids in zip(points, candidates, strict=True)],
-                             dtype=np.float32)
+            gap = ZincCoordination.surface_gaps(points, coords, radii)
             zinc_tree = cKDTree(np.asarray([site["position"] for site in sites]))
             zinc_gap = zinc_tree.query(points)[0] - 1.39
             hard = gap <= self.positive_gap
@@ -114,7 +110,16 @@ class ZincAnnotation:
         if label and not available and row["split"] in ("validation", "test"):
             raise ValueError(f"{row['identifier']}: positive evaluation member has no usable GT; "
                              "revise Selection explicitly; never create all-negative positive GT")
-        audit = {"schema_version": "1.0", "task_name": "zinc_binding",
+        # Preserve Zn-center references as a separately named diagnostic. For explicit negatives
+        # the metal distance is unavailable, not a fictitious zero-distance positive target.
+
+        zinc_gap = np.asarray(zinc_gap, dtype=np.float32)
+        zinc_hard = (zinc_gap <= self.positive_gap) & distance_valid
+        zinc_valid = (zinc_hard | (zinc_gap >= self.negative_gap)) & distance_valid
+        zinc_fraction = np.clip((zinc_gap - self.positive_gap) /
+                                (self.negative_gap - self.positive_gap), 0, 1)
+        zinc_soft = ((1 + np.cos(np.pi * zinc_fraction)) / 2) * distance_valid
+        audit = {"schema_version": "2.0", "task_name": "zinc_binding",
                  "identifier": row["identifier"], "label": label,
                  "source_structure_sha256": row["structure_sha256"],
                  "assembly_id": row["assembly_id"], "protein_chain": row["protein_chain"],
@@ -128,6 +133,11 @@ class ZincAnnotation:
                 stream, surface_target_hard=hard, surface_target_soft=soft.astype(np.float32),
                 surface_valid_mask=valid, surface_distance_to_target=gap.astype(np.float32),
                 coordinating_atom_gap=gap.astype(np.float32), zinc_gap=zinc_gap.astype(np.float32),
+                zinc_center_target_hard=zinc_hard,
+                zinc_center_target_soft=zinc_soft.astype(np.float32),
+                zinc_center_valid_mask=zinc_valid,
+                zinc_center_target_hard_sensitivity=(zinc_gap[:, None] <= np.asarray(
+                    self.sensitivity_gaps, dtype=np.float32)) & distance_valid[:, None],
                 surface_distance_valid=distance_valid, surface_target_hard_sensitivity=sensitivity,
                 sensitivity_gaps=np.asarray(self.sensitivity_gaps, dtype=np.float32),
                 local_gt_available=np.asarray(available),
@@ -174,6 +184,28 @@ class ZincAnnotation:
             if not bool(archive["local_gt_available"].item()) and valid.any():
                 raise ValueError("unavailable Zn GT must not provide supervised points")
             audit = json.loads(str(archive["annotation_metadata_json"].item()))
+            if audit["schema_version"] not in {"1.0", "2.0"}:
+                raise ValueError("unsupported Zn annotation schema")
+            if audit["schema_version"] == "2.0":
+                zinc_gap = archive["zinc_gap"]
+                distance_valid = archive["surface_distance_valid"]
+                zinc_hard = (zinc_gap <= audit["positive_gap"]) & distance_valid
+                zinc_valid = (zinc_hard | (zinc_gap >= audit["negative_gap"])) & distance_valid
+                zinc_fraction = np.clip((zinc_gap - audit["positive_gap"]) /
+                    (audit["negative_gap"] - audit["positive_gap"]), 0, 1)
+                zinc_soft = ((1 + np.cos(np.pi * zinc_fraction)) / 2) * distance_valid
+                if (archive["zinc_center_target_hard"].dtype != np.bool_
+                    or archive["zinc_center_valid_mask"].dtype != np.bool_
+                    or archive["zinc_center_target_soft"].dtype != np.float32
+                    or archive["zinc_center_target_soft"].shape != (count,)
+                    or archive["zinc_center_target_hard_sensitivity"].dtype != np.bool_
+                    or not np.array_equal(archive["zinc_center_target_hard"], zinc_hard)
+                    or not np.array_equal(archive["zinc_center_valid_mask"], zinc_valid)
+                    or not np.allclose(archive["zinc_center_target_soft"], zinc_soft, atol=1e-6)
+                    or not np.array_equal(archive["zinc_center_target_hard_sensitivity"],
+                        (zinc_gap[:, None] <= archive["sensitivity_gaps"])
+                        & distance_valid[:, None])):
+                    raise ValueError("Zn-center diagnostic targets disagree with their gaps")
             if audit["task_name"] != "zinc_binding" or audit["label"] not in (0, 1):
                 raise ValueError("Zn annotation task/label metadata is invalid")
             gap = archive["surface_distance_to_target"]

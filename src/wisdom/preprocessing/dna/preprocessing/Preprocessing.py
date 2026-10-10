@@ -5,11 +5,11 @@ import lambdaforge as lf
 from typing import Any
 from pathlib import Path
 from collections.abc import Sequence
-from wisdom.preprocessing.dna.preprocessing.geometry import generate_geometry
+from wisdom.preprocessing.common.geometry import generate_geometry
+from wisdom.preprocessing.common.snapshots import validate_structure_snapshot
 from wisdom.preprocessing.dna.preprocessing.publication import publish_dataset
 from wisdom.preprocessing.dna.preprocessing.annotations import generate_annotations
 from wisdom.preprocessing.dna.preprocessing.DatasetManifests import DatasetManifests
-from wisdom.preprocessing.dna.preprocessing.structures import validate_structure_snapshot
 
 
 class Preprocessing(lf.Work):

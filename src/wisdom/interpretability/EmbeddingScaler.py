@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
-
 import torch
+
 from torch import Tensor
+from collections.abc import Mapping
 
 
 class EmbeddingScaler:

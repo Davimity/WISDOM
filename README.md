@@ -71,7 +71,7 @@ WISDOM has three ordered actions:
    version; the checked-in screening recipe publishes `wisdom-dna-reduced@6`.
 3. `Visualization` reads the published dataset and creates interactive three-dimensional views.
 
-All three actions are declared in `experiments/dna_preprocess.yaml`. Their first argument is
+All three actions are declared in `experiments/preprocess/dna/dna_preprocess.yaml`. Their first argument is
 `skip`: `false` runs an action and `true` omits it. The checked-in values reuse a prior design,
 run Preprocessing, and skip Visualization. The table below shows the safer single-purpose modes;
 the YAML contains their alternative values as comments beside each step:
@@ -101,19 +101,19 @@ lf clusters bootstrap citius-ctgpgpu12 --project . --dry-run
 lf clusters bootstrap citius-ctgpgpu12 --project .
 
 # Choose one documented YAML mode first. Visualization-only requires wisdom-dna-reduced@6.
-lf validate experiments/dna_preprocess.yaml
-lf explain experiments/dna_preprocess.yaml
-lf run experiments/dna_preprocess.yaml --dry-run
-lf run experiments/dna_preprocess.yaml --on citius-ctgpgpu12
+lf validate experiments/preprocess/dna/dna_preprocess.yaml
+lf explain experiments/preprocess/dna/dna_preprocess.yaml
+lf run experiments/preprocess/dna/dna_preprocess.yaml --dry-run
+lf run experiments/preprocess/dna/dna_preprocess.yaml --on citius-ctgpgpu12
 
-lf validate experiments/validate_dna.yaml  # after wisdom-dna-reduced@6 exists
-lf validate experiments/wisdom_v1a.yaml
-lf run experiments/wisdom_v1a.yaml --dry-run
-lf validate experiments/wisdom_v4.yaml
+lf validate experiments/preprocess/dna/validate_dna.yaml  # after wisdom-dna-reduced@6 exists
+lf validate experiments/v1/wisdom_v1a.yaml
+lf run experiments/v1/wisdom_v1a.yaml --dry-run
+lf validate experiments/v4/wisdom_v4.yaml
 
 # After V10 and after copying its reviewed best-model.pt artifact:
-lf validate experiments/interpretability_sparse_concepts.yaml
-lf run experiments/interpretability_sparse_concepts.yaml --dry-run
+lf validate experiments/interpretability/interpretability_sparse_concepts.yaml
+lf run experiments/interpretability/interpretability_sparse_concepts.yaml --dry-run
 ```
 
 [`experiments/README.md`](experiments/README.md) is the authoritative execution order. Construction
@@ -435,7 +435,7 @@ full RAW population so even an omitted protein can reveal a similarity link betw
 
 ### 3.3. From frozen evidence to a managed dataset
 
-The `select` step in [`experiments/dna_preprocess.yaml`](experiments/dna_preprocess.yaml) revalidates all RAW candidates,
+The `select` step in [`experiments/preprocess/dna/dna_preprocess.yaml`](experiments/preprocess/dna/dna_preprocess.yaml) revalidates all RAW candidates,
 computes similarity and physical descriptors, forms dependency groups, and selects the balanced
 population that reports call **CANONICAL**. This is the population assigned to partitions. RAW
 remains larger because even an omitted candidate
@@ -498,10 +498,10 @@ Registry selector `{dataset: wisdom-dna-reduced@6}`.
 
 ```bash
 # Validate and run the selected combination.
-lf validate experiments/dna_preprocess.yaml
-lf explain experiments/dna_preprocess.yaml
-lf run experiments/dna_preprocess.yaml --dry-run
-lf run experiments/dna_preprocess.yaml --on citius-ctgpgpu12
+lf validate experiments/preprocess/dna/dna_preprocess.yaml
+lf explain experiments/preprocess/dna/dna_preprocess.yaml
+lf run experiments/preprocess/dna/dna_preprocess.yaml --dry-run
+lf run experiments/preprocess/dna/dna_preprocess.yaml --on citius-ctgpgpu12
 
 # In another terminal, inspect all jobs or follow this build's durable log.
 lf overview
@@ -514,8 +514,8 @@ lf datasets members wisdom-dna-reduced@6 --partition split=train --limit 20
 lf datasets verify wisdom-dna-reduced@6
 
 # Repeat the complete scientific audit without modifying the immutable dataset.
-lf validate experiments/validate_dna.yaml
-lf run experiments/validate_dna.yaml --on citius-ctgpgpu12
+lf validate experiments/preprocess/dna/validate_dna.yaml
+lf run experiments/preprocess/dna/validate_dna.yaml --on citius-ctgpgpu12
 ```
 
 When `select.skip` is true, Selection performs no downloads, similarity search, clustering,
@@ -810,37 +810,97 @@ by the current geometry checks; evidence confidence is retained rather than sile
 
 The historical SAGLZn-II project motivates chemical hypotheses, not a dataset to copy. Its use of
 ligand absence to find negatives and random splits is not adopted. A negative must have an explicit
-non-binding experiment or an experimental curated `NOT` annotation for GO:0008270 (zinc-ion binding),
+non-binding experiment or an experimental curated `NOT` annotation for zinc-ion binding,
 with a reference, scope and the exact subject sequence's SHA-256 digest. The digest binds an experiment
 to a protein rather than merely to a similar PDB name. `NOT` explicitly denies an annotation; an absent
 annotation does not. Such evidence remains conditional on assay sensitivity, coverage and curation.
-There is **no default public negative inventory**: a researcher must supply and review it. Construction
-stops if there are too few reliable negatives to create both-class, homology-disjoint splits.
+Selection now acquires that evidence automatically; a negative file is **not required**. Construction
+still stops if the evidence cannot support both-class, homology-disjoint splits. Automatic acquisition
+is not a guarantee that enough experimentally supported proteins exist.
 
 |Action|Input|Decision or output|
 |---|---|---|
-|`ZincDiscovery`|Reviewed negative JSONL and a snapshot name|Frozen RCSB query plus sequence/assembly/copy candidates|
-|`ZincSelection`|Frozen candidate JSONL|Contact revalidation, full-RAW leakage groups, separate phenotypes, balanced selection and fixed splits|
+|`ZincDiscovery`|Snapshot name; optional reviewed negative JSONL|Experimental GO denials, exact UniProt/PDB mappings and frozen RCSB Zn candidates|
+|`ZincSelection`|Automatic acquisition, or frozen candidate JSONL/design|Contact revalidation, full-RAW leakage groups, separate phenotypes and fixed splits|
 |`ZincPreprocessing`|Exact portable design and its mmCIF snapshot|The same universal protein-only NPZ as DNA, plus separate Zn reference arrays|
+|`Visualization`|The newly published DatasetVersion|A sampled interactive HTML gallery and full-point PLY files; no data changes|
 |`ZincValidation`|Managed DatasetVersion|Readable verdict and ordered, per-protein scientific errors|
 
-Create `data/zinc/negative-evidence.jsonl` before running discovery. Each record needs `identifier`
+**Automatic negative acquisition.** QuickGO supplies Gene Ontology (GO) annotations: curated statements
+about a protein's function, together with their supporting reference and evidence category. Selection
+queries exact `NOT|enables` annotations for GO:0008270 (zinc-ion binding) and GO:0046872 (metal-ion
+binding), then retains referenced experimental codes EXP, IDA, IPI, IMP, IGI and IEP. It excludes
+sequence-based inference, context-restricted annotations and isoform-specific records. GO denials
+propagate to more specific functions: denying metal-ion binding also denies Zn binding; denying a
+particular Zn-dependent function or binding another metal does **not** deny all Zn binding. The frozen
+ontology verifies this direction. `negative_go_terms` may also include the reviewed broader cation-
+and ion-binding terms GO:0043169 and GO:0043167. See the authoritative
+[GO annotation rules](https://geneontology.org/docs/go-annotations/) and
+[QuickGO API](https://www.ebi.ac.uk/QuickGO/api/index.html).
+
+UniProt, a curated protein sequence/function database, supplies the subject's canonical sequence and
+PDB cross-references through its [public API](https://www.uniprot.org/help/api). A deposited chain is
+eligible only when its **complete declared polymer sequence** equals that sequence, not merely its
+observed atoms or a similar sequence. Tags, mutations and truncated constructs do not inherit the
+denial. The first declared assembly/copy containing an exact chain match is selected deterministically,
+without choosing a copy to avoid Zn. Contradictory experimental Zn annotations exclude the subject;
+downstream coordinate checks also quarantine negative chains with Zn contacts. The generated digest
+binds each denial to its exact sequence, and every original supporting annotation is retained.
+
+This conservative search can yield very few subjects. Several structures of the same protein do not
+create independent biological negatives; full-RAW homology grouping can reduce the count further.
+ZincBind/MetalPDB coordination resources do not, by themselves, supply experimental whole-protein
+negatives. A site's random non-coordinating residue set is not a negative protein. No absence-based
+fallback is enabled to enlarge the benchmark. If no negative maps successfully, acquisition stops
+**before** scanning all positive Zn entries. A populated inventory may still fail subsequent split
+requirements; this must be resolved with additional explicit evidence, not relaxed leakage checks.
+
+**Optional reviewed override.** Uncomment `negative_evidence` to use a researcher-supplied file instead
+of automatic negative discovery. Each record needs `identifier`
 (`PDB_AQ` means one chain named AQ), `sequence`, `label: 0`, `assembly_id`, one-based `protein_copy`,
 `origin`, and `label_evidence`. An experimental evidence object has `kind: experimental_non_binding`,
 `scope: zinc_binding`, `reference`, `assay`, and `sequence_sha256`. A curated experimental denial uses
-`kind: curated_not_annotation`, the same scope/reference/digest, `qualifier: NOT`, `term: GO:0008270`
+`kind: curated_not_annotation`, the same scope/reference/digest, `qualifier: NOT`, one of the four terms above
 and `evidence_code` EXP, IDA, IPI, IMP, IGI or IEP. These codes identify experimental evidence categories,
 not a guarantee of assay coverage. Sequence-mismatched evidence fails; contradictory identity or
 exact-sequence evidence is quarantined, never silently relabelled.
 
 ```bash
-# Review the explicit negative source and choose a new release_id in this YAML first.
-lf run experiments/zinc_discovery.yaml
-# Freeze the benchmark decision, then generate geometry and publish wisdom-zinc@1.
-lf run experiments/zinc_preprocess.yaml
+# Choose release_id; no preexisting negative file is needed for the three-step workflow.
+lf run experiments/preprocess/zinc/zinc_preprocess.yaml
 lf datasets verify wisdom-zinc@1
-lf run experiments/validate_zinc.yaml
+lf run experiments/preprocess/zinc/validate_zinc.yaml
 ```
+
+The workflow is **select → preprocess → visualize**. With no `raw_path`, select acquires
+candidates and freezes them under `data/zinc/raw`; it then publishes the complete scientific
+design under `data/zinc/design`. Geometry consumes that exact design and publishes `wisdom-zinc@1`;
+visualization consumes the native upstream dataset output and writes `data/zinc/visualizations`.
+`maximum_proteins: 12` limits the gallery, not the dataset; use zero to inspect every member.
+`zinc_discovery.yaml` is an optional acquisition-only command, useful for inspecting/fixing the
+candidate release separately. Its output can be supplied as select's typed `raw_path`, bypassing
+discovery but not scientific selection.
+
+Automatic acquisition adds `negative-evidence.jsonl`, `negative-discovery.json` and exact API responses
+under `sources/` to the raw output. The audit distinguishes queried **annotations** (several statements
+may refer to one protein), eligible **subjects** (UniProt proteins before structural mapping), mapped
+**candidates** (PDB chains), and **unique negative sequences** (before homology grouping). None is a
+count of independent test cases. Exclusion reasons and response digests make discarded evidence
+reviewable. On failure these files remain in the Work's managed `zinc-raw` artifact directory; external
+output copies are only published by LF on successful completion. Native cache and reconstructible
+maps reuse completed queries/downloads/mappings after interruption; `release_id` deliberately names
+a frozen acquisition, so change it when adopting updated annotations, not merely to retry.
+
+**Reuse the frozen selection.** Set `select.with.skip: true`, uncomment
+`existing_design: {file: ../../../data/zinc/design}`, and leave acquisition inputs unset.
+Leave preprocess enabled. Selection then only forwards `zinc-design`: no tool probes, downloads,
+clustering or split assignment run. Retain the whole design, including `selection.jsonl`,
+`dilutions.json` and exact `structures/`; labelled TXT alone cannot recover coordination evidence.
+Native checkpoints also retain completed acquisition/geometry records after interruption; full
+Selection may still recompute inexpensive population summaries. A different intended dataset
+content needs a new `dataset_version`, never an overwrite of an immutable publication. To render
+an existing dataset only, comment the first two step blocks and replace visualize's `from` binding
+with `{dataset: wisdom-zinc@1}`. Set visualize's `skip: true` to build without rendering.
 
 Discovery examines declared biological assemblies and their individual chain copies, including
 multi-character chains, rather than treating the deposited asymmetric unit as the biological object.
@@ -860,18 +920,49 @@ metal specificity. Thresholds must be reviewed for the intended benchmark.
 
 MMseqs2 and Foldseek operate on the **complete parseable RAW population**, including scientific
 rejects. Their thresholded pairs and exact-sequence/deposition edges form transitive leakage groups
-as in section 3.4. Filtering happens afterwards. Positive site phenotypes and negative morphology
-phenotypes are fit separately, with median/IQR scaling and native LambdaForge HDBSCAN/stability.
-The initial positive descriptors are site count, donor count, coordinating-residue count,
-inter-chain fraction, mean/std of coordination distance in Å, and N/O/S donor fractions: a compact
-coordination summary, not a complete pocket-shape description.
-At least two non-noise clusters and minimum cross-grid ARI 0.7 are required to retain a robust
-multi-cluster interpretation. ARI measures assignment agreement (1 means identical; near 0 is
-chance-level agreement). All-noise agreement is not meaningful evidence. The current stability
-check concerns parameter-grid perturbations, not bootstrap population stability.
+as in section 3.4; filtering happens afterwards. Global morphology is clustered jointly over quality
+eligible positives **and** negatives. Local phenotypes instead describe each accepted Zn site:
+donor/residue counts, interchain membership, coordination-distance mean/std and N/O/S fractions,
+plus separate Cys/His/Glu/Asp counts. These retain multiplicity: Cys₂His₂ and Cys₁His₃ are different.
+A multisite protein keeps a composition of site labels, not a mean that hides different sites.
+`zinc-sites.jsonl` exposes the assembly/copy, source digest, donor partners, distances, donor-pair
+angles, chemistry, surface support and site phenotype. Counts and angles are structural descriptions,
+not a claim about metal specificity or functional families.
+
+Both fits use median/IQR scaling and native LambdaForge HDBSCAN/stability. At least two non-noise
+clusters and minimum cross-grid ARI 0.7 are required for a robust multi-cluster interpretation.
+ARI measures assignment agreement (1 means identical; near 0 is chance-level agreement). All-noise
+agreement is not useful evidence. Stability concerns parameter perturbations, not bootstrap stability.
+`local_phenotype` always means a task's local physical descriptor, never a leakage relation.
+
+Before partitioning, Selection samples the same deterministic protein surface boundary used later,
+without computing curvature or spectral operators. It uses the universal reader's atom filtering,
+centered deposited frame and float32 arrays **before** transforming to the selected assembly;
+resampling a rotated assembly would otherwise change voxel selection. With defaults 1 Å resolution, 1.4 Å probe and
+1.4 Å positive donor gap, it counts accessible positive points per site. A coordination-positive
+protein with none is marked `buried_global_only`: it remains scientifically positive but its whole
+leakage group is restricted to train. Here “buried” means unsupported on WISDOM's selected
+protein-only surface, not proven solvent inaccessibility in the complete assembly.
+The final annotation repeats the check; changed sampling
+settings can invalidate a held-out member rather than silently giving it all-negative targets.
 
 Selection keeps reliable negatives and distributes the requested positive quota across leakage
-groups, phenotypes and sources. Group-wise splits use 70/15/15% by default; exact balancing can be
+groups, phenotypes, sources, experimental methods and available families/coordination signatures.
+`positive_policy: diverse_quota` honors `positive_negative_ratio` when support permits;
+`positive_policy: all` keeps every eligible positive and reports the resulting ratio instead of
+claiming balance. Frozen optional `functional_metadata` JSONL records require `identifier`,
+`sequence_sha256`, `source`, `version`, and may add `uniprot`, `pfam`, `interpro`, `cath`, `ec` or
+`family`. Their exact sequence/release and input digest are checked; these annotations neither
+change labels nor create leakage edges. Live annotation services are not queried automatically. Optional `site_metadata` separately links
+reviewed frozen metal-site exports: each JSONL record needs `identifier`, `site_id`,
+`structure_sha256`, `source`, `version`, `external_id`, optionally `family`/`reference`. Unknown
+sites or different coordinate bytes fail; metadata cannot override donor acceptance. This supports
+researcher-mapped [ZincBind database exports](https://zincbind.net/help/) and
+[MetalPDB site exports](https://metalpdb.cerm.unifi.it/downloadMetalSites), not an automatic live
+adapter or new evidence for negative labels.
+`evaluate_shortcuts: true` fits a simple size/resolution/morphology/source classifier on train and
+reports validation performance only. A high score warns that non-binding covariates can predict the
+label; it is not evidence of biochemical understanding. Insufficient support is unavailable. Group-wise splits use 70/15/15% by default; exact balancing can be
 limited by indivisible groups and is reported, not claimed. Dilutions reduce train only, after final
 groups exist, and preserve validation/test. `report.md`, `audit.json`, `split-counts.csv`, pair tables,
 labelled TXT, `selection.jsonl` and `dilutions.json` expose these decisions. `diversity.md` explains
@@ -887,7 +978,9 @@ point-to-donor-center distance minus that donor's van der Waals radius. All rele
 considered when taking the minimum. The positive region is the union across verified sites. Defaults
 mark gaps ≤1.4 Å positive, ≥3 Å negative and intermediate gaps ambiguous; a cosine transition supplies
 soft labels. A separate `zinc_gap` uses Zn-center distance minus the diagnostic radius 1.39 Å; it is
-not the primary target. Sensitivities at 1/1.4/2 Å quantify cutoff dependence without changing the base
+not the primary target. Annotation schema 2 additionally stores diagnostic Zn-center hard/soft/mask
+and sensitivity channels, validated separately; missing metal coordinates in negatives remain
+unavailable for this diagnostic. Sensitivities at 1/1.4/2 Å quantify cutoff dependence without changing the base
 geometry. These are proximity references, not experimentally measured surface binding probabilities.
 
 Actual Zn coordinates appear only in evidence and evaluation sidecars. They never enter the universal
@@ -1065,7 +1158,7 @@ XML, trajectories, and archive containers are outside the current input contract
 
 **Configuration and execution.**
 
-[`experiments/dna_preprocess.yaml`](experiments/dna_preprocess.yaml) is the public DNA data entry
+[`experiments/preprocess/dna/dna_preprocess.yaml`](experiments/preprocess/dna/dna_preprocess.yaml) is the public DNA data entry
 point. It contains `select`, `preprocess`, and `visualize`; the first parameter of each step is
 `skip`. Selection reuse for an active Preprocessing step requires the complete existing design and
 `raw_path: null`; the current input bindings pass its six named outputs to Preprocessing.
@@ -1075,10 +1168,10 @@ run, use `true/false/false` and pass `{from: preprocess.dataset}` to Visualizati
 to the commented `{dataset: wisdom-dna-reduced@6}` selector. Neither form contains a physical dataset path.
 
 ```bash
-lf validate experiments/dna_preprocess.yaml
-lf explain experiments/dna_preprocess.yaml
-lf run experiments/dna_preprocess.yaml --dry-run
-lf run experiments/dna_preprocess.yaml
+lf validate experiments/preprocess/dna/dna_preprocess.yaml
+lf explain experiments/preprocess/dna/dna_preprocess.yaml
+lf run experiments/preprocess/dna/dna_preprocess.yaml --dry-run
+lf run experiments/preprocess/dna/dna_preprocess.yaml
 ```
 
 `validate` catches malformed arguments, invalid output references, missing RAW evidence, and
@@ -2132,7 +2225,7 @@ checkpoints, not from filenames alone. WISDOM additionally revalidates molecular
 reusing their atomically written archives. Inspect the resolved call without starting work with:
 
 ```bash
-lf explain experiments/dna_preprocess.yaml
+lf explain experiments/preprocess/dna/dna_preprocess.yaml
 ```
 
 Changing declared design bytes, code identity, or a scientific setting creates a different Work
@@ -2218,7 +2311,7 @@ in the report or any scientific array.
 In LambdaForge 0.15, each sequence step's resource block determines its absolute reservation:
 
 ```bash
-lf run experiments/dna_preprocess.yaml --on citius-ctgpgpu12
+lf run experiments/preprocess/dna/dna_preprocess.yaml --on citius-ctgpgpu12
 ```
 
 The `preprocess` Work reports `cpu: 36`, 128 GiB, and 24 hours. Its coordinator calls a bounded map
@@ -2245,7 +2338,7 @@ Each `resources` block requests CPU, RAM, GPU, storage, and time. A configured c
 YAML; WISDOM does not contain a separate SSH or scheduler script:
 
 ```bash
-lf run experiments/dna_preprocess.yaml --on citius-ctgpgpu12
+lf run experiments/preprocess/dna/dna_preprocess.yaml --on citius-ctgpgpu12
 lf jobs show latest
 lf datasets show wisdom-dna-reduced@6
 ```
@@ -2259,16 +2352,34 @@ have a verified physical copy on several machines; those paths may differ, while
 
 **Code architecture.**
 
-All runtime code lives under `src/wisdom`. The five user-facing `Work` classes are `Selection`,
-`Preprocessing`, `Visualization`, `DNAValidation`, and `Training`. Selection and Preprocessing are
-short orchestration classes under `preprocessing/dna`; adjacent modules implement evidence,
-similarity, geometry, annotation, and publication.
+All runtime code lives under `src/wisdom`. Selection and Preprocessing are short, commented
+orchestrators; their adjacent modules contain task-specific evidence and annotation. Shared
+algorithms live under `preprocessing/common`: descriptors, similarity, leakage groups, balancing,
+splits, dilutions, phenotype fitting, snapshots and structural geometry. This package imports
+neither DNA nor Zn. Each task supplies its scientific inputs; sharing an algorithm does not share
+its labels, coordination rules or local target.
+
+|Directory|Responsibility|
+|---|---|
+|`preprocessing/common/structure`|Universal protein-only arrays, sparse graphs, surfaces, exact archive validation|
+|`preprocessing/dna` and `preprocessing/zinc`|Task evidence, design and annotation; use common independence algorithms|
+|`utils/structure`|Deposited-structure and molecule objects genuinely shared by independent workflows|
+|`features`, `data`, `models`, `evaluation`|Optional fixed fields, ingestion, trainable models and numerical evaluation|
+|`experiments/preprocess/{dna,zinc,common}`|Preparation and validation configurations|
+|`experiments/v1` … `experiments/v10`|Versioned studies and their `visualization` reviews|
+|`experiments/ablations`, `interpretability`, `reviews`|Controlled representation comparisons, concept discovery and review policies|
+
+Moving a YAML preserves its explicit name or filename-derived study identity. File paths are rebased
+to its new directory; no old YAML aliases remain. `local_phenotype` is the generic metadata name;
+historical `interface_phenotype` is translated only at reader boundaries. New DNA preparation
+publishes version 7, while the existing studies intentionally still consume the historical reduced
+version 6. Changing vocabulary does not rewrite that immutable dataset.
 
 Shared structural concepts live under `utils/structure`. `ProteinStructure` represents a complete
 PDB/mmCIF deposition and its assemblies; `BiologicalAssembly` exposes the selected protein and DNA
 chains; and the hierarchy `Protein -> Chain -> Residue -> Atom` represents the filtered molecule.
 The benchmark-independent conversion from that hierarchy to WISDOM arrays remains under
-`preprocessing/structure`, together with exact NPZ validation. This separation lets selection and
+`preprocessing/common/structure`, together with exact NPZ validation. This separation lets selection and
 annotation share assembly rules without mixing DNA labels into universal geometry.
 
 `ProteinPreprocessor` still reads like the one-protein sequence in Section 4.1:
@@ -2295,18 +2406,27 @@ type, and relation use enums, so misspelled free-text values cannot enter the ar
 ruff check .
 mypy src/wisdom
 pytest -q
-lf validate experiments/dna_preprocess.yaml
-lf validate experiments/validate_dna.yaml
-lf validate experiments/wisdom_v1a.yaml
-lf validate experiments/wisdom_v4.yaml
-lf validate experiments/wisdom_v10.yaml
+lf validate experiments/preprocess/dna/dna_preprocess.yaml
+lf validate experiments/preprocess/dna/validate_dna.yaml
+lf validate experiments/v1/wisdom_v1a.yaml
+lf validate experiments/v4/wisdom_v4.yaml
+lf validate experiments/v10/wisdom_v10.yaml
 ```
+
+The GitHub workflow runs Ruff, mypy and small CPU tests without cluster credentials, tools,
+network data acquisition or production datasets. Optional `network`, `external_tools`, `gpu`,
+`slow` and `browser` markers separate checks requiring those resources; run them explicitly in a
+suitable environment. CI checks executability, not benchmark performance. Generated `build/lib`
+files are no longer tracked. The retained `setup.cfg` build `force=1` prevents a stale, newer-dated
+cached Python file from entering a wheel; a packaging regression test exercises that case.
 
 Tests are offline and cover PDB/mmCIF/gzip, input grammar, model and chain errors, filters, alternate
 locations, explicit bond order, templates, peptide/disulfide/aromatic chemistry, relation unions,
 covalent edges outside the radius, sphere/plane/cylinder/concave curvature, surface determinism,
 area weights, LambdaForge source→transform→sink integration, CPU-process equivalence, partial
 failure, scientific resume invalidation, dataset-artifact identity, and bounded debug sampling.
+
+Implementation decisions and verification results: [refactor report](docs/COMMON_PREPROCESSING_REFACTOR.md).
 
 ### 4.9. Scientific limitations
 
@@ -2355,69 +2475,82 @@ These limits define what conclusions may safely be drawn from the output:
 
 ### 4.10. Optional fixed physicochemical surface fields
 
-A surface shape alone does not name the nearby chemistry. Optional fixed fields put interpretable
-protein properties on the existing surface without modifying its coordinates, neighbor order or
-universal NPZ. They live in a separate, pickle-free sidecar containing `feature_values[M,K]`, ordered
-`feature_names[K]`, the exact base NPZ digest and versioned metadata. Here M is the number of surface
-points and K the requested fields. Metadata records units, kernel width, stored radius/neighbor limit,
-source rules and approximations. Field schema 1.0 is independent of universal structural schema 3.0
-and of task annotation schemas.
+Optional fields describe the nearby protein chemistry on the existing surface. They do not move
+points or modify the universal NPZ. A separate feature sidecar stores `feature_values[M,K]`, ordered
+`feature_names[K]`, the exact base archive digest and the calculation settings. M is the number of
+points; K is the requested channel count. Field schema **2.0** corrects the chemistry described below;
+historical schema 1.0 remains readable with its original meanings, not silently relabelled.
 
 ```bash
-# Choose a new output family/version and the requested fields before running.
-lf run experiments/surface_features.yaml
-# Five alternatives: learned control, two explicit sets and two late-hybrid sets.
-lf run experiments/surface_representation_ablation.yaml
+lf run experiments/preprocess/common/surface_features.yaml
+# Primary comparison: five evidence alternatives, identical MAX pooling.
+lf run experiments/ablations/surface_representation/surface_representation_ablation.yaml
+# Secondary comparison: Attention changes its parameter count with the evidence width.
+lf run experiments/ablations/surface_representation/attention.yaml
 ```
 
-The default `generic_basic` group contains formal charge, hydrogen-bond donor/acceptor, aromaticity,
-hydropathy, polarity and N/O/S fields. `generic_minimal` has charge/donor/acceptor;
-`generic_chemistry` has the first six and `generic_elemental` the last three. Hydrogen-bond donor
-and acceptor flags approximate the ability to donate/accept a hydrogen bond from atom/residue rules;
-they do not measure Zn affinity. Formal charge is not partial charge or an electrostatic potential.
-Hydropathy uses the existing Kyte–Doolittle residue scale divided by 4.5; this is an intrinsic unit
-convention, not a fit on the dataset. `feature_names` appends individual fields and `exclude` removes
-known names. Unknown names fail instead of silently creating zero channels.
+`generic_basic` contains charge, hydrogen-bond donor/acceptor, aromaticity, hydropathy, polarity and
+N/O/S channels. `generic_minimal` selects charge/donor/acceptor; `generic_chemistry` selects the first
+six; `generic_elemental` selects N/O/S. Hydrogen-bond donor/acceptor flags are protein-identity
+approximations, not measured metal affinity. Formal charge is neither partial charge nor an
+electrostatic potential. Hydropathy uses the Kyte–Doolittle residue scale divided by 4.5.
+`feature_names` appends channels and `exclude` removes known names; unknown names fail explicitly.
 
-For point p, valid stored neighbor atom a has distance d in Å. With positive width σ (default 2 Å),
-the fixed Gaussian weight is:
+For surface point p and stored neighbor atom a, let d_pa be their distance in Å and σ a positive
+kernel width, default 2 Å. The fixed contribution decreases smoothly with distance:
 
-$$w_{pa}=\exp[-d_{pa}^{2}/(2\sigma^{2})].$$
+$$w_{pa}=\exp\left(-\frac{d_{pa}^{2}}{2\sigma^{2}}\right).$$
 
-Only the immutable radius/Jmax neighborhood participates. Hydropathy and polarity use
-`sum(w*f)/sum(w)`, zero for an empty neighborhood. Count-like chemistry fields use `sum(w*f)`:
-they are weighted-count proxies, **not volume-normalized physical densities**. The Jmax bound can
-truncate dense neighborhoods. Curvature channels remain on their original learned path.
+Only the stored radius/maximum-neighbor neighborhood participates. Atom-count channels sum these
+weights over eligible atoms; they are **weighted counts**, not volume-normalized physical densities.
+Hydropathy and polarity instead average residue values using only alpha-carbon (CA) contributions:
+`sum(w * residue_value) / sum(w)` over CA atoms, zero when unsupported. Thus a large sidechain does
+not gain extra votes simply because it contains more atoms. A truncated neighborhood can still miss
+nearby chemistry; the metadata records its limits.
 
-`zinc_interpretable` adds `zn_lewis_strict`, Zn-motivated N/O/S fields, CHED donor density,
-`zn_specificity_ratio`, `ched_ca_compactness` and `ched_constellation_score`. CHED means Cys, His, Glu
-and Asp residues. Strict Lewis eligibility includes their named N/O/S sites and backbone O/OXT with
-non-positive formal charge; it excludes amide N but does not know His tautomer/protonation or Cys pKa.
-It is a conservative identity heuristic, not measured donor strength. The specificity ratio divides
-CHED N/O/S weighted count by all N/O/S weighted count, zero if unsupported. Generic and Zn-motivated
-fields remain distinct by metadata scope, and neither contains observed Zn or task GT.
+`zinc_interpretable` adds the following hypotheses, without reading observed Zn or task labels:
 
-CA compactness considers at least two stored CHED alpha carbons, their Gaussian-weighted spatial
-spread R in Å, and reports `sigma/(sigma+R)`; fewer than two gives zero. Constellation score multiplies
-that value by the fraction of the four CHED residue types present. These bounded geometric hypotheses
-are not validated Zn-site scores. They depend on the stored neighborhood, may have weak support near
-surface points and must be ablated. No AAindex (a database of residue property scales), protonation
-prediction or continuum electrostatics solver is silently included.
+|Channel|Calculation and limitation|
+|---|---|
+|`zn_lewis_strict`|Weighted count of HIS ND1/NE2, CYS SG, ASP OD1/OD2 and GLU OE1/OE2 with non-positive formal charge. Backbone O/OXT and amide N are excluded. Protonation and donor strength are not inferred.|
+|`zn_donor_N_density`, `zn_donor_O_density`, `zn_donor_S_density`|The strict eligible donors separated by element, not duplicates of generic N/O/S counts.|
+|`ched_residue_density`|Weighted count of CA atoms of Cys, His, Glu and Asp (CHED), one contribution per represented residue.|
+|`zn_specificity_ratio`|Strict donor weighted count divided by all nearby N/O/S weighted count; zero without support.|
+|`ched_ca_compactness`|For at least two CHED CA atoms, σ/(σ+R), where R is their weighted spatial spread in Å; otherwise zero.|
+|`ched_constellation_score`|Compactness times the fraction of the four CHED residue types represented.|
 
-The augmentation Work freezes pooled-point training means μ and population standard deviations s.
-Every split then uses the same transform, with ε=10⁻⁸:
+These are interpretable candidate predictors, not validated Zn-site probabilities. Their correlation
+and support must be checked before interpreting learned importance. No protonation solver,
+electrostatics calculation or hidden metal-coordinate feature is added.
 
-$$\widehat{x}_{pk}=(x_{pk}-\mu_k^{train})/(s_k^{train}+\varepsilon).$$
+**Training-only normalization, separately for every dilution.** Let x_ik be field k at training
+point i and q_i its statistical weight. `normalization_weighting` selects `pooled_points` (default,
+q_i=1), `pooled_area` (q_i equals the stored surface area represented by that point), or `equal_protein`
+(q_i=1/M_b for a protein b with M_b points). The first gives larger point clouds more influence;
+the second weights physical area; the third gives each protein total weight one. None is universally
+best, so the chosen convention is recorded. Means and population standard deviations are:
 
-Here k names a field; the mean/std are computed over points belonging only to the published train
-partition. Large surfaces contribute more points: this is deliberate pooled-point weighting, not
-equal-protein weighting. Validation/test never fit their own transform. The JSON statistics retain
-training member IDs/base digests, counts and exact field order. Train dilution views reuse this
-release's full-train transform; publish a reduced version first if the transform must fit that
-smaller population alone. Epsilon prevents division by zero: a constant training field centers to
-zero on train, but a shifted validation value can become large and should be investigated. There is
-no per-protein rescaling. New optional assets require a new immutable DatasetVersion; older releases
-remain usable in the default learned regime.
+$$\mu_k=\frac{\sum_i q_i x_{ik}}{\sum_i q_i},\qquad
+s_k=\sqrt{\frac{\sum_i q_i(x_{ik}-\mu_k)^2}{\sum_i q_i}}.$$
+
+Every evaluated point then uses the selected training population's transform, with ε=10⁻⁸:
+
+$$\widehat{x}_{pk}=\frac{x_{pk}-\mu_k}{s_k+\varepsilon}.$$
+
+The augmentation fits `full` and each published training dilution independently. A 25% training run
+uses the 25% fit for **all** splits; validation/test never contribute to fitting and remain undiluted.
+Schema-2 statistics record exact IDs, base/feature digests, point counts, field order and weighting.
+Historical full-only statistics remain valid for full training but are rejected for a dilution;
+publish a new augmented version rather than borrowing information from excluded training proteins.
+There is no per-protein rescaling. A constant training channel becomes zero on train; a shifted
+held-out value may become large and deserves inspection, not an automatic claim of usefulness.
+
+`surface-feature-audit.md` explains each population's min/max, finite support, mean/std, zero/nonzero
+fractions and correlation matrix. All-zero means unsupported under this representation, not physical
+absence. Near-constant channels carry little variation. Absolute correlation ≥0.999 flags possible
+redundancy, not an instruction to remove a channel; correlation with a constant channel is unavailable,
+not zero. Fits are descriptive, not hypothesis tests. Corrected fields or added assets require a new
+immutable DatasetVersion; the supplied augmentation targets `wisdom-dna-features@2`.
 
 ## 5. Trainable WISDOM models
 
@@ -3392,7 +3525,7 @@ Vertex-deletion faithfulness is unavailable with active refiners because removin
 the operator; pooling a refined subset would skip the full-model intervention.
 The sweep sets faithfulness_audit=false and visualization.mode=none.
 
-After training, experiments/visualization/wisdom_v5c.yaml reuses inference-only review
+After training, experiments/v5/visualization/wisdom_v5c.yaml reuses inference-only review
 (Section 5.10). Choose explicit protein IDs to compare the **same protein** across selected
 poolers/refiners; filter large Studies to respect the report budget. Shared HTML/PLY channels
 include raw logits/probabilities, refined logits/predictions, refined-minus-raw logits and soft/hard
@@ -3876,7 +4009,7 @@ already lives in the YAML:
 
 ```bash
 lf datasets materialize wisdom-dna-reduced@6 --on citius-ctgpgpu12 --strategy replicate --apply
-lf run experiments/wisdom_v1a.yaml --on citius-ctgpgpu12
+lf run experiments/v1/wisdom_v1a.yaml --on citius-ctgpgpu12
 ```
 
 The direct-process cluster normally uses exclusive LambdaForge GPU leases and avoids devices with
@@ -3900,21 +4033,21 @@ Inspect composition and plans without creating study state:
 lf datasets list --all
 lf datasets show wisdom-dna-reduced@6
 lf datasets locations wisdom-dna-reduced@6
-lf validate experiments/wisdom_v1a.yaml
-lf explain experiments/wisdom_v1a.yaml
-lf run experiments/wisdom_v1a.yaml --dry-run
+lf validate experiments/v1/wisdom_v1a.yaml
+lf explain experiments/v1/wisdom_v1a.yaml
+lf run experiments/v1/wisdom_v1a.yaml --dry-run
 
-lf validate experiments/wisdom_v4.yaml
-lf explain experiments/wisdom_v4.yaml
-lf config resolve experiments/wisdom_v4.yaml
-lf run experiments/wisdom_v4.yaml --dry-run
+lf validate experiments/v4/wisdom_v4.yaml
+lf explain experiments/v4/wisdom_v4.yaml
+lf config resolve experiments/v4/wisdom_v4.yaml
+lf run experiments/v4/wisdom_v4.yaml --dry-run
 ```
 
 Start V1a with the normal command. Repeating it lets LambdaForge reuse or resume its durable
 Work evidence; never edit framework state or event files manually.
 
 ```bash
-lf run experiments/wisdom_v1a.yaml
+lf run experiments/v1/wisdom_v1a.yaml
 lf results list
 lf results analyze EXECUTION_ID
 lf results report EXECUTION_ID --output wisdom-v1a-report.html
@@ -3925,13 +4058,13 @@ copy the largest decimal blindly. Then separate both random sources, select init
 optimizer policies, run the restored core HPO, and check pooling:
 
 ```bash
-lf run experiments/wisdom_v1b.yaml
-lf run experiments/wisdom_v1c.yaml
-lf run experiments/wisdom_v2.yaml
-lf run experiments/wisdom_v3.yaml
-lf run experiments/wisdom_v4.yaml
-lf run experiments/wisdom_v5a.yaml
-lf run experiments/wisdom_v5b.yaml
+lf run experiments/v1/wisdom_v1b.yaml
+lf run experiments/v1/wisdom_v1c.yaml
+lf run experiments/v2/wisdom_v2.yaml
+lf run experiments/v3/wisdom_v3.yaml
+lf run experiments/v4/wisdom_v4.yaml
+lf run experiments/v5/wisdom_v5a.yaml
+lf run experiments/v5/wisdom_v5b.yaml
 lf results analyze EXECUTION_ID
 ```
 
@@ -3939,18 +4072,18 @@ Continue only after each decision gate passes. The weak-loss stages are sequenti
 heads, architecture, final retuning and uncensored confirmation follow:
 
 ```bash
-lf run experiments/wisdom_v6a.yaml
-lf run experiments/wisdom_v6b.yaml       # positive existence; only after useful V6a signal
-lf run experiments/wisdom_v6b2.yaml      # regional existence, independently
-lf run experiments/wisdom_v6b3.yaml      # regional ranking, independently
-lf run experiments/wisdom_v6c.yaml       # cardinality; only for a diagnosed remaining failure
-lf run experiments/wisdom_v6c2.yaml      # total variation, independently
-lf run experiments/wisdom_v6c3.yaml      # Dirichlet energy, independently
-lf run experiments/wisdom_v6d.yaml       # only if one term from each family is credible
-lf run experiments/wisdom_v7.yaml
-lf run experiments/wisdom_v8.yaml
-lf run experiments/wisdom_v9.yaml
-lf run experiments/wisdom_v10.yaml
+lf run experiments/v6/wisdom_v6a.yaml
+lf run experiments/v6/wisdom_v6b.yaml       # positive existence; only after useful V6a signal
+lf run experiments/v6/wisdom_v6b2.yaml      # regional existence, independently
+lf run experiments/v6/wisdom_v6b3.yaml      # regional ranking, independently
+lf run experiments/v6/wisdom_v6c.yaml       # cardinality; only for a diagnosed remaining failure
+lf run experiments/v6/wisdom_v6c2.yaml      # total variation, independently
+lf run experiments/v6/wisdom_v6c3.yaml      # Dirichlet energy, independently
+lf run experiments/v6/wisdom_v6d.yaml       # only if one term from each family is credible
+lf run experiments/v7/wisdom_v7.yaml
+lf run experiments/v8/wisdom_v8.yaml
+lf run experiments/v9/wisdom_v9.yaml
+lf run experiments/v10/wisdom_v10.yaml
 lf results analyze EXECUTION_ID
 ```
 
@@ -4147,9 +4280,9 @@ Copy the winning `best-model` artifact to the path declared as `checkpoint` in
 `interpretability_sparse_concepts.yaml`; then validate and execute exactly one analysis:
 
 ```bash
-lf validate experiments/interpretability_sparse_concepts.yaml
-lf run experiments/interpretability_sparse_concepts.yaml --dry-run
-lf run experiments/interpretability_sparse_concepts.yaml --on citius-ctgpgpu12
+lf validate experiments/interpretability/interpretability_sparse_concepts.yaml
+lf run experiments/interpretability/interpretability_sparse_concepts.yaml --dry-run
+lf run experiments/interpretability/interpretability_sparse_concepts.yaml --on citius-ctgpgpu12
 ```
 
 The checkpoint records both model parameters and collator budgets, so extraction reproduces the
@@ -4395,15 +4528,15 @@ lf import ./exports/PRINTED_PACKAGE_DIRECTORY --apply
 lf results list
 ~~~
 
-Set source_execution in experiments/visualization/wisdom_v1a.yaml to the registered ID. Its authored
+Set source_execution in experiments/v1/visualization/wisdom_v1a.yaml to the registered ID. Its authored
 seed policy shows best/median/worst together; use mode: median for one typical replication, or all
 for every eligible seed. The exact training DatasetVersion also needs a local LF placement.
 
 ~~~bash
-lf validate experiments/visualization/wisdom_v1a.yaml
-lf explain experiments/visualization/wisdom_v1a.yaml
-lf run experiments/visualization/wisdom_v1a.yaml --dry-run
-lf run experiments/visualization/wisdom_v1a.yaml
+lf validate experiments/v1/visualization/wisdom_v1a.yaml
+lf explain experiments/v1/visualization/wisdom_v1a.yaml
+lf run experiments/v1/visualization/wisdom_v1a.yaml --dry-run
+lf run experiments/v1/visualization/wisdom_v1a.yaml
 lf results report REVIEW_EXECUTION_ID --output review.html
 ~~~
 
@@ -4442,12 +4575,12 @@ average biological accuracy.
 ~~~bash
 lf products select SOURCE_EXECUTION_ID \
   --name review-models --contract wisdom/review-models:v1 \
-  --policy experiments/visualization/policies/top3-wisdom-score.yaml --apply
+  --policy experiments/reviews/policies/top3-wisdom-score.yaml --apply
 lf products export review-models --output ./modelset-export --apply
 lf products import ./modelset-export --apply
 lf products verify review-models
-lf validate experiments/visualization/templates/modelset_review.yaml
-lf run experiments/visualization/templates/modelset_review.yaml
+lf validate experiments/reviews/templates/modelset_review.yaml
+lf run experiments/reviews/templates/modelset_review.yaml
 lf results report REVIEW_EXECUTION_ID --output modelset-review.html
 ~~~
 
@@ -4477,7 +4610,7 @@ hidden retraining. Dataset content identity must match even if its placement cha
 documented as Unreleased. The version string alone is insufficient: verify ProductInput,
 SelectionPolicy, ResultStore import/execution_directory and outputs.html_section.
 WISDOM does not invent a published dependency minimum. See the complete
-[review guide and configuration reference](experiments/visualization/README.md) for both workflows,
+[review guide and configuration reference](experiments/reviews/README.md) for both workflows,
 historical limits and all study-specific examples.
 
 
@@ -4510,7 +4643,17 @@ descriptor, so inference reconstructs the same evidence representation. Optional
 targets have disjoint keys; targets never enter the forward-input whitelist. Task metadata names the
 global target and annotation asset, while old DNA indexes retain their historical fallback.
 
-The supplied paired sweep keeps architecture, loss, pooling and data fixed. It tests an information
+Output names distinguish these representations: `surface_learned_embeddings` is real H (absent
+in explicit mode), `surface_explicit_features` is X where selected, and `surface_evidence_features`
+is Z. The deprecated `surface_embeddings` alias means H only, never X or concatenated Z. Refiners
+receive Z as `evidence_features`, so their guidance is explicit even when no H exists. Full viewer
+exports distinguish all three matrices; lightweight prediction views do not copy them. Sparse
+concept discovery currently requires learned H and rejects explicit/hybrid checkpoints before
+reconstruction; combining learned and fixed concepts needs a separate scientific design.
+
+The primary paired comparison uses MAX on logits, so changing the evidence width does not change
+the pooling scorer's parameter count. The secondary `attention.yaml` tests Attention explicitly;
+its width-dependent parameters make it a different control. The supplied paired sweep keeps architecture, loss, pooling and data fixed. It tests an information
 source, not general scientific improvement. Compare protein metrics, localization, failure rate,
 runtime and active parameter count across repeated seeds. No Zn result or favorable hybrid outcome
 is assumed. Dataset integrity, tests and a compiling configuration establish executability only.

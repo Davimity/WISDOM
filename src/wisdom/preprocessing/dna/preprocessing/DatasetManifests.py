@@ -18,7 +18,7 @@ class DatasetManifests:
         "split",
         "leakage_group",
         "global_phenotype",
-        "interface_phenotype",
+        "local_phenotype",
         "origin",
         "label_evidence",
         "pdb_id",
@@ -204,6 +204,11 @@ class DatasetManifests:
         with self.catalog.open("r", encoding="utf-8", newline="") as stream:
             for raw in csv.DictReader(stream):
                 row: dict[str, Any] = dict(raw)
+                # Published historical designs used a DNA-specific name for local phenotype.
+                # Translate only at ingestion; new outputs use the task-neutral vocabulary.
+
+                if "local_phenotype" not in row:
+                    row["local_phenotype"] = row.pop("interface_phenotype")
                 for field in self.JSON_FIELDS:
                     row[field] = json.loads(str(row[field]))
 
@@ -233,7 +238,10 @@ class DatasetManifests:
             value = json.loads(line)
             if not isinstance(value, Mapping):
                 raise ValueError(f"{path.name} line {line_number} must be one JSON object")
-            rows.append(dict(value))
+            record = dict(value)
+            if "local_phenotype" not in record and "interface_phenotype" in record:
+                record["local_phenotype"] = record.pop("interface_phenotype")
+            rows.append(record)
         return rows
 
     def _labelled_rows(

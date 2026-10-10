@@ -3,10 +3,10 @@
 import torch
 
 from torch import Tensor, nn
-from wisdom.models.refinement.SurfaceEvidenceContext import SurfaceEvidenceContext
 from wisdom.models.refinement.GeometricAnisotropicEvidenceRefiner import (
     GeometricAnisotropicEvidenceRefiner,
 )
+from wisdom.models.refinement.SurfaceEvidenceContext import SurfaceEvidenceContext
 
 
 class LearnedAnisotropicEvidenceRefiner(GeometricAnisotropicEvidenceRefiner):
@@ -53,7 +53,7 @@ class LearnedAnisotropicEvidenceRefiner(GeometricAnisotropicEvidenceRefiner):
             Only two detached summary scalars survive for logging; no edge graph is retained.
         """
         projected = torch.tanh(self.projection(
-            context.embeddings.to(self.projection.weight.dtype),
+            context.evidence_features.to(self.projection.weight.dtype),
         )).float()
         distance, alignment, difference = context.geometry(left, right)
         features = torch.cat((

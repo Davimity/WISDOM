@@ -78,8 +78,7 @@ class SurfaceFeatureSidecar:
             digest   = str(archive["base_npz_sha256"].item())
         with np.load(base, allow_pickle=False) as archive:
             count = len(archive["surface_area_weights"])
-        if metadata["schema_version"] != SurfaceFeatureSchema.VERSION:
-            raise ValueError("unsupported surface feature schema")
+        SurfaceFeatureSchema.validate_stored(names_in, metadata["schema_version"])
         if values.shape != (count, len(names_in)) or metadata["point_count"] != count:
             raise ValueError("surface feature sidecar point count/shape mismatch")
         if len(set(names_in)) != len(names_in) or not np.isfinite(values).all():
@@ -87,7 +86,6 @@ class SurfaceFeatureSidecar:
         metadata_names = [channel["name"] for channel in metadata["channels"]]
         if values.dtype != np.float32 or metadata_names != names_in:
             raise ValueError("surface feature values/metadata violate the float32 channel contract")
-        SurfaceFeatureSchema.resolve(names_in)
         if verify_hash and hashlib.sha256(base.read_bytes()).hexdigest() != digest:
             raise ValueError("surface feature base NPZ hash mismatch")
         if not set(names) <= set(names_in):
@@ -115,43 +113,149 @@ class SurfaceFeatureSidecar:
     @staticmethod
     def fit_statistics(
         records: Sequence[tuple[str, Path, Path]], names: Sequence[str],
+        weighting: str = "pooled_points", population: str = "full",
     ) -> dict[str, object]:
-        """Fit pooled-point mean/std from the explicitly supplied training population only.
+        """Fit one frozen training population using stable weighted covariance merging.
+
+        For point weights w, mu=sum(w*x)/sum(w) and covariance is the population
+        weighted second moment about mu. Each protein's sufficient statistics are merged
+        without retaining all surfaces. Audit zero counts remain unweighted point counts.
 
         Args:
-            records: Training member ID, base NPZ and raw feature sidecar triples. The caller
-                must pass train only; IDs and base digests are persisted for an independent audit.
+            records: Exact training ID/base/sidecar triples, never validation or test.
             names: Ordered normalization channels.
+            weighting: pooled_points gives every point weight one; pooled_area uses positive
+                surface areas; equal_protein gives every protein total weight one.
+            population: Exact training view name, full or a published dilution.
 
         Returns:
-            JSON statistics with sample counts, population std, epsilon and exact train sources.
+            JSON mean/std, sources and a descriptive support/correlation audit. Nothing is
+            deleted automatically. Constant channels normalize to zero through epsilon.
 
         Raises:
-            ValueError: If no training points exist or an input sidecar is invalid.
+            ValueError: Empty population, invalid weights or non-finite/misaligned sidecars.
         """
-        count = 0
-        total = np.zeros(len(names), dtype=np.float64)
-        mean  = total.copy()
-        m2    = total.copy()
-        sources = []
+        if weighting not in {"pooled_points", "pooled_area", "equal_protein"}:
+            raise ValueError("unknown surface feature normalization weighting")
+        width       = len(names)
+        count       = 0
+        weight_sum  = 0.0
+        mean        = np.zeros(width, dtype=np.float64)
+        moment      = np.zeros((width, width), dtype=np.float64)
+        minimum     = np.full(width, np.inf)
+        maximum     = np.full(width, -np.inf)
+        zero_count  = np.zeros(width, dtype=np.int64)
+        sources: list[dict[str, object]] = []
+
         for identifier, base, path in records:
             values = SurfaceFeatureSidecar.read(path, base, names).astype(np.float64)
             n      = len(values)
-            delta  = values.mean(axis=0) - mean
-            following = count + n
-            m2 += ((values - values.mean(axis=0))**2).sum(axis=0)
-            m2 += delta**2 * count * n / following
-            mean += delta * n / following
-            count = following
-            sources.append({"id": identifier, "base_npz_sha256": hashlib.sha256(
-                base.read_bytes()).hexdigest()})
+            if n == 0:
+                raise ValueError("training surface contains no points")
+            weights = np.ones(n, dtype=np.float64)
+            if weighting == "pooled_area":
+                with np.load(base, allow_pickle=False) as archive:
+                    weights = archive["surface_area_weights"].astype(np.float64)
+            elif weighting == "equal_protein":
+                weights /= n
+            if weights.shape != (n,) or not np.isfinite(weights).all() or np.any(weights <= 0):
+                raise ValueError("normalization requires finite positive point weights")
+
+            # Merge centered second moments rather than subtracting two large raw moments.
+
+            local_weight = float(weights.sum())
+            local_mean   = (values * weights[:, None]).sum(axis=0) / local_weight
+            centered     = values - local_mean
+            delta        = local_mean - mean
+            following    = weight_sum + local_weight
+            moment += (centered * weights[:, None]).T @ centered
+            moment += np.outer(delta, delta) * weight_sum * local_weight / following
+            mean += delta * local_weight / following
+            weight_sum = following
+            count += n
+            minimum = np.minimum(minimum, values.min(axis=0))
+            maximum = np.maximum(maximum, values.max(axis=0))
+            zero_count += (values == 0).sum(axis=0)
+            sources.append({
+                "id": identifier,
+                "base_npz_sha256": hashlib.sha256(base.read_bytes()).hexdigest(),
+                "feature_sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+                "point_count": n,
+            })
         if count == 0:
             raise ValueError("feature statistics require non-empty train points")
+        covariance = moment / weight_sum
+        std        = np.sqrt(np.maximum(np.diag(covariance), 0))
+        denominator = std[:, None] * std[None, :]
+        correlation = np.divide(covariance, denominator, out=np.zeros_like(covariance),
+                                where=denominator > 0)
+        constant = [name for name, deviation, low, high in
+                    zip(names, std, minimum, maximum, strict=True)
+                    if deviation <= 1e-8 * max(1.0, abs(low), abs(high))]
+        unsupported = [name for name, zeros in zip(names, zero_count, strict=True)
+                       if zeros == count]
+        related = [
+            {"left": names[i], "right": names[j], "correlation": float(correlation[i, j]),
+             "reason": "possible_duplicate_or_linear_dependency"}
+            for i in range(width) for j in range(i + 1, width)
+            if std[i] > 0 and std[j] > 0 and abs(correlation[i, j]) >= 0.999
+        ]
         return {
-            "schema_version": "1.0", "split": "train", "feature_names": list(names),
-            "count": count, "mean": mean.tolist(), "std": np.sqrt(m2 / count).tolist(),
-            "epsilon": 1e-8, "weighting": "pooled_surface_points", "sources": sources,
+            "schema_version": "1.0", "split": "train", "population": population,
+            "feature_names": list(names), "count": count, "mean": mean.tolist(),
+            "std": std.tolist(), "epsilon": 1e-8, "weighting": weighting,
+            "weight_sum": weight_sum, "sources": sources,
+            "audit": {
+                "minimum": minimum.tolist(), "maximum": maximum.tolist(),
+                "zero_fraction": (zero_count / count).tolist(),
+                "nonzero_fraction": (1 - zero_count / count).tolist(),
+                "finite_fraction": [1.0] * width,
+                "correlation": [[float(correlation[i, j]) if denominator[i, j] > 0 else None
+                                 for j in range(width)] for i in range(width)],
+                "constant_channels": constant,
+                "unsupported_channels": unsupported, "highly_correlated_pairs": related,
+                "interpretation": (
+                    "Train-only descriptive audit. Zero support is missing local chemical "
+                    "support, not proof of absence in the whole protein. High correlation "
+                    "flags redundancy, not a reason to silently remove a channel."
+                ),
+            },
         }
+
+    @staticmethod
+    def validate_statistics(
+        statistics: Mapping[str, Any], names: Sequence[str],
+        populations: Mapping[str, Mapping[str, str]],
+    ) -> bool:
+        """Audit every frozen training fit independently of model-side normalization.
+
+        Args:
+            statistics: Historical single-full fit or schema-2 population collection.
+            names: Expected ordered field vocabulary.
+            populations: Exact training IDs/base digests for full and each published view.
+
+        Returns:
+            True when all declared fits have exact population coverage and valid scalars.
+            Historical full-only files remain valid for full, never for a requested dilution.
+
+        Raises:
+            ValueError: Unknown population, duplicate sources, foreign geometry or malformed fit.
+        """
+        if statistics.get("schema_version") == "2.0":
+            fits = statistics["populations"]
+            if set(fits) != set(populations):
+                raise ValueError("normalization populations differ from published training views")
+        else:
+            fits = {"full": statistics}
+        for population, fitted in fits.items():
+            if population not in populations:
+                raise ValueError("normalization declares an unknown training population")
+            sources = fitted["sources"]
+            observed = {source["id"]: source["base_npz_sha256"] for source in sources}
+            if len(observed) != len(sources) or observed != populations[population]:
+                raise ValueError("normalization includes non-train or changed geometry")
+            SurfaceFeatureSidecar.normalize(np.zeros((1, len(names))), names, fitted)
+        return True
 
     @staticmethod
     def normalize(
@@ -173,10 +277,14 @@ class SurfaceFeatureSidecar:
         if stats["split"] != "train":
             raise ValueError("surface feature normalization must be fitted on train only")
         order = list(stats["feature_names"])
+        if (len(set(order)) != len(order) or
+            np.asarray(stats["mean"]).shape != (len(order),) or
+            np.asarray(stats["std"]).shape != (len(order),)):
+            raise ValueError("surface feature normalization has misaligned field scalars")
         columns = [order.index(name) for name in names]
         mean = np.asarray(stats["mean"])[columns]
         std  = np.asarray(stats["std"])[columns]
         if (not np.isfinite(mean).all() or not np.isfinite(std).all() or np.any(std < 0)
-            or float(stats["epsilon"]) <= 0):
+            or not np.isfinite(float(stats["epsilon"])) or float(stats["epsilon"]) <= 0):
             raise ValueError("surface feature normalization statistics are invalid")
         return ((values - mean) / (std + float(stats["epsilon"]))).astype(np.float32)

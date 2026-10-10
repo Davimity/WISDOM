@@ -3,8 +3,8 @@
 import gemmi
 import torch
 
-from torch import Tensor, nn
 from typing import ClassVar
+from torch import Tensor, nn
 
 
 class PhysicalEmbeddingInitializer:

@@ -2,6 +2,7 @@
 
 import json
 import math
+import gemmi
 import hashlib
 import numpy as np
 
@@ -9,17 +10,22 @@ from typing import Any
 from pathlib import Path
 from functools import partial
 from collections.abc import Mapping, Sequence
+from wisdom.preprocessing.common.descriptors import (
+    global_features, protein_coordinates, rigid_transform, sequence_features,
+)
 from wisdom.utils.structure.ProteinStructure import ProteinStructure
 from wisdom.preprocessing.zinc.ZincCoordination import ZincCoordination
-from wisdom.preprocessing.dna.selection.structures import (
-    _global_features, _protein_coordinates, _rigid_transform, _sequence_features,
-)
+from wisdom.preprocessing.common.structure.ProteinReader import ProteinReader
+from wisdom.preprocessing.common.structure.SurfaceBuilder import SurfaceBuilder
+from wisdom.preprocessing.common.structure.StructureSource import StructureSource
+from wisdom.preprocessing.common.structure.PreprocessConfig import PreprocessConfig
 
 
 def analyse_structures(
     work: Any, rows: Sequence[Mapping[str, Any]], workers: int, cutoff: float,
     minimum_occupancy: float, minimum_donors: int, minimum_residues: int,
     maximum_resolution: float | None, requests_per_second: float,
+    surface_resolution: float = 1.0, probe_radius: float = 1.4, positive_gap: float = 1.4,
 ) -> list[dict[str, Any]]:
     """Download once per deposition, then verify every selected assembly/copy.
 
@@ -33,6 +39,9 @@ def analyse_structures(
         minimum_residues: Minimum selected-copy coordinating residues per accepted site.
         maximum_resolution: Worst accepted deposited resolution in ångströms; None disables.
         requests_per_second: Shared native public-service request ceiling.
+        surface_resolution: Early surface sampling spacing in ångströms, default 1.
+        probe_radius: Solvent expansion radius in ångströms, default 1.4.
+        positive_gap: Maximum coordinating-atom gap supporting local GT, default 1.4 Å.
 
     Returns:
         Analysed full RAW rows, including rejected contacts and contradictory evidence. All
@@ -42,6 +51,7 @@ def analyse_structures(
         _analyse, work=work, cutoff=cutoff, minimum_occupancy=minimum_occupancy,
         minimum_donors=minimum_donors, minimum_residues=minimum_residues,
         maximum_resolution=maximum_resolution, requests_per_second=requests_per_second,
+        surface_resolution=surface_resolution, probe_radius=probe_radius, positive_gap=positive_gap,
     ), key=lambda row: str(row["identifier"]), workers=workers, executor="thread",
         name="zinc-structures")
 
@@ -50,6 +60,7 @@ def _analyse(
     raw: Mapping[str, Any], work: Any, cutoff: float, minimum_occupancy: float,
     minimum_donors: int, minimum_residues: int, maximum_resolution: float | None,
     requests_per_second: float,
+    surface_resolution: float, probe_radius: float, positive_gap: float,
 ) -> dict[str, Any]:
     """Verify one deposited-chain identity and retain explicit exclusion reasons.
 
@@ -62,6 +73,9 @@ def _analyse(
         minimum_residues: Selected-copy donor residue minimum.
         maximum_resolution: Maximum resolution in ångströms or None.
         requests_per_second: Shared native download ceiling.
+        surface_resolution: Early surface spacing in ångströms.
+        probe_radius: Early solvent expansion radius in ångströms.
+        positive_gap: Early positive surface threshold in ångströms.
 
     Returns:
         JSON-compatible row with source digest, rigid transform, sites and physical descriptors.
@@ -70,9 +84,10 @@ def _analyse(
         ValueError: Missing chain/copy, sequence mismatch or invalid coordinates.
     """
     pdb = str(raw["pdb_id"])
+    rate = work.cache.rate_limit("files.rcsb.org", requests_per_second=requests_per_second)
     source = work.cache.fetch(f"https://files.rcsb.org/download/{pdb.upper()}.cif.gz",
                               key=f"structures/{pdb}.cif", decompress="gzip",
-                              retries=5, timeout=180, rate_limit=requests_per_second)
+                              retries=5, timeout=180, rate_limit=rate)
     structure = ProteinStructure(Path(source))
     if raw.get("structure_sha256") and raw["structure_sha256"] != structure.sha256():
         raise ValueError(f"{raw['identifier']}: deposition revision differs from frozen discovery")
@@ -103,19 +118,40 @@ def _analyse(
     if (maximum_resolution is not None and structure.resolution is not None
         and structure.resolution > maximum_resolution):
         reasons.append("resolution_exceeds_maximum")
-    protein = _protein_coordinates(chain, len(sequence))
-    sequence_features = _sequence_features(sequence)
-    rotation, translation = _rigid_transform(deposited, chain)
+    protein = protein_coordinates(chain, len(sequence))
+    rotation, translation = rigid_transform(deposited, chain)
+    # Local evaluability is audited before balancing/splits, without fitting curvature or
+    # spectral operators. Buried positive sites remain valid protein-level evidence.
+
+    exposed = False
+    if int(raw["label"]) == 1 and accepted:
+        points = _surface_points(Path(source), raw, structure.sha256(), surface_resolution,
+                                 probe_radius, rotation, translation)
+        for site in accepted:
+            local = [atom for atom in site["partners"]
+                     if atom["chain_index"] == site["selected_chain_index"]]
+            gaps = ZincCoordination.surface_gaps(points,
+                np.asarray([a["position"] for a in local]),
+                np.asarray([a["vdw_radius"] for a in local]))
+            support = int((gaps <= positive_gap).sum())
+            site["surface_support"] = {
+                "positive_point_count": support, "point_count": len(points),
+                "classification": "surface_evaluable" if support else "buried_global_only",
+                "resolution_angstrom": surface_resolution, "probe_radius_angstrom": probe_radius,
+                "positive_gap_angstrom": positive_gap,
+            }
+            exposed |= support > 0
+    sequence_descriptors = sequence_features(sequence)
     foldseek = work.checkpoints.file(
         f"zinc-foldseek/{raw['identifier']}.cif",
         build=partial(assembly.write_protein_copy, chain_name=str(raw["protein_chain"]),
                       copy_index=int(raw["protein_copy"]), identifier=str(raw["identifier"])),
     )
     return {
-        **dict(raw), **sequence_features, **_global_features(protein),
+        **dict(raw), **sequence_descriptors, **global_features(protein),
         "sequence_sha256": digest, "source_structure": str(source),
-        "log_sequence_length": math.log(len(sequence)),
-        "charge_density": sequence_features["net_charge_at_pH_7"] / len(sequence),
+        "log_sequence_length": math.log(len(str(raw["sequence"]))),
+        "charge_density": sequence_descriptors["net_charge_at_pH_7"] / len(sequence),
         "structure_sha256": structure.sha256(), "foldseek_structure": str(foldseek),
         "assembly_rotation": rotation.tolist(), "assembly_translation": translation.tolist(),
         "quality_eligible": not reasons, "quality_exclusion_reason": ";".join(reasons),
@@ -129,7 +165,9 @@ def _analyse(
         "zn_residue_count": len({r for site in accepted for r in site["selected_residues"]}),
         "zn_interchain_fraction": (sum(site["interchain"] for site in accepted) / len(accepted)
                                    if accepted else 0.0),
-        "local_gt_expected": bool(accepted) or int(raw["label"]) == 0,
+        "local_gt_expected": exposed or int(raw["label"]) == 0,
+        "surface_evaluability": "surface_evaluable" if exposed else (
+            "explicit_negative" if int(raw["label"]) == 0 else "buried_global_only"),
         "positive_confidence": (evidence.get("confidence", "structural_coordination_only")
                                 if int(raw["label"]) else "not_applicable"),
         "negative_confidence": evidence["kind"] if not int(raw["label"]) else "not_applicable",
@@ -138,3 +176,43 @@ def _analyse(
                                     "minimum_residues": minimum_residues},
         "evidence_record_json": json.dumps(dict(raw), sort_keys=True),
     }
+
+
+def _surface_points(
+    path: Path, row: Mapping[str, Any], digest: str, resolution: float, probe_radius: float,
+    rotation: np.ndarray, translation: np.ndarray,
+) -> np.ndarray:
+    """Reuse preprocessing's filtered, centered sampling frame before an assembly transform.
+
+    Sampling a rotated assembly directly changes the voxel grid and alternate-conformer choices.
+    Instead use the universal reader and its float32 atom arrays, sample its centered deposition,
+    cast exactly as the published surface does, then restore and transform the points. No graphs,
+    curvature, labels or spectral operators are computed.
+
+    Args:
+        path: Exact cached deposited mmCIF bytes.
+        row: Candidate identifier, PDB ID and complete selected chain name.
+        digest: SHA-256 of the exact deposited bytes.
+        resolution: Surface spacing in ångströms, equal to intended preprocessing settings.
+        probe_radius: Solvent expansion in ångströms, equal to intended preprocessing settings.
+        rotation: Rigid deposition-to-assembly matrix [3,3].
+        translation: Deposition-to-assembly translation [3], ångströms.
+
+    Returns:
+        Float64 [M,3] surface positions in assembly coordinates. With the same preprocessing
+        settings these are the points that final annotation evaluates, not a rotated resampling.
+
+    Raises:
+        ValueError: The selected chain is invalid or no protein surface can be sampled.
+    """
+    source = StructureSource(str(row["identifier"]), str(row["pdb_id"]),
+                             (str(row["protein_chain"]),), path, digest, "mmcif", False)
+    protein, provenance = ProteinReader(PreprocessConfig()).read(source)
+    atoms = [atom for chain in protein.chains for residue in chain.residues
+             for atom in residue.atoms]
+    positions = np.asarray([atom.position for atom in atoms], dtype=np.float32)
+    radii = np.asarray([gemmi.Element(atom.atomic_number).vdw_r for atom in atoms],
+                       dtype=np.float32)
+    points, _ = SurfaceBuilder(resolution, probe_radius).sample(positions, radii)
+    restored = points.astype(np.float32).astype(np.float64) + provenance.coordinate_origin
+    return restored @ rotation.T + translation

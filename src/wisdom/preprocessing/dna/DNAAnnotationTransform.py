@@ -2,18 +2,17 @@
 
 from __future__ import annotations
 
-import gzip
-import hashlib
-import json
 import os
-from collections.abc import Mapping
-from pathlib import Path
+import gzip
+import json
+import hashlib
+import numpy as np
+
 from typing import Any
 from uuid import uuid4
-
-import numpy as np
+from pathlib import Path
 from scipy.spatial import cKDTree
-
+from collections.abc import Mapping
 from wisdom.utils.structure.ProteinStructure import ProteinStructure
 from wisdom.preprocessing.dna.DNAAnnotationSink import DNAAnnotationSink
 

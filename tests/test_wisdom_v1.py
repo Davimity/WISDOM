@@ -19,8 +19,8 @@ from wisdom.models.DiffusionSurfaceEncoder import DiffusionSurfaceEncoder
 from wisdom.models.WeakSurfaceLoss import WeakSurfaceLoss
 from wisdom.models.WisdomV1 import WisdomV1
 from wisdom.models.WisdomV2 import WisdomV2
-from wisdom.preprocessing.structure.PreprocessConfig import PreprocessConfig
-from wisdom.preprocessing.structure.ProteinPreprocessor import ProteinPreprocessor
+from wisdom.preprocessing.common.structure.PreprocessConfig import PreprocessConfig
+from wisdom.preprocessing.common.structure.ProteinPreprocessor import ProteinPreprocessor
 from wisdom.Training import (
     _create_model,
     _diffusion_time_summary,

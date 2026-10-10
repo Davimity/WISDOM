@@ -2,17 +2,17 @@
 
 from __future__ import annotations
 
-import csv
-import hashlib
-import json
 import os
+import csv
+import json
 import shutil
-from collections.abc import Mapping
-from pathlib import Path
+import hashlib
+import numpy as np
+
 from typing import Any
 from uuid import uuid4
-
-import numpy as np
+from pathlib import Path
+from collections.abc import Mapping
 
 
 class DNAAnnotationSink:

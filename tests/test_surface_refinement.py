@@ -49,7 +49,7 @@ def _context(counts=(4, 3), embeddings=None):
                 neighbors[index, 1] = index + 1
         start += count
     return SurfaceEvidenceContext(
-        embeddings=embeddings,
+        evidence_features=embeddings,
         area_weights=torch.ones(total),
         owners=owners,
         surface_ptr=torch.tensor([0, *torch.tensor(counts).cumsum(0).tolist()]),
@@ -106,7 +106,7 @@ def test_identity_zero_heat_and_historical_regional_share_exact_control_and_prim
     regional = _v2("local_mean_max", regional_diffusion_scale=3.0).pooling_head
     pooled = regional(
         raw,
-        context.embeddings,
+        context.evidence_features,
         context.area_weights,
         context.owners,
         context.operators,
@@ -287,13 +287,13 @@ def test_v2_integrated_forward_pools_refined_and_bce_reaches_local_head(kind, po
 def test_native_v5c_sweep_has_30_candidates_120_runs_and_no_inactive_children():
     """Use native LF expansion to check independent factors, paired seeds and frozen backbone."""
     root = Path(__file__).parents[1] / "experiments"
-    config = WorkConfig.from_yaml(root / "wisdom_v5c.yaml")
+    config = WorkConfig.from_yaml(root / "v5/wisdom_v5c.yaml")
     plan = WorkRunner().plan(config)
     assert len(plan.levels[0]) == 120
     assert plan.preflight["studies"][0]["candidates"] == 30
     assert plan.preflight["studies"][0]["shared_seeds"] == [4, 7, 32, 54]
-    authored = safe_load((root / "wisdom_v5c.yaml").read_text())
-    baseline = safe_load((root / "wisdom_v5b.yaml").read_text())
+    authored = safe_load((root / "v5/wisdom_v5c.yaml").read_text())
+    baseline = safe_load((root / "v5/wisdom_v5b.yaml").read_text())
     assert authored["with"]["faithfulness_audit"] is False
     assert authored["with"]["visualization"]["mode"] == "none"
     assert authored["with"]["evaluate_test"] is False

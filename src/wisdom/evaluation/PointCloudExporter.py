@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 import os
-from collections.abc import Mapping, Sequence
-from pathlib import Path
-from uuid import uuid4
-
 import numpy as np
+
+from uuid import uuid4
+from pathlib import Path
+from collections.abc import Mapping, Sequence
 
 
 class PointCloudExporter:
@@ -40,14 +40,16 @@ class PointCloudExporter:
             raise ValueError("point-cloud positions must have finite shape [M,3]")
         scalar_channels: dict[str, np.ndarray] = {}
         for name, values in channels.items():
-            if name == "surface_embeddings":
+            if name in {"surface_embeddings", "surface_learned_embeddings",
+                        "surface_explicit_features", "surface_evidence_features"}:
                 matrix = np.asarray(values)
                 if matrix.ndim != 2 or matrix.shape[0] != len(coordinates):
-                    raise ValueError("surface_embeddings must have shape [M,H]")
+                    raise ValueError(f"{name} must have shape [M,K]")
                 for index in latent_channels:
                     if index < 0 or index >= matrix.shape[1]:
                         raise ValueError(f"latent channel {index} is outside embedding width")
-                    scalar_channels[f"latent_chemical_channel_{index}"] = matrix[:, index]
+                    prefix = "latent_chemical" if name == "surface_embeddings" else name
+                    scalar_channels[f"{prefix}_channel_{index}"] = matrix[:, index]
                 continue
             if not name.replace("_", "").isalnum():
                 raise ValueError(f"PLY scalar channel has an unsafe name: {name!r}")

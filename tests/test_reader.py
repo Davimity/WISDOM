@@ -5,10 +5,10 @@ import gemmi
 import numpy as np
 import pytest
 
-from wisdom.preprocessing.structure.AtomicStructureBuilder import AtomicStructureBuilder
-from wisdom.preprocessing.structure.PreprocessConfig import PreprocessConfig
-from wisdom.preprocessing.structure.ProteinReader import ProteinReader
-from wisdom.preprocessing.structure.StructureResolver import StructureResolver
+from wisdom.preprocessing.common.structure.AtomicStructureBuilder import AtomicStructureBuilder
+from wisdom.preprocessing.common.structure.PreprocessConfig import PreprocessConfig
+from wisdom.preprocessing.common.structure.ProteinReader import ProteinReader
+from wisdom.preprocessing.common.structure.StructureResolver import StructureResolver
 from wisdom.utils.structure.enums.AtomRole import AtomRole
 from wisdom.utils.structure.enums.BondType import BondType
 

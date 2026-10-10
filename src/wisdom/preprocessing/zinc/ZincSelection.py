@@ -8,17 +8,21 @@ import lambdaforge as lf
 from typing import Any
 from pathlib import Path
 from collections.abc import Sequence
+from wisdom.preprocessing.common.audit import audit_dataset
 from wisdom.preprocessing.zinc.evidence import load_evidence
+from wisdom.preprocessing.common.splits import assign_splits
+from wisdom.preprocessing.zinc.evidence import annotate_sites
+from wisdom.preprocessing.common.shortcut import shortcut_baseline
 from wisdom.preprocessing.zinc.audit import write_diversity_report
 from wisdom.preprocessing.zinc.phenotypes import assign_phenotypes
-from wisdom.preprocessing.dna.selection.audit import audit_dataset
+from wisdom.preprocessing.common.dilutions import create_dilutions
+from wisdom.preprocessing.zinc.discovery import discover_candidates
 from wisdom.preprocessing.zinc.structures import analyse_structures
-from wisdom.preprocessing.dna.selection.splits import assign_splits
-from wisdom.preprocessing.dna.selection.dilutions import create_dilutions
-from wisdom.preprocessing.dna.selection.population import select_population
-from wisdom.preprocessing.dna.selection.leakage import assign_leakage_groups
-from wisdom.preprocessing.dna.selection.similarity import compute_similarity
-from wisdom.preprocessing.dna.selection.structures import snapshot_structures
+from wisdom.preprocessing.common.population import select_population
+from wisdom.preprocessing.common.leakage import assign_leakage_groups
+from wisdom.preprocessing.common.similarity import compute_similarity
+from wisdom.preprocessing.common.snapshots import snapshot_structures
+from wisdom.preprocessing.common.functional_metadata import annotate_functions
 
 
 class ZincSelection(lf.Work):
@@ -26,7 +30,14 @@ class ZincSelection(lf.Work):
 
     def run(
         self,
-        raw_path: Path,
+        skip: bool = False,
+        existing_design: Path | None = None,
+        raw_path: Path | None = None,
+        negative_evidence: Path | None = None,
+        release_id: str = "zinc-pilot-1",
+        maximum_entries: int = 0,
+        raw_output_directory: str | None = None,
+        negative_go_terms: Sequence[str] = ("GO:0008270", "GO:0046872"),
         workers: int = 8,
         coordination_cutoff: float = 3.0,
         minimum_occupancy: float = 0.5,
@@ -46,6 +57,13 @@ class ZincSelection(lf.Work):
         phenotype_min_samples: int = 2,
         phenotype_stability: float = 0.7,
         positive_negative_ratio: float = 1.0,
+        positive_policy: str = "diverse_quota",
+        surface_resolution: float = 1.0,
+        probe_radius: float = 1.4,
+        positive_gap: float = 1.4,
+        functional_metadata: Path | None = None,
+        site_metadata: Path | None = None,
+        evaluate_shortcuts: bool = False,
         train_fraction: float = 0.70,
         validation_fraction: float = 0.15,
         test_fraction: float = 0.15,
@@ -57,7 +75,16 @@ class ZincSelection(lf.Work):
         """Verify coordination, group the full RAW population, then select and split once.
 
         Args:
-            raw_path: Frozen JSONL with positive candidates and sequence-bound explicit negatives.
+            skip: Forward existing_design without tools, downloads or scientific computation.
+            existing_design: Complete portable design directory, required when skipped.
+            raw_path: Optional frozen candidate JSONL; bypass acquisition when supplied.
+            negative_evidence: Optional reviewed negative JSONL; null discovers experimental NOT.
+            release_id: Frozen discovery query namespace, default zinc-pilot-1.
+            maximum_entries: Sorted discovery pilot cap; zero inspects all query hits.
+            raw_output_directory: Optional atomic acquisition copy; null keeps managed evidence.
+            negative_go_terms: Exact denial terms when acquiring negatives, default Zn binding
+                GO:0008270 and broader metal binding GO:0046872. Reviewed ion/cation ancestors
+                GO:0043167/GO:0043169 are also accepted; never a narrower or unrelated term.
             workers: Bounded download and native tool threads, default 8.
             coordination_cutoff: Maximum donor-Zn center separation in ångströms, default 3.
             minimum_occupancy: Minimum occupied Zn/donor fraction, default 0.5.
@@ -77,6 +104,16 @@ class ZincSelection(lf.Work):
             phenotype_min_samples: HDBSCAN core-neighbor count, default 2.
             phenotype_stability: Minimum cross-grid ARI for >=2 clusters, default 0.7.
             positive_negative_ratio: Positive/negative canonical count ratio, default 1.
+            positive_policy: diverse_quota (default) samples positives; all retains every
+                eligible positive and reports the actual ratio instead of enforcing balance.
+            surface_resolution: Early deterministic boundary spacing, default 1 Å.
+            probe_radius: Early solvent expansion, default 1.4 Å.
+            positive_gap: Early positive coordinating-atom surface gap, default 1.4 Å.
+            functional_metadata: Optional frozen JSONL annotations bound to identifier and
+                sequence_sha256, with source/version provenance. Used only for audit/selection.
+            evaluate_shortcuts: Fit a small train-only covariate baseline; default false.
+            site_metadata: Optional frozen metal-database JSONL bound to exact structure/site;
+                enriches audit evidence, never coordination acceptance or labels. Default null.
             train_fraction: Group-wise training fraction, default 0.70.
             validation_fraction: Fixed validation fraction, default 0.15.
             test_fraction: Fixed test fraction, default 0.15; fractions must sum to one.
@@ -94,8 +131,18 @@ class ZincSelection(lf.Work):
                 group splits, or leakage audit failure. No fallback or invented negatives exist.
             ValueError: Invalid evidence, assembly/copy, sequence, or scientific thresholds.
         """
+        # A frozen design already contains the scientific decision and exact coordinate snapshot.
+        # Forward its native artifact without acquiring evidence or recomputing a single split.
+
+        if skip:
+            if existing_design is None:
+                raise ValueError("existing_design is required when Zn Selection is skipped")
+            self.outputs.artifact("zinc-design", existing_design, role="dataset-design")
+            self.log("Zn selection skipped; forwarding the frozen design and structure snapshot")
+            return {"skipped": True, "design": str(existing_design)}
+
         # 1. Resolve specialist binaries before expensive work. Then read explicit evidence:
-        # an RCSB Zn hit is only a candidate; negative evidence is mandatory and sequence-bound.
+        # an RCSB Zn hit is only a candidate; negative evidence is acquired or explicitly supplied.
 
         try:
             mmseqs = self.tools.require("mmseqs", version_args=("version",))
@@ -103,6 +150,13 @@ class ZincSelection(lf.Work):
         except Exception as error:
             raise RuntimeError("Zn selection needs mmseqs and foldseek; run ./install.sh locally "
                                "or lf clusters bootstrap <cluster> --project .") from error
+        if raw_path is None:
+            acquisition = discover_candidates(
+                self, negative_evidence, release_id, workers, maximum_entries,
+                requests_per_second, coordination_cutoff, minimum_occupancy,
+                minimum_donors, minimum_residues, raw_output_directory, negative_go_terms,
+            )
+            raw_path = acquisition["raw_path"]
         rows = load_evidence(raw_path)
         if not any(int(row["label"]) == 0 for row in rows):
             raise RuntimeError("no explicit negative Zn evidence; benchmark construction stopped")
@@ -113,7 +167,12 @@ class ZincSelection(lf.Work):
         self.log(f"Verifying {len(rows)} Zn candidates with {workers} workers")
         rows = analyse_structures(self, rows, workers, coordination_cutoff, minimum_occupancy,
                                   minimum_donors, minimum_residues, maximum_resolution,
-                                  requests_per_second)
+                                  requests_per_second, surface_resolution, probe_radius,
+                                  positive_gap)
+        if functional_metadata is not None:
+            rows = annotate_functions(rows, functional_metadata)
+        if site_metadata is not None:
+            rows = annotate_sites(rows, site_metadata)
         sequence_labels: dict[str, set[int]] = {}
         for row in rows:
             sequence_labels.setdefault(row["sequence_sha256"], set()).add(int(row["label"]))
@@ -135,14 +194,27 @@ class ZincSelection(lf.Work):
         # 4. Keep all reliable negatives and sample diverse positives. Assign entire leakage
         # groups to fixed splits, and only afterwards derive nested group-wise train dilutions.
 
-        selected, selection = select_population(rows, positive_negative_ratio, True, False, seed)
+        if positive_policy not in {"diverse_quota", "all"}:
+            raise ValueError("Zn positive_policy must be diverse_quota or all")
+        for row in rows:
+            row["coordination_signature"] = "|".join(sorted(
+                "/".join(f"{name}{count}" for name, count in
+                         site["selected_residue_counts"].items())
+                for site in row["sites"] if site["accepted"]))
+        selected, selection = select_population(rows, positive_negative_ratio, True, False, seed,
+            keep_all_positives=positive_policy == "all",
+            additional_strata=("method", "family", "coordination_signature"))
+        global_only = [row["identifier"] for row in selected
+                       if int(row["label"]) == 1 and not row["local_gt_expected"]]
         selected, split_audit = assign_splits(selected, train_fraction, validation_fraction,
-                                              test_fraction, seed)
+                                              test_fraction, seed, training_only_ids=global_only)
         dilutions = create_dilutions(selected, dilution_fractions, dilution_replicates, seed)
-        audit = audit_dataset(rows, selected, dilutions)
+        audit = audit_dataset(rows, selected, dilutions, selection["positive_negative_ratio"])
         audit.update(phenotypes=phenotypes, selection=selection, split_assignment=split_audit,
                      task="zinc_binding", positive_definition="verified deposited coordination",
                      physiological_specificity_claimed=False)
+        if evaluate_shortcuts:
+            audit["shortcut_baseline"] = shortcut_baseline(selected, seed)
 
         # 5. Preserve exact coordinates and evidence. Human labelled TXT is convenient but the
         # complete JSONL retains assembly/copy, coordination and grouping for preprocessing.
@@ -161,6 +233,14 @@ class ZincSelection(lf.Work):
             + "\n" for row in rows))
         (root / "dilutions.json").write_text(json.dumps(dilutions, indent=2))
         (root / "audit.json").write_text(json.dumps(audit, indent=2))
+        selected_ids = {row["identifier"] for row in selected}
+        (root / "zinc-sites.jsonl").write_text("".join(
+            json.dumps({"identifier": row["identifier"], "pdb_id": row["pdb_id"],
+                        "assembly_id": row["assembly_id"], "protein_copy": row["protein_copy"],
+                        "selected": row["identifier"] in selected_ids,
+                        "structure_sha256": row["structure_sha256"], **site}, sort_keys=True) + "\n"
+            for row in rows for site in row["sites"] if site["accepted"]
+        ), encoding="utf-8")
         for name, values in (("sequence-pairs.tsv", similarity["sequence_path"]),
                               ("structure-pairs.tsv", similarity["structure_path"])):
             (root / name).write_bytes(Path(values).read_bytes())

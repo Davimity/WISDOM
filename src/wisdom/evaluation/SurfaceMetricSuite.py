@@ -3,11 +3,10 @@
 from __future__ import annotations
 
 import math
-
 import torch
+
 from torch import Tensor
 from scipy.stats import spearmanr
-
 from wisdom.evaluation.BinaryMetricSuite import BinaryMetricSuite
 
 

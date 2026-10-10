@@ -19,7 +19,7 @@ from lambdaforge.work.ResultStore import ResultStore
 from test_integration import _run
 
 from wisdom.evaluation.SurfacePredictionReport import SurfacePredictionReport
-from wisdom.preprocessing.structure.ProteinVisualizer import ProteinVisualizer
+from wisdom.preprocessing.common.structure.ProteinVisualizer import ProteinVisualizer
 from wisdom.Training import Training
 from wisdom.visualization.ModelValidation import ModelValidation
 from wisdom.visualization.ProteinReportPage import ProteinReportPage

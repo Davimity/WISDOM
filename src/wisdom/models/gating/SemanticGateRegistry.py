@@ -1,12 +1,10 @@
 """Stable registry for globally shared semantic gates and their hierarchy."""
 
-from collections.abc import Mapping, Sequence
-from typing import cast
-
 import torch
 
+from typing import cast
 from torch import Tensor, nn
-
+from collections.abc import Mapping, Sequence
 from wisdom.models.gating.HardConcreteGate import HardConcreteGate
 
 

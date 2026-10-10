@@ -1,7 +1,6 @@
 """Parser-independent protein domain value."""
 
 from dataclasses import dataclass
-
 from wisdom.utils.structure.models.Atom import Atom
 from wisdom.utils.structure.models.Chain import Chain
 from wisdom.utils.structure.enums.BondType import BondType

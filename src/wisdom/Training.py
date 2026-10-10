@@ -34,15 +34,15 @@ from wisdom.evaluation.SurfaceMetricSuite import SurfaceMetricSuite
 from wisdom.visualization.ProteinReportPage import ProteinReportPage
 from wisdom.evaluation.SubgroupMetricSuite import SubgroupMetricSuite
 from wisdom.models.InitializationProfile import InitializationProfile
+from wisdom.features.SurfaceFeatureSchema import SurfaceFeatureSchema
 from wisdom.analysis.WisdomAnalysisProfile import WisdomAnalysisProfile
 from wisdom.models.DiffusionSurfaceEncoder import DiffusionSurfaceEncoder
 from wisdom.evaluation.OptimizationDiagnostics import OptimizationDiagnostics
 from wisdom.evaluation.SurfacePredictionReport import SurfacePredictionReport
+from wisdom.models.SurfaceRepresentationMode import SurfaceRepresentationMode
 from wisdom.evaluation.SurfaceFaithfulnessAudit import SurfaceFaithfulnessAudit
 from wisdom.evaluation.SurfaceVisualizationMode import SurfaceVisualizationMode
-from wisdom.preprocessing.structure.VisualizationContent import VisualizationContent
-from wisdom.features.SurfaceFeatureSchema import SurfaceFeatureSchema
-from wisdom.models.SurfaceRepresentationMode import SurfaceRepresentationMode
+from wisdom.preprocessing.common.structure.VisualizationContent import VisualizationContent
 
 
 _MODEL_INPUT_NAMES = (
@@ -2063,6 +2063,7 @@ def _train_wisdom(
                     "model_version":    model_version,
                     "model_parameters": model_parameters,
                     "surface_features": tuple(surface_features),
+                    "surface_representation_contract": "H/X/Z:2.0",
                     "surface_feature_statistics": datasets["train"].feature_statistics,
                     "task_specification": {
                         "task_name": datasets["train"].task_specification.task_name,
@@ -2809,7 +2810,7 @@ def _evaluate(
     atom_counts       : list[Tensor] = []
     surface_counts    : list[Tensor] = []
     global_phenotypes : list[str] = []
-    interface_phenotypes: list[str] = []
+    local_phenotypes: list[str] = []
     tiers             : list[str] = []
     attention_available = True
     faithfulness_sums : dict[str, float] = {}
@@ -2883,7 +2884,7 @@ def _evaluate(
             )
             for name, destination in (
                 ("global_phenotype", global_phenotypes),
-                ("interface_phenotype", interface_phenotypes),
+                ("local_phenotype", local_phenotypes),
                 ("tier", tiers),
             ):
                 values = batch.get(name)
@@ -3014,7 +3015,7 @@ def _evaluate(
             torch.cat(surface_validity),
             torch.cat(surface_owners),
             global_phenotypes,
-            interface_phenotypes,
+            local_phenotypes,
             tiers,
         )
     )

@@ -3,6 +3,7 @@
 import numpy as np
 
 from typing import Any
+from collections import Counter
 from scipy.spatial import cKDTree
 from wisdom.utils.structure.BiologicalAssembly import BiologicalAssembly
 
@@ -76,16 +77,111 @@ class ZincCoordination:
         tree = cKDTree(np.asarray([atom["position"] for atom in donors]).reshape(-1, 3))
         sites = []
         for index, metal in enumerate(metals):
-            partners = [donors[i] for i in tree.query_ball_point(metal["position"], self.cutoff)]
+            partners = [{**donors[i], "distance_angstrom": float(np.linalg.norm(
+                np.asarray(donors[i]["position"]) - metal["position"]))}
+                for i in sorted(tree.query_ball_point(metal["position"], self.cutoff))]
             local = [atom for atom in partners if atom["chain_index"] == selected_index]
             residues = sorted({atom["residue"] for atom in local})
+            # Count distinct residues, not donor atoms or unique residue types. Two Cys and
+            # two His must remain distinguishable from one Cys and three His.
+
+            distinct = {atom["residue"]: atom["residue_name"] for atom in local}
+            residue_counts = dict(sorted(Counter(distinct.values()).items()))
+            element_counts = dict(sorted(Counter(a["element"] for a in local).items()))
+            distances = [atom["distance_angstrom"] for atom in local]
+            directions = np.asarray([np.asarray(a["position"]) - metal["position"]
+                                     for a in local]).reshape(-1, 3)
+            lengths = np.linalg.norm(directions, axis=1)
+            directions = directions[lengths > 0] / lengths[lengths > 0, None]
+            angles = [float(np.degrees(np.arccos(np.clip(np.dot(left, right), -1, 1))))
+                      for i, left in enumerate(directions) for right in directions[i + 1:]]
             sites.append({**metal, "site_id": f"ZN{index:04d}", "partners": partners,
+                          "coordination_schema": "2.0",
+                          "assembly_id": assembly.assembly_id,
+                          "protein_chain": chain_name, "protein_copy": copy_index,
                           "selected_chain_index": selected_index,
                           "selected_donor_count": len(local),
                           "selected_residues": residues,
                           "selected_residue_names": sorted({a["residue_name"] for a in local}),
+                          "selected_residue_counts": residue_counts,
+                          "selected_element_counts": element_counts,
+                          "selected_atom_type_counts": dict(sorted(Counter(
+                              f"{a['residue_name']}:{a['atom']}" for a in local).items())),
+                          "coordination_distance_mean": float(np.mean(distances))
+                          if distances else None,
+                          "coordination_distance_std": float(np.std(distances))
+                          if distances else None,
+                          "donor_angles_degrees": angles,
                           "interchain": len({a["chain_index"] for a in partners}) > 1,
                           "accepted": len(local) >= self.minimum_donors
                           and len(residues) >= self.minimum_residues,
                           "definition": f"occupied protein N/O/S centers within {self.cutoff} Å"})
         return sites
+
+    @staticmethod
+    def surface_gaps(
+        points: np.ndarray, coordinates: np.ndarray, radii: np.ndarray,
+    ) -> np.ndarray:
+        """Measure minimum signed gaps to coordinating spheres without dense point pairs.
+
+        Args:
+            points: Surface positions [M,3] in assembly coordinates, ångströms.
+            coordinates: Coordinating atom centers [N,3] in the same frame.
+            radii: Positive donor van der Waals radii [N], ångströms.
+
+        Returns:
+            Float32 [M] minimum(||point-atom||-radius). A nearest-center upper bound plus
+            maximum radius includes every atom that could improve the minimum.
+
+        Raises:
+            ValueError: No coordinating atoms are provided.
+        """
+        if len(coordinates) == 0:
+            raise ValueError("coordinating surface gaps require at least one donor")
+        tree       = cKDTree(coordinates)
+        nearest    = tree.query(points)[0]
+        candidates = tree.query_ball_point(points, nearest + radii.max())
+        return np.asarray([
+            np.min(np.linalg.norm(coordinates[ids] - point, axis=1) - radii[ids])
+            for point, ids in zip(points, candidates, strict=True)
+        ], dtype=np.float32)
+
+    @staticmethod
+    def matches(observed: list[dict[str, Any]], expected: list[dict[str, Any]]) -> bool:
+        """Compare immutable site evidence with a controlled historical-schema boundary.
+
+        Args:
+            observed: Newly reproduced coordination evidence from exact deposited bytes.
+            expected: Published site records, historical schema or current 2.0 records.
+
+        Returns:
+            True only when coordination fields agree. Schema-2 excludes separately derived
+            surface-support/phenotype fields; all remaining fields require exact equality;
+            historical records compare their complete original vocabulary, not new derived fields.
+        """
+        if len(observed) != len(expected):
+            return False
+        for actual, prior in zip(observed, expected, strict=True):
+            if prior.get("coordination_schema") == "2.0":
+                coordination = {key: value for key, value in prior.items()
+                                if key not in {
+                                    "surface_support", "local_phenotype", "external_metadata"}}
+                if actual != coordination:
+                    return False
+                continue
+            for key, value in prior.items():
+                if key == "partners":
+                    partners = actual[key]
+                    remaining = list(partners)
+                    for partner in value:
+                        match = next((index for index, candidate in enumerate(remaining)
+                                      if all(candidate.get(field) == item
+                                             for field, item in partner.items())), None)
+                        if match is None:
+                            return False
+                        remaining.pop(match)
+                    if remaining:
+                        return False
+                elif actual.get(key) != value:
+                    return False
+        return True

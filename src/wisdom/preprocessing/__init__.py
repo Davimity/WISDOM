@@ -1,6 +1,5 @@
-"""Public WISDOM selection and preprocessing Works."""
+"""Common geometry and independent task-specific preprocessing namespaces.
 
-from wisdom.preprocessing.dna.selection.Selection import Selection
-from wisdom.preprocessing.dna.preprocessing.Preprocessing import Preprocessing
-
-__all__ = ["Preprocessing", "Selection"]
+Public Works use their explicit task paths. Importing common structural algorithms must not
+eagerly load the DNA orchestration or its evidence modules.
+"""

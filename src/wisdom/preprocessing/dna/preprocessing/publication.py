@@ -8,7 +8,6 @@ import lambdaforge as lf
 from typing import Any
 from pathlib import Path
 from collections.abc import Iterable, Mapping, Sequence
-
 from wisdom.preprocessing.dna.DNAValidation import DNAValidation
 from lambdaforge.data import DatasetAsset, DatasetIndex, DatasetMember
 
@@ -268,7 +267,7 @@ def _write_index(
                     "split":               str(row["split"]),
                     "leakage_group":       str(row["leakage_group"]),
                     "global_phenotype":    str(row["global_phenotype"]),
-                    "interface_phenotype": str(row["interface_phenotype"]),
+                    "local_phenotype": str(row["local_phenotype"]),
                 },
                 targets = {
                     "dna_binding":       int(row["label"]),

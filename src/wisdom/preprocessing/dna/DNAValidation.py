@@ -3,24 +3,25 @@
 from __future__ import annotations
 
 import csv
-import hashlib
 import json
 import math
-from collections import Counter, defaultdict
-from collections.abc import Mapping
-from pathlib import Path
-from typing import Any
-
-import lambdaforge as lf
+import hashlib
 import matplotlib
 import numpy as np
-from lambdaforge.data import DatasetIndex
-from scipy.stats import wasserstein_distance
+import lambdaforge as lf
+import matplotlib.pyplot as plt
+
+from typing import Any
+from pathlib import Path
+from collections.abc import Mapping
 from sklearn.decomposition import PCA
+from lambdaforge.data import DatasetIndex
+from collections import Counter, defaultdict
+from scipy.stats import wasserstein_distance
 from sklearn.preprocessing import RobustScaler
+from wisdom.features.SurfaceFeatureSidecar import SurfaceFeatureSidecar
 
 matplotlib.use("Agg")
-import matplotlib.pyplot as plt
 
 
 class DNAValidation(lf.Work):
@@ -163,6 +164,18 @@ class DNAValidation(lf.Work):
 
         split_ids: dict[str, set[str]] = defaultdict(set)
         group_splits: dict[str, set[str]] = defaultdict(set)
+        normalization_populations: dict[str, dict[str, str]] = {"full": {}}
+        for member in members:
+            if member.partitions.get("split") == "train":
+                digest = member.assets["universal_npz"].sha256
+                if digest is not None:
+                    normalization_populations["full"][member.member_id] = (
+                        digest.removeprefix("sha256:")
+                    )
+                    for view in member.metadata.get("dilutions", ()):
+                        normalization_populations.setdefault(str(view), {})[member.member_id] = (
+                            digest.removeprefix("sha256:")
+                        )
         for member in members:
             split = str(member.partitions.get("split", ""))
             group = str(member.partitions.get("leakage_group", ""))
@@ -170,6 +183,21 @@ class DNAValidation(lf.Work):
             group_splits[group].add(split)
             try:
                 self._validate_member(root, member)
+                feature_names: list[str] = []
+                for name in member.metadata.get("optional_surface_feature_assets", ()):
+                    path = root / member.assets[name].path
+                    with np.load(path, allow_pickle=False) as fields:
+                        names = fields["feature_names"].tolist()
+                    if set(names) & set(feature_names):
+                        raise ValueError("duplicate optional surface feature channels")
+                    feature_names.extend(names)
+                    SurfaceFeatureSidecar.read(path,
+                        root / member.assets["universal_npz"].path, names)
+                if feature_names:
+                    statistics = json.loads((root / member.assets[
+                        "surface_feature_statistics"].path).read_text())
+                    SurfaceFeatureSidecar.validate_statistics(
+                        statistics, feature_names, normalization_populations)
             except (OSError, ValueError, KeyError, json.JSONDecodeError) as error:
                 details.append({"identifier": member.member_id, "failure": str(error)})
         overlap = sum(
@@ -333,7 +361,9 @@ class DNAValidation(lf.Work):
             ] += 1
             if int(member.targets.get("dna_binding", -1)) == 1:
                 interface_by_split.setdefault(split, Counter())[
-                    str(member.partitions.get("interface_phenotype", "unavailable"))
+                    str(member.partitions.get(
+                        "local_phenotype",
+                        member.partitions.get("interface_phenotype", "unavailable")))
                 ] += 1
 
         max_cross_sequence: float | None = None
@@ -390,7 +420,7 @@ class DNAValidation(lf.Work):
                 split: dict(sorted(counts.items()))
                 for split, counts in global_by_split.items()
             },
-            "positive_interface_phenotype_by_split": {
+            "positive_local_phenotype_by_split": {
                 split: dict(sorted(counts.items()))
                 for split, counts in interface_by_split.items()
             },
@@ -569,8 +599,10 @@ class DNAValidation(lf.Work):
         phenotype_splits: dict[str, set[str]] = defaultdict(set)
         for member in members:
             group = str(member.partitions.get("leakage_group", ""))
-            for field in ("global_phenotype", "interface_phenotype"):
-                phenotype = str(member.partitions.get(field, "unavailable"))
+            for field in ("global_phenotype", "local_phenotype"):
+                historical = "interface_phenotype" if field == "local_phenotype" else field
+                phenotype = str(member.partitions.get(
+                    field, member.partitions.get(historical, "unavailable")))
                 if phenotype.endswith("NOISE") or phenotype in {
                     "unavailable",
                     "not_applicable",
@@ -898,8 +930,10 @@ class DNAValidation(lf.Work):
                 str(member.partitions.get("global_phenotype", "unavailable"))
                 for member in selected
             )
-            interface_phenotypes = Counter(
-                str(member.partitions.get("interface_phenotype", "unavailable"))
+            local_phenotypes = Counter(
+                str(member.partitions.get(
+                        "local_phenotype",
+                        member.partitions.get("interface_phenotype", "unavailable")))
                 for member in selected
                 if int(member.targets["dna_binding"]) == 1
             )
@@ -925,7 +959,7 @@ class DNAValidation(lf.Work):
                 "leakage_groups": len(groups),
                 "largest_leakage_group": max(groups.values(), default=0),
                 "global_phenotypes": dict(sorted(global_phenotypes.items())),
-                "positive_interface_phenotypes": dict(sorted(interface_phenotypes.items())),
+                "positive_local_phenotypes": dict(sorted(local_phenotypes.items())),
                 "source_datasets": dict(sorted(sources.items())),
                 "continuous": {
                     field: DNAValidation._distribution(values)
@@ -1125,7 +1159,7 @@ class DNAValidation(lf.Work):
         for axis, table_name, title in (
             (
                 axes[2],
-                "positive_interface_phenotype_by_split",
+                "positive_local_phenotype_by_split",
                 "Positive local phenotypes by split",
             ),
             (axes[3], "global_phenotype_by_split", "Global phenotypes by split"),
@@ -1215,7 +1249,7 @@ class DNAValidation(lf.Work):
                 axes[0],
                 "positive-interface-features.csv",
                 "positive-interface-phenotypes.csv",
-                "interface_phenotype",
+                "local_phenotype",
                 "Positive local-interface PCA",
             ),
             (
@@ -1236,7 +1270,8 @@ class DNAValidation(lf.Work):
             if label_source.is_file():
                 with label_source.open("r", encoding="utf-8", newline="") as stream:
                     labels_by_id = {
-                        str(row["identifier"]): str(row[label_field])
+                        str(row["identifier"]): str(row.get(
+                            label_field, row.get("interface_phenotype", "unavailable")))
                         for row in csv.DictReader(stream)
                     }
             feature_names = sorted(

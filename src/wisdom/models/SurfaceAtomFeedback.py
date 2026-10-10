@@ -1,8 +1,9 @@
 """Sparse surface-to-atom feedback over the existing compact transfer relation."""
 
 import torch
-from lambdaforge.nn import Scatter
+
 from torch import Tensor, nn
+from lambdaforge.nn import Scatter
 
 
 class SurfaceAtomFeedback(nn.Module):

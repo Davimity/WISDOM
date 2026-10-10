@@ -226,23 +226,23 @@ class WisdomV2(WisdomV1):
         operators    = inputs["surface_operators"]
         surface_ptr  = inputs["surface_ptr"]
 
-        embeddings, surface_logits = self.encode_surface(**inputs)
+        evidence_features, surface_logits = self.encode_surface(**inputs)
         protein_count = len(surface_ptr) - 1
         head_output: dict[str, Tensor] = {}
         if self.global_surface_heads is not None:
             head_output = self.global_surface_heads(
-                embeddings,
+                evidence_features,
                 area_weights,
                 owners,
                 protein_count,
             )
             surface_logits = head_output.get("conditioned_surface_logits", surface_logits)
         # Evidence refinement is inside the training forward: protein BCE differentiates
-        # through this operator to the local head. Attention still scores unchanged embeddings.
+        # through this operator to the local head. Attention still scores unchanged Z features.
 
         raw_surface_logits = surface_logits
         context = SurfaceEvidenceContext(
-            embeddings, area_weights, owners, surface_ptr, operators,
+            evidence_features, area_weights, owners, surface_ptr, operators,
             positions=inputs.get("surface_positions"),
             normals=inputs.get("surface_normals"),
             curvatures=inputs.get("surface_curvatures"),
@@ -251,7 +251,7 @@ class WisdomV2(WisdomV1):
         )
         surface_logits = self.refine_surface_logits(raw_surface_logits, context)
         pooled = self.pool_refined_surface_logits(
-            surface_logits, embeddings, area_weights, owners, operators, surface_ptr
+            surface_logits, evidence_features, area_weights, owners, operators, surface_ptr
         )
 
         epsilon       = torch.finfo(surface_logits.dtype).eps
@@ -284,8 +284,8 @@ class WisdomV2(WisdomV1):
                 else torch.sigmoid(raw_surface_logits)
             ),
             "refined_surface_probabilities": probabilities,
-            "surface_embeddings": embeddings,
-            "surface_evidence_features": embeddings,
+            **self.surface_representation_outputs(evidence_features,
+                inputs.get("surface_explicit_features")),
             "surface_probabilities": probabilities,
             "localization_scores": localization,
             "positive_area_fraction": positive_area,
@@ -321,18 +321,18 @@ class WisdomV2(WisdomV1):
 
     def pool_refined_surface_logits(
         self,
-        surface_logits      : Tensor,
-        surface_embeddings  : Tensor,
-        surface_area_weights: Tensor,
-        surface_batch       : Tensor,
-        surface_operators   : Any,
-        surface_ptr         : Tensor,
+        surface_logits            : Tensor,
+        surface_evidence_features : Tensor,
+        surface_area_weights      : Tensor,
+        surface_batch             : Tensor,
+        surface_operators         : Any,
+        surface_ptr               : Tensor,
     ) -> dict[str, Tensor]:
         """Pool already refined evidence without applying the refiner a second time.
 
         Args:
             surface_logits: Local evidence ``[M]``.
-            surface_embeddings: Surface features ``[M,H]``.
+            surface_evidence_features: Actual Z ``[M,D]``: H, X or hybrid [H,X].
             surface_area_weights: Represented-area weights ``[M]``.
             surface_batch: Point-to-protein owners ``[M]``.
             surface_operators: Ordered per-protein diffusion operators.
@@ -341,7 +341,7 @@ class WisdomV2(WisdomV1):
         Returns:
             Protein logits and optional attention weights from ``ProteinPoolingHead``.
         """
-        # Mixed-precision model forward passes may expose BF16 surface embeddings after leaving
+        # Mixed-precision forward passes may expose BF16 Z features after leaving
         # their autocast context. The diagnostic pooling boundary is called later by the
         # faithfulness audit, where the attention scorer still owns FP32 parameters. Recompute
         # attention scores in the scorer's parameter dtype so PyTorch receives compatible matrix
@@ -349,11 +349,11 @@ class WisdomV2(WisdomV1):
 
         if self.pooling_type is PoolingType.ATTENTION:
             parameter = next(self.pooling_head.parameters())
-            surface_embeddings = surface_embeddings.to(dtype=parameter.dtype)
+            surface_evidence_features = surface_evidence_features.to(dtype=parameter.dtype)
 
         return self.pooling_head(
             surface_logits,
-            surface_embeddings,
+            surface_evidence_features,
             surface_area_weights,
             surface_batch,
             surface_operators,
@@ -362,19 +362,19 @@ class WisdomV2(WisdomV1):
 
     def pool_surface_logits(
         self,
-        surface_logits      : Tensor,
-        surface_embeddings  : Tensor,
-        surface_area_weights: Tensor,
-        surface_batch       : Tensor,
-        surface_operators   : Any,
-        surface_ptr         : Tensor,
-        context             : SurfaceEvidenceContext | None = None,
+        surface_logits            : Tensor,
+        surface_evidence_features : Tensor,
+        surface_area_weights      : Tensor,
+        surface_batch             : Tensor,
+        surface_operators         : Any,
+        surface_ptr               : Tensor,
+        context                   : SurfaceEvidenceContext | None = None,
     ) -> dict[str, Tensor]:
         """Apply the complete raw -> refiner -> pooling boundary for interventions.
 
         Args:
             surface_logits: Raw local-head evidence [M], not an already refined field.
-            surface_embeddings: Existing point embeddings [M,H].
+            surface_evidence_features: Actual Z point features [M,D], not an assumed learned H.
             surface_area_weights: Point areas [M].
             surface_batch: Protein owners [M].
             surface_operators: Original per-protein spectral packs.
@@ -382,7 +382,7 @@ class WisdomV2(WisdomV1):
             context: Required original full-surface context for a nonidentity refiner.
 
         Returns:
-            Protein logits and optional unchanged embedding-derived attention weights.
+            Protein logits and optional unchanged Z-derived attention weights.
 
         Raises:
             ValueError: If refinement is active but its full context is unavailable.
@@ -391,11 +391,11 @@ class WisdomV2(WisdomV1):
             if self.surface_refiner_type is not SurfaceEvidenceRefinerType.NONE:
                 raise ValueError("active evidence refinement requires the original surface context")
             context = SurfaceEvidenceContext(
-                surface_embeddings, surface_area_weights, surface_batch,
+                surface_evidence_features, surface_area_weights, surface_batch,
                 surface_ptr, surface_operators,
             )
         refined = self.refine_surface_logits(surface_logits, context)
         return self.pool_refined_surface_logits(
-            refined, surface_embeddings, surface_area_weights, surface_batch,
+            refined, surface_evidence_features, surface_area_weights, surface_batch,
             surface_operators, surface_ptr,
         )
