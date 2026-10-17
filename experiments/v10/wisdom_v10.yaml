@@ -31,15 +31,15 @@ with:                                               # Replace every marked value
   weight_decay: 0.0001                              # REPLACE with the V9 winner.
   gate_lambda: 0.001                                # REPLACE with the V9 winner.
   weak_loss_profile: custom                         # Preserve selected weak coefficients.
-  negative_surface_lambda: 0.3                      # REPLACE with the V6a or V6d winner.
-  positive_existence_lambda: 0.0                    # REPLACE if selected at V6b.
-  regional_positive_lambda: 0.0                     # REPLACE if selected at V6b or V6d.
+  negative_surface_lambda: 0.3                      # REPLACE from the reviewed V6h interaction ledger.
+  positive_existence_lambda: 0.0                    # REPLACE from the reviewed V6h interaction ledger.
+  regional_positive_lambda: 0.0                     # Freeze this coefficient from the reviewed V6h interaction ledger.
   regional_loss_length: 2.5                         # REPLACE with the selected regional scale.
-  regional_ranking_lambda: 0.0                      # REPLACE if selected at V6b.
+  regional_ranking_lambda: 0.0                      # Freeze this coefficient from the reviewed V6h interaction ledger.
   regional_ranking_margin: 0.5                      # REPLACE with the selected ranking margin.
-  cardinality_lambda: 0.0                           # REPLACE if selected at V6c.
-  total_variation_lambda: 0.0                       # REPLACE if selected at V6c.
-  dirichlet_lambda: 0.0                             # REPLACE if selected at V6c or V6d.
+  cardinality_lambda: 0.0                           # Freeze this coefficient from the reviewed V6h interaction ledger.
+  total_variation_lambda: 0.0                       # Freeze this coefficient from the reviewed V6h interaction ledger.
+  dirichlet_lambda: 0.0                             # Freeze this coefficient from the reviewed V6h interaction ledger.
   head_type: single                                 # REPLACE with the V7 winner.
   global_context_dim: 16                            # REPLACE if V7 selects a conditioned head.
   detach_global_context: true                       # REPLACE with the V7 winner policy.

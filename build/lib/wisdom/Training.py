@@ -395,7 +395,7 @@ class Training(lf.Work):
                 embeds inspectors only in LF, ``viewer`` writes HTML/PLY, and ``full`` also writes
                 NPZ prediction data. Never changes metrics, loss, or checkpoint choice.
             visualization: Preferred presentation mapping: mode=none (none/report/viewer/full),
-                content=predictions (predictions/full), maximum_points=2000 (>0),
+                content=predictions (predictions/features/full), maximum_points=2000 (>0),
                 maximum_proteins=12 (0 means all), report_budget_mib=4.0 in (0,16],
                 identifiers=(), threshold=0.5 in [0,1], embed_report=true. Supplied entries override
                 corresponding legacy surface_* arguments. Generation occurs only at the end of
@@ -884,7 +884,8 @@ def _train_wisdom(
             only on the restored best checkpoint; a positive integer additionally evaluates every
             N epochs. Ignored when ``surface_metrics`` is false.
         surface_visualization: ``none``, ``report``, ``viewer``, or ``full`` final artifact level.
-        surface_visualization_content: predictions embeds only probability/logits/GT; full uses
+        surface_visualization_content: predictions embeds only probability/logits/GT; features
+            adds sampled learned model channels without structural traces; full uses
             the structural inspector. Neither alters scientific metrics or the forward pass.
         surface_visualization_points: Positive maximum displayed points; scientific evaluation
             and optional NPZ/PLY exports retain all points and their original precision.
@@ -1732,6 +1733,9 @@ def _train_wisdom(
                 else:
                     surface_task_loss = direct_task_loss.new_zeros(())
                     task_loss = direct_task_loss
+                # Priors and pooling share the operational field. With an active refiner,
+                # surface_logits is its output; raw_surface_logits is evaluation-only here.
+
                 weak_losses = weak_surface_loss(
                     logits=output["surface_logits"],
                     area_weights=_tensor(tensors, "surface_area_weights"),
@@ -2429,7 +2433,10 @@ def _train_wisdom(
     if report_page is not None:
         for document in surface_report_documents:
             document["seed"] = seed
-            document["details"] = {"best_epoch": best_epoch, "run": run_label}
+            document["configuration"] = model_parameters
+            document["details"] = {
+                **document.get("details", {}), "best_epoch": best_epoch, "run": run_label,
+            }
         empty_reason = (
             "This Run was competitively pruned; best-checkpoint protein viewers were not generated."
             if stop_reason == "adaptive-hpo"

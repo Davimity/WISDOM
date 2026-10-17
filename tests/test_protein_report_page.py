@@ -70,6 +70,83 @@ def test_empty_report_is_explanatory_and_contains_no_library():
     assert summary["included_proteins"] == 0 and summary["omitted_proteins"] == []
 
 
+def test_saved_report_refresh_preserves_point_arrays_and_joins_configuration(documents):
+    """Refresh only renderer-owned UI; use matching audit identity, never guesses about labels."""
+    source, _ = ProteinReportPage().render(
+        [dict(documents[0], variant="Trial 143 / seed 4", seed=4)], {}
+    )
+    original = _payload(source)["documents"][0]
+    audit = [{
+        "trial": 143, "seed": 4, "split": "validation", "run_id": "source-run",
+        "parameters": {"pooling_type": "attention", "attention_hidden_dim": 32,
+                       "attention_variant": "gated"},
+        "proteins": {documents[0]["identifier"]: {"protein_probability": 0.75}},
+    }]
+    rows = ProteinReportPage.upgrade(source, audit)
+    assert rows[0]["configuration"]["attention_hidden_dim"] == 32
+    assert rows[0]["details"]["protein_probability"] == 0.75
+    old_html = gzip.decompress(base64.b64decode(original["content"])).decode()
+    controls = r"const C=(.*?);\nconst gd="
+    assert re.search(controls, old_html, re.S).group(1) == re.search(
+        controls, rows[0]["html"], re.S
+    ).group(1)
+    assert "Resize ${side} panel" in rows[0]["html"]
+    new, _ = ProteinReportPage().render(rows, {})
+    caption = _payload(new)["documents"][0]["configuration_label"]
+    assert "Attention" in caption and "32" in caption and "gated" in caption
+    assert "143" not in caption
+    with pytest.raises(ValueError, match="unsupported saved"):
+        ProteinVisualizer.refresh("not an inspector")
+
+
+def test_report_budget_interleaves_recorded_pooling_families(monkeypatch):
+    """A large early family cannot suppress later families merely by exhausting display bytes."""
+    monkeypatch.setattr(ProteinReportPage, "_encode", staticmethod(lambda text: "A" * 4000))
+    rows = [
+        {"identifier": f"protein-{index}", "label": index % 2, "split": "val",
+         "variant": f"Trial {index}", "seed": 4, "html": "fixture",
+         "configuration": {"pooling_type": family}}
+        for index, family in enumerate(["attention"] * 100 + ["mean"] * 2 + ["max"] * 2)
+    ]
+    html, summary = ProteinReportPage(0.1).render(rows, {})
+    assert summary["omitted_proteins"]
+    assert {row["configuration"]["pooling_type"] for row in _payload(html)["documents"]} == {
+        "attention", "mean", "max",
+    }
+
+
+def test_feature_profile_retains_model_channels_without_structural_traces(tmp_path, documents):
+    """Selected learned matrices must become real channels, without leaking into metrics or GT."""
+    archive = tmp_path / "geometry/processed/tiny.npz"
+    with np.load(archive, allow_pickle=False) as arrays:
+        count = len(arrays["surface_positions"])
+    report = SurfacePredictionReport(
+        SimpleNamespace(records=((archive, None, 0, "tiny", "core"),)),
+        tmp_path / "feature-report", "val", content="features", report_only=True,
+        identifiers=("tiny",), maximum_surface_points=30,
+    )
+    learned = torch.arange(count * 2).reshape(count, 2).float()
+    report.collect(
+        {"identifier": ["tiny"], "surface_ptr": torch.tensor([0, count])},
+        {"surface_logits": torch.zeros(count), "logits": torch.tensor([1.0]),
+         "surface_learned_embeddings": learned},
+    )
+    report.publish({}, 3)
+    np.testing.assert_array_equal(
+        report.representations["tiny"]["surface_learned_embeddings"], learned
+    )
+    document = report.report_documents[0]
+    controls = json.loads(re.search(r"const C=(.*?);\nconst gd=", document["html"], re.S).group(1))
+    assert set(controls["traces"]) == {"surface", "measurement"}
+    assert "surface_learned_embeddings_1" in controls["surface"]
+    assert len(controls["surface"]["surface_learned_embeddings_0"]["cloud"]) == 30
+    assert document["details"]["surface_auprc"] is None
+    assert document["details"]["protein_probability"] == pytest.approx(
+        torch.sigmoid(torch.tensor(1.0)).item()
+    )
+    assert not list(report.output_root.rglob("*.npz"))
+
+
 def test_prediction_profile_omits_structural_payload_and_fits_four_viewers(
     tmp_path, documents, monkeypatch,
 ):
@@ -137,6 +214,43 @@ def test_small_report_budget_explains_omissions_without_failing(documents):
     assert summary["included_proteins"] == 0 and len(summary["omitted_proteins"]) == 2
     assert "byte budget" in data["reason"]
     assert len(page.encode()) <= 0.1 * 1024 * 1024
+
+
+@pytest.mark.parametrize("maximum_mib", [0.25, 4.0, 14.0])
+def test_large_review_reserves_omission_metadata_and_actual_json_bytes(monkeypatch, maximum_mib):
+    """Model a 206-Trial gallery and measure the complete serialized HTML budget.
+
+    Args:
+        monkeypatch: Replace compression with deterministic fixed-size payloads;
+            this test checks byte accounting, not decompression or WebGL.
+        maximum_mib: Small gallery budget and normal Training/review budgets.
+
+    Unicode and less-than signs expand in script-safe JSON. Thousands of omitted
+    viewer IDs also occupy bytes even though the viewers themselves are excluded.
+    """
+    monkeypatch.setattr(ProteinReportPage, "_encode", staticmethod(lambda text: "A" * 8192))
+    documents = [
+        {
+            "identifier": f"protein-{index:04d}_A",
+            "split": "val", "label": index % 2,
+            "variant": f"Trial {index // 12 + 1} / seed 4",
+            "seed": 4, "html": "renderer fixture",
+            "details": {"description": "<" * 100 + "Ω" * 100},
+        }
+        for index in range(206 * 12)
+    ]
+    page, summary = ProteinReportPage(maximum_mib).render(
+        documents, {"description": "Ω" * 100, "source": "historical V5a"}
+    )
+    data = _payload(page)
+    assert summary["size_bytes"] == len(page.encode()) <= int(maximum_mib * 1024 * 1024)
+    assert len(data["documents"]) + len(data["omitted"]) == len(documents)
+    assert summary["omitted_proteins"] == data["omitted"]
+    assert data["omitted"]
+    assert data["context"]["description"] == "Ω" * 100
+    assert summary["included_proteins"] > 0
+    assert any(entry["label"] == 0 for entry in data["documents"])
+    assert any(entry["label"] == 1 for entry in data["documents"])
 
 
 def test_script_safe_context_and_native_section_metadata(tmp_path):
@@ -416,23 +530,24 @@ def test_review_rejects_modified_checkpoint_bytes(tmp_path):
         ModelValidation._verified(tmp_path, "model.pt", inventory)
 
 
-@pytest.mark.parametrize("content", ["full", "predictions"])
+@pytest.mark.parametrize("content", ["full", "predictions", "features"])
 def test_native_report_keeps_seeds_and_inspector_navigation_in_isolated_frame(
     tmp_path, documents, content,
 ):
     """Exercise the real LF report CSP, lazy viewer, return path and per-seed selection."""
     playwright = pytest.importorskip("playwright.sync_api")
-    if content == "predictions":
+    if content != "full":
         archive = tmp_path / "geometry/processed/tiny.npz"
         with np.load(archive, allow_pickle=False) as arrays:
             count = len(arrays["surface_positions"])
         for doc in documents:
             doc["html"], _ = ProteinVisualizer(max_surface_points=50).render(
-                archive, doc["identifier"], content="predictions",
+                archive, doc["identifier"], content=content,
                 additional_channels={
                     "model_prediction_probability": np.linspace(0, 1, count),
                     "model_prediction_hard": np.ones(count),
                     "model_prediction_logit": np.linspace(-5, 5, count),
+                    "surface_learned_embeddings_0": np.linspace(-1, 1, count),
                 },
             )
     runs = []
@@ -441,7 +556,14 @@ def test_native_report_keeps_seeds_and_inspector_navigation_in_isolated_frame(
         root.mkdir(parents=True)
         outputs = OutputCollection(SimpleNamespace(run_dir=root))
         labelled = [
-            dict(doc, variant=("max" if i == 0 else "topk"), seed=seed)
+            dict(
+                doc, variant=("max" if i == 0 else "topk"), seed=seed,
+                details={"protein_probability": 0.1 if i == 0 else 0.9,
+                         "surface_auprc": None if i == 0 else 0.8,
+                         "binary_error": False,
+                         "selection_reasons": ["correct_negative" if i == 0
+                                               else "best_localization"]},
+            )
             for i, doc in enumerate(documents)
         ]
         page, _ = ProteinReportPage().render(labelled, {"seed": seed})
@@ -493,12 +615,24 @@ def test_native_report_keeps_seeds_and_inspector_navigation_in_isolated_frame(
         page.get_by_role("button", name="WISDOM proteins", exact=True).click()
         frame = page.frame_locator('iframe[title="WISDOM proteins"]')
         assert frame.get_by_role("heading", name="WISDOM proteins").is_visible()
+        assert frame.get_by_text("Correct negative", exact=True).first.is_visible()
+        frame.get_by_label("Metric threshold").fill("0.2")
+        frame.get_by_label("Protein label", exact=True).select_option("0")
+        assert frame.get_by_role("button", name="Compare configurations").count() == 0
+        frame.get_by_label("Protein label", exact=True).select_option("1")
+        assert frame.get_by_role("button", name="Compare configurations").count() == 1
+        frame.get_by_label("Metric threshold").fill("")
+        frame.get_by_label("Protein label", exact=True).select_option("")
         frame.get_by_label("Model or pooling").select_option("max")
-        assert frame.get_by_role("button", name="Open protein").filter(visible=True).count() == 1
+        assert frame.get_by_role("button", name="Compare configurations").count() == 1
         frame.get_by_label("Model or pooling").select_option("")
         frame.get_by_label("Source seed").select_option("4")
+        assert not frame.locator("pre").count()
+        frame.get_by_role("button", name="Compare configurations").first.click()
         frame.get_by_role("button", name="Open protein").first.click()
         frame.get_by_role("button", name="← Protein list").wait_for(timeout=30000)
+        assert frame.locator("#selection-reasons").is_visible()
+        assert frame.locator("#selection-reasons").inner_text().startswith("Correct negative")
         assert frame.locator("#wisdom-plot").evaluate("gd=>gd.data.length") == (
             11 if content == "full" else 2
         )
@@ -513,8 +647,63 @@ def test_native_report_keeps_seeds_and_inspector_navigation_in_isolated_frame(
             frame.locator("#surface-palette").select_option("Cividis")
             frame.get_by_role("button", name="Surface", exact=True).click()
         frame.locator("#viewer-state").get_by_text("Ready", exact=True).wait_for()
+        frame.get_by_role("button", name="Surface", exact=True).click()
+        frame.locator("#viewer-state").get_by_text("Ready", exact=True).wait_for()
+        frame.locator("#surface-palette").select_option("Turbo")
+        frame.locator("#viewer-state").get_by_text("Ready", exact=True).wait_for()
+        assert frame.locator("#wisdom-plot").evaluate(
+            "gd=>gd._fullData[0].marker.colorscale[0][1]"
+        ) == "#30123b"
+        if content == "features":
+            assert frame.locator(
+                '#surface-channel option[value="surface_learned_embeddings_0"]'
+            ).count() == 1
+        frame.locator("#surface-range-mode").select_option("unit")
+        assert frame.locator("#surface-min").input_value() == "0.00000"
+        frame.locator("#compare-toggle").click()
+        frame.locator("#viewer-state").get_by_text("Ready", exact=True).wait_for()
+        assert frame.locator("#wisdom-plot").evaluate(
+            "gd=>gd._fullLayout.scene2.domain.x"
+        ) == [0.52, 1]
+        frame.locator("#compare-right").select_option("model_prediction_hard")
+        frame.locator("#prediction-threshold").fill("0.9")
+        frame.locator("#compare-right-range").select_option("custom")
+        frame.locator("#compare-right-min").fill("-2")
+        frame.locator("#compare-right-min").dispatch_event("change")
+        frame.locator("#compare-right-max").fill("2")
+        frame.locator("#compare-right-max").dispatch_event("change")
+        frame.locator("#viewer-state").get_by_text("Ready", exact=True).wait_for()
+        assert frame.locator("#wisdom-plot").evaluate(
+            "gd=>gd.data[gd.data.length-1].marker.cmax"
+        ) == 2
+        frame.locator("#wisdom-plot").evaluate(
+            "gd=>Plotly.relayout(gd,{'scene.camera.eye':{x:2,y:3,z:4}})"
+        )
+        assert frame.locator("#wisdom-plot").evaluate(
+            "gd=>gd._fullLayout.scene2.camera.eye.x===2"
+        )
+        frame.locator("#compare-toggle").click()
+        frame.locator("#viewer-state").get_by_text("Ready", exact=True).wait_for()
+        frame.locator('[data-panel="left"][data-action="close"]').click()
+        frame.locator('[data-panel="left"][data-action="open"]').click()
+        grip = frame.get_by_role("separator", name="Resize left panel")
+        grip.focus()
+        page.keyboard.press("ArrowRight")
+        assert frame.locator("#controls-panel").bounding_box()["width"] == 320
+        frame.locator("#measure-toggle").click()
+        frame.locator("#wisdom-plot").evaluate(
+            """gd=>{
+                gd.emit('plotly_click',{});gd.emit('plotly_click',{points:[]});
+                gd.emit('plotly_click',{points:[{curveNumber:0,pointNumber:0,
+                    customdata:0,x:1,y:2,z:3}]});
+                gd.emit('plotly_click',{points:[{curveNumber:0,pointNumber:1,
+                    customdata:1,x:4,y:6,z:3}]});
+            }"""
+        )
+        assert "5.0000 Å" in frame.locator("#measure-result").inner_text()
         page.screenshot(path=str(tmp_path / "protein-report.png"), full_page=True)
         frame.get_by_role("button", name="← Protein list").click()
+        frame.get_by_role("button", name="Compare configurations").last.click()
         frame.get_by_role("button", name="Open protein").last.click()
         frame.get_by_role("button", name="← Protein list").wait_for(timeout=30000)
         assert frame.locator(".viewer-head strong").inner_text() == "tiny-positive"
@@ -522,7 +711,8 @@ def test_native_report_keeps_seeds_and_inspector_navigation_in_isolated_frame(
         frame.get_by_role("heading", name="WISDOM proteins").wait_for()
         page.click("#project-section-0-document-picker")
         page.locator('#study-dropdown-options input[data-choice="1"]').check()
-        assert '"seed": 7' in frame.locator("pre").first.inner_text()
+        frame.get_by_label("Source seed").select_option("7")
+        frame.get_by_role("button", name="Compare configurations").first.click()
         frame.get_by_role("button", name="Open protein").first.click()
         frame.get_by_role("button", name="← Protein list").wait_for(timeout=30000)
         assert not errors and not external

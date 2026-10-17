@@ -1,0 +1,163 @@
+# OBJECTIVE: compare normalized spectral Dirichlet energy with Heat on/off.
+# PREREQUISITES: the exact V5c benchmark content and unchanged reviewed backbone.
+# VARIES: three retained poolers and dirichlet_lambda crossed with Heat on/off.
+# FIXED: V5c initialization/optimizer/backbone, four paired seeds and sealed test.
+# DECISION: inspect G versus S and negative evidence/stability, not W alone.
+name: wisdom-v6g  # One native complete Study; reviews can select this unambiguous name.
+run: wisdom.Training.Training  # Existing weakly supervised training Work; no new losses or runner.
+
+with:  # Frozen V5c backbone; only the explicitly authored factors vary below.
+  dataset: {dataset: wisdom-dna-reduced@6}  # Exact version; verify the expected content below on the execution target.
+  # Required V5a/V5b content_id: sha256:ac1745504422cf60b84e57b90efc99206dea039dc36d0c1359782062cb10e202.
+  # A same-name placement with another content ID is not a scientifically equivalent control.
+  # Current LF Work markers accept one key only, so content_id is not a YAML marker field.
+  # Before dispatch, verify the target registry resolves the required content; do not
+  # silently run this comparison on the older record or publish a synthetic substitute.
+  model_version: 2                                     # Existing generation exposing pooling alternatives.
+  subset: "full"                                       # Use the complete reduced training population.
+  initialization_profile: "baseline"                   # Reviewed initialization, unchanged across families.
+  optimization_profile: "baseline"                     # Reviewed optimization, unchanged across families.
+  hidden_dim: 128                                      # Shared atom/surface latent width.
+  embedding_dim: 32                                    # Element embedding width.
+  residue_embedding_dim: 64                            # Residue embedding width.
+  atomic_layers: 2                                     # Atomic propagation depth.
+  projection_depth: 3                                  # Atom-to-surface MLP depth.
+  surface_layers: 4                                    # DiffusionNet depth.
+  atom_spatial_k: 8                                    # Active spatial atom neighbors.
+  surface_atom_k: 16                                   # Nearest transfer atoms per point.
+  diffusion_spectral_modes: 32                         # Retained surface spectral modes.
+  surface_atom_radius: 4                               # Transfer cutoff in angstroms.
+  dropout: 0.2                                         # Training dropout probability.
+  learning_rate: 0.001                                 # AdamW learning rate.
+  weight_decay: 0.0005                                 # AdamW decoupled decay.
+  gate_lambda: 0.04                                    # Expected L0 semantic-gate penalty.
+  weak_loss_profile: custom                            # Preserve direct weak-prior coefficients; never local GT.
+  negative_surface_lambda: 0.0  # Disable every competing weak-loss family.
+  positive_existence_lambda: 0.0  # Disable every competing weak-loss family.
+  regional_positive_lambda: 0.0  # Disable every competing weak-loss family.
+  regional_ranking_lambda: 0.0  # Disable every competing weak-loss family.
+  cardinality_lambda: 0.0  # Disable every competing weak-loss family.
+  total_variation_lambda: 0.0  # Disable every competing weak-loss family.
+  architecture_spike: "baseline"                       # Do not change the backbone.
+  pooling_area_mode: "point"                           # Point MAX control; LSE and Attention select area measure below.
+  head_type: "single"                                  # One surface-to-protein head.
+  batch_size: 16                                       # Proteins per update.
+  epochs: 500                                          # Epoch ceiling; validation patience may stop earlier.
+  patience: 30                                         # Stop after 30 non-improving validation epochs.
+  minimum_delta: 0.001                                 # Minimum G improvement, not W-based checkpoint selection.
+  precision: "auto"                                    # Use supported mixed precision.
+  surface_metrics: true                                # Evaluation-only local ground truth.
+  surface_metrics_interval: 1                          # Record local metrics each validation epoch.
+  visualization:                                    # Presentation only; generated once at this Run's best checkpoint.
+    mode: none                                      # none disables all viewers; report embeds HTML without duplicate files.
+    content: predictions                            # Probability, original logits and soft/hard GT only; full adds structural layers.
+    maximum_points: 2000                            # Deterministic display-only sample; metrics retain every point.
+    maximum_proteins: 4                             # Balanced proteins per evaluated split; zero displays all.
+    report_budget_mib: 4.0                          # Maximum embedded document size, not evaluation coverage.
+    # identifiers: [1ABC_A]                         # Optional exact evaluated IDs instead of automatic balanced sampling.
+
+  # Visualization defaults: mode=none (none/report/viewer/full), content=predictions
+  # (predictions/full), maximum_points=2000 (>0), maximum_proteins=12 (>=0),
+  # report_budget_mib=4.0 in (0,16], identifiers=(), threshold=0.5 in [0,1],
+  # embed_report=true. report writes embedded pages only; viewer adds HTML/PLY;
+  # full additionally saves prediction NPZ. none overrides embed_report completely.
+  # This is per completed Run, not per epoch or a post-Study best-seed callback.
+  # LF has a 64 MiB combined report limit: keep mode=none for large sweeps/HPO.
+  faithfulness_audit: false                            # Vertex deletion changes refiner operators; the audit is unavailable.
+  evaluate_test: false                                 # Keep held-out test sealed.
+  data_workers: 4                                      # Persistent NPZ-decoding workers per Run.
+
+# Selected Training arguments: dataset is required; model_version=1, subset=full,
+# profiles=custom, architecture_spike=custom, head_type=single. V6 freezes the V5c overrides.
+# Default widths/depths: hidden_dim=128, embedding_dim=32, residue_embedding_dim=null,
+# atomic_layers=2, projection_depth=1, surface_layers=2; widths/depths must be positive.
+# Default topology: atom_spatial_k=16, surface_atom_k=16, diffusion_spectral_modes=128,
+# surface_atom_radius=6 Å; positive active budgets cannot exceed stored geometry support.
+# dropout=0.2 in [0,1), learning_rate=3e-4 (>0), weight_decay=1e-4 (>=0),
+# gate_lambda=1e-3 (>=0); baseline initialization/optimization keep historical AdamW.
+# Weak defaults: all seven *_lambda=0 (nonnegative); custom preserves authored coefficients.
+# regional_loss_length=2.5 Å, regional_ranking_margin=0.5, minimum_positive_area=0,
+# maximum_positive_area=null. These controls are inactive when their lambda is zero.
+# Heat defaults: type=none, heat_length=3 Å (>=0); zero is identity, learned_heat is not active.
+# Pooling defaults: type=max, area=legacy, LSE mode=fixed/beta=5 (>0),
+# attention_variant=simple (simple/gated), attention_hidden_dim=32 (>0).
+# Other poolers remain implemented but inactive: topk_fraction=0.05 in (0,1],
+# regional_scale_mode=fixed/length=2.5 Å, autopool_alpha=1 (>=0), gem_power=1 (>=1),
+# max_mean_lambda=0.5 in [0,1]; learned modes and curricula are not V6 factors.
+# Runtime defaults: batch_size=2, epochs=100, patience=30 (>0), minimum_delta=0.001 (>=0),
+# precision=auto (auto/bfloat16/float16/float32), surface_metrics=true,
+# surface_metrics_interval=0 (best checkpoint only; positive N adds every N epochs),
+# faithfulness_audit=false, evaluate_test=true, data_workers=4 (>=0).
+# V6 explicitly seals test and records surface metrics each epoch; local GT is evaluation-only.
+# Other public Training arguments/defaults are documented in README 5.3 and Training.run.
+
+seeds: [4, 7, 32, 54]  # Four mandatory paired replications; no seed racing or competitive pruning.
+
+sweep:  # Exhaust every finite Cartesian cell; this is not adaptive HPO.
+  space:  # Inactive child parameters do not create extra scientific Trials.
+    pooling_type:  # Retain all three V5c pooling philosophies.
+      values: [max, log_sum_exp, attention]  # MAX control, fixed area LSE, simple area Attention.
+    pooling_area_mode:  # Use represented area for distributed pooling only.
+      values: [area]  # Frozen V5c measure, not an additional factor.
+      when: {pooling_type: {in: [log_sum_exp, attention]}}  # MAX retains with.point.
+    log_sum_exp_mode:  # Freeze the V5a/V5b retained LSE policy.
+      values: [fixed]  # No learned temperature or curriculum.
+      when: {pooling_type: log_sum_exp}  # Absent from non-LSE Trials.
+    log_sum_exp_beta:  # Freeze the retained LSE concentration.
+      values: [0.25]  # Exact V5c value, not a pooling search.
+      when: {pooling_type: log_sum_exp}  # Absent from MAX and Attention.
+    attention_variant:  # Freeze the retained embedding-based attention scorer.
+      values: [simple]  # No alternative attention mechanism.
+      when: {pooling_type: attention}  # Absent from non-Attention Trials.
+    attention_hidden_dim:  # Freeze the retained scorer capacity.
+      values: [256]  # Exact V5c width; backbone embeddings remain unchanged.
+      when: {pooling_type: attention}  # Absent from MAX and LSE.
+    dirichlet_lambda:  # Sole active weak-loss family; zero is its matched control.
+      values: [0.0, 0.001, 0.010, 0.050, 0.100]  # Complete predeclared coefficient screen; no adaptive pruning.
+    surface_refiner_type:  # Cross learned smoothness with explicit forward refinement.
+      values: [none, heat]  # Both zero-lambda controls are scientifically necessary.
+    surface_refiner_heat_length:  # Physical length applies only to the Heat branch.
+      values: [6.0]  # Frozen V5c length; no length HPO.
+      when: {surface_refiner_type: heat}  # Absent from identity Trials.
+
+# 18 scientific Trials x four seeds = 72 required Runs.
+
+# sweep.space is required; finite values and when use native LF expansion.
+# With explicit seeds, every cell/seed is mandatory; no search, pruning or racing is authored.
+# WISDOM's patience still stops a Run after 30 non-improving global-validation epochs.
+# W is a development utility, NOT the sole scientific decision. Read the G/S frontier,
+# operational/raw AUPRC, refinement gain, negative mass/peak, top-k, regret and seed dispersion.
+# Compare none/lambda0, heat6/lambda0, none/lambda>0 and heat6/lambda>0 per pooling/seed.
+# These distinguish replacement, redundancy, complementarity and over-smoothing.
+# Read raw/operational AUPRC and refinement gain; negative gain must not be clipped.
+# All priors consume operational surface_logits; raw maps remain available for diagnostics.
+# No local ground truth enters any weak term. TV and Dirichlet cannot be active together.
+# Regional ranking is zero for single-class batches. Cardinality is a squared mass hinge,
+# not a hard-positive area constraint; inspect its actual activation before drawing conclusions.
+
+objective:  # Preserve W and its practical margin; never use held-out test.
+  metric: val_wisdom_hpo_score  # Existing global/surface/coupling development utility.
+  mode: max  # Higher utility is better, but no single-metric scientific winner is assumed.
+  range: [0.0, 1.0]  # Known mathematical bounds.
+  practical_margin: 0.015  # Frozen threshold of practical equivalence.
+
+# Objective requires metric; mode=max by default; range/practical_margin are optional.
+# W's formula and global-only checkpoint selection remain unchanged.
+
+resources:  # Operational enclosing allocation, not a scientific factor.
+  gpu: 1  # Two accelerators as in V5c; native LF handles concurrency.
+  cpu: 36  # Shared host decoding and orchestration budget.
+  memory: 96GiB  # Shared host-memory allocation.
+  time: 168h  # Seven-day scheduler ceiling.
+
+# Resource defaults: cpu=1, gpu=0, processes=1; memory/gpu_memory/storage=0, time=null.
+# cpu/processes>=1, gpu>=0, processes<=cpu; sizes and positive durations are native LF values.
+# Packing is automatically planned; no hard-coded runs_per_gpu/max_parallel/VRAM reservation.
+
+execution:  # Logical dispatch budget, separate from the scheduler ceiling.
+  max_time: 168h  # Seven days may leave coverage incomplete; audit all required Runs afterwards.
+
+# Execution defaults: max_time/max_runs/max_parallel/runs_per_gpu=null, failure_retries=1.
+# A complete sweep requires sufficient wall time; neither budget guarantees completion.
+# Existing Training.analysis_profile exposes G/S/raw/refinement/coupling/support/cost metrics.
+# Use native lf results analysis/report; reviews only run forwards on frozen checkpoints.

@@ -1,97 +1,117 @@
-# Complete Zn workflow: acquire/select, publish geometry/annotations, then inspect the dataset.
-name: wisdom-zinc-preprocess  # Registry publication is performed by the second Work only.
-steps:  # This preprocessing composition is not a training Study.
-  - name: select  # Contact revalidation, full-RAW leakage, phenotypes and fixed selection.
-    run: wisdom.preprocessing.zinc.ZincSelection.ZincSelection  # Explicit-negative design Work.
-    with:  # Acquire candidates here, or explicitly reuse frozen evidence/design below.
-      skip: false  # True forwards existing_design without downloads, tools or clustering.
-      negative_go_terms: ["GO:0008270", "GO:0046872"]  # Experimental NOT Zn/metal binding; exact term queries, never ligand absence.
-      # negative_evidence: {file: ../../../data/zinc/negative-evidence.jsonl}  # Optional reviewed override instead of automatic QuickGO/UniProt negatives.
-      release_id: zinc-pilot-1  # Freeze one RCSB query; change for a deliberately new acquisition.
-      maximum_entries: 0  # Zero inspects all Zn query hits; positive values are pilot caps.
-      raw_output_directory: ../../../data/zinc/raw  # Freeze raw JSONL, query and provenance for independent reuse.
-      # raw_path: {file: ../../../data/zinc/raw/raw.jsonl}  # Uncomment to bypass all acquisition; no negative input is then needed.
-      # existing_design: {file: ../../../data/zinc/design}  # Uncomment with skip=true; no acquisition input is then needed.
-      workers: 12  # Native cache workers and MMseqs2/Foldseek threads.
-      positive_policy: diverse_quota  # Or all: retain every valid positive and report imbalance.
-      positive_negative_ratio: 1.0  # Desired ratio only for the diverse_quota policy.
-      surface_resolution: 1.0  # Early support audit uses downstream surface spacing in angstroms.
-      probe_radius: 1.4  # Early solvent expansion radius, matching downstream geometry.
-      positive_gap: 1.4  # Early local-positive cutoff, matching downstream annotation.
-      evaluate_shortcuts: false  # Optional train-only covariate validation baseline.
-      # functional_metadata: {file: ../../../data/zinc/functional-metadata.jsonl}  # Frozen sequence-bound annotations.
-      output_directory: ../../../data/zinc/design  # Portable design including exact compressed mmCIF bytes.
-    # Selection defaults: skip=false, existing_design=null, raw_path=null, negative_evidence=null;
-    # skip=true requires existing_design and forwards zinc-design without scientific computation.
-    # Otherwise raw_path bypasses acquisition; absent raw_path acquires positives and negatives.
-    # negative_evidence=null invokes QuickGO experimental NOT and exact full-sequence UniProt/PDB
-    # mapping; a supplied JSONL replaces that search, never the downstream evidence/quality checks.
-    # negative_go_terms=[GO:0008270,GO:0046872]; GO:0043169/GO:0043167 (cation/ion ancestors)
-    # are also accepted. NOT of a narrower activity or another metal cannot deny Zn binding.
-    # Sources, exclusions and unique sequence counts are frozen in raw/negative-discovery.json;
-    # no eligible negatives stops before the positive scan; too few leakage groups blocks splits.
-    # release_id="zinc-pilot-1", maximum_entries=0 (>=0), raw_output_directory=null (managed only).
-    # workers=8, coordination_cutoff=3.0 Angstrom,
-    # minimum_occupancy=0.5,
-    # minimum_donors=2, minimum_residues=2, maximum_resolution=4.0 Angstrom (null disables),
-    # requests_per_second=2.0; sequence_identity=.30, sequence_coverage=.80, sequence_evalue=1e-3;
+# Observable evidence -> offline design -> geometry -> independent validation -> viewers.
+name: wisdom-zinc-preprocess  # Only Preprocessing publishes a DatasetVersion.
+steps:  # Sequential scientific boundaries visible in LambdaForge.
+  - name: discover  # Freeze public evidence, responses and exact coordinates.
+    run: wisdom.preprocessing.zinc.ZincDiscovery.ZincDiscovery  # Acquisition only, no splitting.
+    with:  # A fresh Run requires no manually prepared input.
+      skip: false  # True forwards existing_raw without network requests.
+      # existing_raw: {file: ../../../data/zinc/raw}  # Complete snapshot required when skipped.
+      negative_evidence_go_terms: ["GO:0008270", "GO:0046872"]  # Experimental NOT of Zn/metal binding; these terms are not negative themselves.
+      # negative_evidence: {file: ../../../data/zinc/negative-evidence.jsonl}  # Optional referenced exact-sequence override.
+      maximum_entries: 0  # Zero inspects every Zn entry; a positive cap marks a pilot.
+      workers: 12  # Bounded acquisition concurrency, not scientific identity.
+      acquire_functional_metadata: true  # Freeze domains, taxonomy and exact-sequence UniProt annotations.
+      output_directory: ../../../data/zinc/raw  # Portable snapshot published only on success.
+    # ZincDiscovery defaults: skip=false, existing_raw=null (required when skipped),
+    # negative_evidence=null (automatic QuickGO NOT), snapshot_label=null (optional human label),
+    # workers=8 (>0), maximum_entries=0 (>=0), requests_per_second=2 (>0 per-service ceiling),
+    # coordination_cutoff=3 Å (>0), minimum_occupancy=.5 ([0,1]), minimum_donors=2,
+    # minimum_residues=2 (>0 selected-copy counts), acquire_functional_metadata=true.
+    # negative_evidence_go_terms=[GO:0008270,GO:0046872]; reviewed is-a ancestors
+    # GO:0043169/GO:0043167 also allowed, never narrower functions or another metal.
+    # output_directory="../data/zinc/raw"; null retains only managed outputs.
+    # Native checkpoints retain one acquisition session across Attempts; content/policy determines
+    # snapshot_id, never label/time/workers. No mapped negatives stops with an audit, no fallback.
+    resources: {cpu: 12, memory: 16GiB}  # Network acquisition and assembly inspection, no GPU.
+  - name: select  # Reverify frozen copies, group full RAW, characterize shapes and split once.
+    run: wisdom.preprocessing.zinc.ZincSelection.ZincSelection  # Offline scientific design.
+    with:  # No current RCSB revision is downloaded here.
+      skip: false  # True forwards existing_design without scientific computation or tools.
+      raw_path: {from: discover.raw}  # Adjacent provenance and structures are part of Discovery.
+      # raw_path: {file: ../../../data/zinc/raw/raw.jsonl}  # Independent selection: remove discover and replace from.
+      # existing_design: {file: ../../../data/zinc/design}  # With skip=true, remove discover and comment raw_path.
+      workers: 12  # Local workers and specialist-tool threads.
+      positive_policy: all  # Keep every eligible positive; evidence quality outranks balance.
+      # positive_policy: diverse_quota  # Optional controlled-size selection, reporting coverage loss.
+      # positive_negative_ratio: 1.0  # Applies only to diverse_quota, not a biological preference.
+      sensitivity_cutoffs: [2.8, 3.0, 3.2]  # Audit-only Zn-donor Å cutoffs on fixed assemblies.
+      sensitivity_minimum_donors: [2, 3, 4]  # Audit-only selected-copy donor atom minima.
+      sensitivity_minimum_residues: [1, 2, 3]  # Audit-only distinct residue minima, no resplitting.
+      evaluate_shortcuts: true  # Structural-only train/validation classifier; no acquisition fields.
+      # functional_metadata: {file: ../../../data/zinc/functional-metadata.jsonl}  # Extra sequence-bound annotations.
+      # site_metadata: {file: ../../../data/zinc/site-metadata.jsonl}  # Reviewed exact coordinate/site external support.
+      output_directory: ../../../data/zinc/design  # Fixed decisions, sources, labelled TXT and reports.
+    # ZincSelection defaults: skip=false, existing_design=null, raw_path=null (required unless skipped),
+    # workers=8 (>0), coordination_cutoff=3 Å, minimum_occupancy=.5, minimum_donors=2,
+    # minimum_residues=2, maximum_resolution=4 Å (null disables); no live service is consulted.
+    # sequence_identity=.30, sequence_coverage=.80, sequence_evalue=1e-3;
     # foldseek_probability=.90, foldseek_tmscore=.75, foldseek_coverage=.80,
-    # foldseek_evalue=1e-3; group_same_pdb=true.
-    # Fractions/probabilities are in [0,1], lengths/E-values positive, counts positive integers.
+    # foldseek_evalue=1e-3; group_same_pdb=true. Similarity uses full RAW before selection.
+    # Fractions/probabilities in [0,1], positive lengths/E-values and positive count minima.
     # phenotype_cluster_sizes=[5,10,15] (distinct >=2), phenotype_min_samples=2 (>0),
-    # phenotype_stability=.7 (ARI minimum for >=2 clusters). positive_negative_ratio=1.0 (>0),
+    # phenotype_stability=.7 (ARI minimum for >=2 non-noise clusters).
+    # positive_policy="all" or "diverse_quota"; positive_negative_ratio=1 (>0, quota only).
+    # sensitivity_cutoffs=[2.8,3,3.2] (>0 Å), sensitivity_minimum_donors=[2,3,4] and
+    # sensitivity_minimum_residues=[1,2,3] (>0), Cartesian audit grid; never relabels/resplits.
+    # surface_resolution=1 Å (>0), probe_radius=1.4 Å (>=0), positive_gap=1.4 Å (>=0).
+    # Unsupported positive local sites force their whole leakage group to train.
+    # functional_metadata=null: frozen identifier/sequence_sha256/source/version JSONL with
+    # optional uniprot/pfam/interpro/cath/ec/family. site_metadata=null: frozen
+    # identifier/site_id/structure_sha256/source/version/external_id plus optional family/reference.
+    # Metadata never creates labels, edges or model inputs; unknown exact sites fail.
+    # evaluate_shortcuts=true; train-only structural baseline, validation not test.
     # train_fraction=.70, validation_fraction=.15, test_fraction=.15 (positive, sum one),
     # dilution_fractions=[1,.75,.5,.25,.1] ((0,1], including 1), dilution_replicates=1 (>0),
-    # seed=2026; output_directory="../data/zinc/design" (null disables external publication).
-    resources: {cpu: 12, memory: 32GiB}  # Specialist tools are required before downloads.
-    # positive_policy="diverse_quota" accepts "all"; ratio>0 is a selection choice, not a
-    # biological rule. Global morphology clusters both classes; local phenotype clusters sites.
-    # surface_resolution=1.0/probe_radius=1.4/positive_gap=1.4 Angstrom audit support before splits;
-    # buried positives and their whole leakage groups remain train-only. Publication rechecks GT.
-    # functional_metadata=null accepts identifier, sequence_sha256, source, version and optional
-    # uniprot/pfam/interpro/cath/ec/family in frozen JSONL; never labels or model inputs.
-    # site_metadata=null accepts frozen identifier/site_id/structure_sha256/source/version/
-    # external_id plus optional family/reference; unknown sites or changed bytes are rejected.
-    # It links reviewed ZincBind/MetalPDB annotations, not automatic live-service discovery.
-    # evaluate_shortcuts=false; true fits train morphology/source and reports validation, not test.
-  - name: preprocess  # Consume the exact design; never recluster, rebalance or repartition.
-    run: wisdom.preprocessing.zinc.ZincPreprocessing.ZincPreprocessing  # Shared universal NPZ and Zn-only sidecars.
-    with:  # Named upstream output, resolved only when Selection has completed.
-      skip: false  # True does no computation and publishes no dataset.
-      design: {from: select.zinc-design}  # Complete scientific design, not an unlabelled ID list.
-      # design: {file: ../../../data/zinc/design}  # Alternative direct binding; comment the from binding if selected.
-      dataset_name: wisdom-zinc  # Immutable managed family, separate from DNA.
-      dataset_version: "1"  # Bump for any intended scientific membership/content change.
-      training_subset: full  # Or replicate-00/train-25; validation/test remain fixed.
-      workers: 12  # CPU geometry processes and bounded annotation threads.
-    # Preprocessing defaults: skip=false, design=null (required unless skipped), dataset_name=
-    # "wisdom-zinc", dataset_version="1", training_subset="full", workers=8 (>0); surface_resolution=1,
-    # probe_radius=1.4, atom_spatial_radius=6, surface_atom_radius=6 (positive Angstrom);
+    # seed=2026; output_directory="../data/zinc/design" (null disables external copy).
+    resources: {cpu: 12, memory: 32GiB}  # Probe MMseqs2/Foldseek before expensive offline work.
+  - name: preprocess  # Never rediscover, rebalance, recluster or repartition.
+    run: wisdom.preprocessing.zinc.ZincPreprocessing.ZincPreprocessing  # Universal NPZ and Zn sidecars.
+    with:  # TXT alone cannot restore assembly/site provenance.
+      skip: false  # True publishes no dataset and performs no computation.
+      design: {from: select.zinc-design}  # Exact selected coordinates and fixed partitions.
+      # design: {file: ../../../data/zinc/design}  # Independent preprocessing: replace from and remove prior steps.
+      dataset_name: wisdom-zinc  # Separate managed family; zinc_binding remains compatible.
+      dataset_version: "1"  # New scientific content requires a new immutable version.
+      training_subset: full  # Or replicate-00/train-25; evaluation remains fixed.
+      workers: 12  # Bounded geometry processes and annotation threads.
+    # ZincPreprocessing defaults: skip=false, design=null (required unless skipped),
+    # dataset_name="wisdom-zinc", dataset_version="1", training_subset="full", workers=8 (>0),
+    # surface_resolution=1, probe_radius=1.4, atom_spatial_radius=6, surface_atom_radius=6 Å;
     # atom_spatial_k_max=32, surface_atom_k_max=32, diffusion_spectral_modes_max=128,
-    # surface_neighbor_k_max=24 (positive counts), curvature_scales=[2.5,5] (increasing positive).
-    # positive_gap=1.4, negative_gap=3.0 (0<=positive<negative, Angstrom), sensitivity_gaps=[1,1.4,2],
-    # progress_log_seconds=120 (>0), verbose=false (debug logs). No Zn enters universal inputs.
-    resources: {cpu: 12, memory: 64GiB}  # Universal geometry owns the dominant CPU/memory demand.
-  - name: visualize  # Inspect the newly published dataset without modifying scientific arrays.
+    # surface_neighbor_k_max=24 (>0), curvature_scales=[2.5,5] (increasing positive).
+    # positive_gap=1.4, negative_gap=3 Å (0<=positive<negative), sensitivity_gaps=[1,1.4,2];
+    # progress_log_seconds=120 (>0), verbose=false. Zn never enters universal NPZ inputs.
+    resources: {cpu: 12, memory: 64GiB}  # Geometry dominates CPU/memory demand.
+  - name: validate  # Independent audit after publication and before viewers.
+    run: wisdom.preprocessing.zinc.ZincValidation.ZincValidation  # Scientific validation, not just hashes.
+    with:  # Resolve publication only after preprocessing succeeds.
+      dataset: {from: preprocess.dataset}  # Complete native placement.
+      output_directory: ../../../data/zinc/validation  # Human verdict and ordered member errors.
+    # ZincValidation defaults: dataset=null (required unless skipped), fail_on_error=true,
+    # skip=false, output_directory=null. Failures register reports before raising.
+    # For validation only, remove prior steps and bind {dataset: wisdom-zinc@1}.
+    resources: {cpu: 1, memory: 8GiB}  # Sequential member audit, no model fitting.
+  - name: visualize  # Runs after successful independent validation.
     run: wisdom.visualization.Visualization.Visualization  # Shared DNA/Zn HTML and PLY viewer.
-    with:  # Resolve the upstream version only after successful publication.
-      skip: false  # True leaves the published dataset intact and creates no gallery.
-      dataset: {from: preprocess.dataset}  # Native DatasetVersion output; no premature Registry lookup.
-      # dataset: {dataset: wisdom-zinc@1}  # Visualization-only: replace from and comment/disable earlier steps.
-      output_directory: ../../../data/zinc/visualizations  # Offline HTML gallery and full-point PLY files.
-      maximum_proteins: 12  # Balanced deterministic sample; zero requests every eligible member.
-      splits: [train, validation, test]  # Display eligible strata only; no metrics or model selection.
-      labels: [0, 1]  # Show explicit negatives and structurally verified positives.
-      report_section: true  # Also register inspectors in the native LF report.
+    with:  # Scientific arrays are unchanged by display sampling.
+      skip: false  # True creates no gallery; data and validation remain available.
+      dataset: {from: preprocess.dataset}  # Native upstream DatasetVersion.
+      output_directory: ../../../data/zinc/visualizations  # Offline gallery and full-point PLY.
+      maximum_proteins: 12  # Deterministic display sample; zero means every member.
+      splits: [train, validation, test]  # Display evidence, not checkpoint selection.
+      labels: [0, 1]  # Explicit negatives and verified positives.
+      report_section: true  # Register inspectors in the LF report.
     # Visualization defaults: skip=true, dataset=null (required unless skipped),
     # output_directory="../data/dna/visualizations", overwrite_output=true, identifiers=(),
-    # splits=(train,validation,test), labels=(0,1), maximum_proteins=12 (>=0; zero means all).
-    # Exact identifiers override automatic sampling and its maximum. maximum_surface_points=6000,
-    # maximum_mesh_points=2500, maximum_edges=5000, normal_stride=25, normal_length=1.5 Angstrom,
-    # mesh_alpha=4.0 Angstrom, maximum_vdw_atoms=1500 bound display only, not scientific arrays.
-    # report_section=true, report_maximum_mib=4.0 ((0,16] MiB), verbose=false.
-    # For visualization only, comment select/preprocess blocks and bind the registered dataset.
-    resources: {cpu: 1, memory: 8GiB}  # Bounded CPU rendering; no GPU needed.
-# LF composition defaults: steps execute in authored dependency order; name is optional.
-# Each executable step may declare run/with/resources/seeds/replicates/sweep/search/execution/
-# objective/analysis. Resource defaults cpu=1/gpu=0; optional memory/storage/time/processes.
+    # splits=(train,validation,test), labels=(0,1), maximum_proteins=12 (>=0, zero all).
+    # Identifiers override sample/maximum; maximum_surface_points=6000, maximum_mesh_points=2500,
+    # maximum_edges=5000, normal_stride=25, normal_length=1.5 Å, mesh_alpha=4 Å,
+    # maximum_vdw_atoms=1500 bound display only. report_section=true,
+    # report_maximum_mib=4 ((0,16] MiB), verbose=false. GT metrics retain full point coverage.
+    resources: {cpu: 1, memory: 8GiB}  # CPU rendering, no GPU.
+# LF composition defaults: sequential authored dependencies; executable fields are
+# run/with/resources/seeds/replicates/sweep/search/execution/objective/analysis as applicable.
+# resources defaults cpu=1 (>0), gpu=0 (>=0); memory/storage/time/processes optional.
+# Reuse RAW: discover.skip=true + existing_raw. Reuse design: remove discover, select.skip=true
+# + existing_design, comment raw_path. Inspect an existing version: remove upstream blocks,
+# replace validate/visualize dataset bindings with {dataset: wisdom-zinc@VERSION}.

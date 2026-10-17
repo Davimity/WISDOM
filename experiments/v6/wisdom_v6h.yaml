@@ -1,0 +1,289 @@
+# OBJECTIVE: screen weak-loss interactions using bounded, explicitly enumerated mixtures.
+# PREREQUISITES: interpreted V6a-V6f exports; V6g and extended-range results remain pending.
+# VARIES: 18 controlled loss combinations per pooling; exploratory, not final confirmation.
+# FIXED: V5c initialization/optimizer/backbone, four paired seeds and sealed test.
+# DECISION: inspect G versus S and negative evidence/stability, not W alone.
+name: wisdom-v6h  # One native complete Study; reviews can select this unambiguous name.
+run: wisdom.Training.Training  # Existing weakly supervised training Work; no new losses or runner.
+
+with:  # Frozen V5c backbone; only the explicitly authored factors vary below.
+  dataset: {dataset: wisdom-dna-reduced@6}  # Exact version; verify the expected content below on the execution target.
+  # Required V5a/V5b content_id: sha256:ac1745504422cf60b84e57b90efc99206dea039dc36d0c1359782062cb10e202.
+  # A same-name placement with another content ID is not a scientifically equivalent control.
+  # Current LF Work markers accept one key only, so content_id is not a YAML marker field.
+  # Before dispatch, verify the target registry resolves the required content; do not
+  # silently run this comparison on the older record or publish a synthetic substitute.
+  model_version: 2                                     # Existing generation exposing pooling alternatives.
+  subset: "full"                                       # Use the complete reduced training population.
+  initialization_profile: "baseline"                   # Reviewed initialization, unchanged across families.
+  optimization_profile: "baseline"                     # Reviewed optimization, unchanged across families.
+  hidden_dim: 128                                      # Shared atom/surface latent width.
+  embedding_dim: 32                                    # Element embedding width.
+  residue_embedding_dim: 64                            # Residue embedding width.
+  atomic_layers: 2                                     # Atomic propagation depth.
+  projection_depth: 3                                  # Atom-to-surface MLP depth.
+  surface_layers: 4                                    # DiffusionNet depth.
+  atom_spatial_k: 8                                    # Active spatial atom neighbors.
+  surface_atom_k: 16                                   # Nearest transfer atoms per point.
+  diffusion_spectral_modes: 32                         # Retained surface spectral modes.
+  surface_atom_radius: 4                               # Transfer cutoff in angstroms.
+  dropout: 0.2                                         # Training dropout probability.
+  learning_rate: 0.001                                 # AdamW learning rate.
+  weight_decay: 0.0005                                 # AdamW decoupled decay.
+  gate_lambda: 0.04                                    # Expected L0 semantic-gate penalty.
+  weak_loss_profile: custom                            # Preserve direct weak-prior coefficients; never local GT.
+  surface_refiner_type: heat  # Hold the V6a-V6e operational field fixed while mixing losses.
+  surface_refiner_heat_length: 6.0  # Frozen Heat length in Å; not a claim of optimal refinement.
+  negative_surface_lambda: 0.0  # Zero defaults; explicit candidates below override active families.
+  positive_existence_lambda: 0.0  # Point existence, abbreviated E in the candidate comments.
+  regional_positive_lambda: 0.0  # Regional existence, abbreviated P; not independent of E.
+  regional_ranking_lambda: 0.0  # Between-class regional ranking, abbreviated R.
+  cardinality_lambda: 0.0  # Minimum probability mass, abbreviated C; activation may remain weak.
+  total_variation_lambda: 0.0  # Local probability variation, abbreviated T; never paired with D.
+  dirichlet_lambda: 0.0  # Spectral smoothness, abbreviated D; provisional until V6g is reviewed.
+  regional_loss_length: 2.5  # Auxiliary diffusion length in Å for P and R.
+  regional_ranking_margin: 0.5  # Fixed positive-minus-negative regional logit margin.
+  minimum_positive_area: 0.0  # Inactive at C=0; positive-C candidates explicitly select 0.02.
+  maximum_positive_area: null  # No upper mass bound and no change to the cardinality formula.
+  architecture_spike: "baseline"                       # Do not change the backbone.
+  pooling_area_mode: "point"                           # Point MAX control; LSE and Attention select area measure below.
+  head_type: "single"                                  # One surface-to-protein head.
+  batch_size: 16                                       # Proteins per update.
+  epochs: 500                                          # Epoch ceiling; validation patience may stop earlier.
+  patience: 30                                         # Stop after 30 non-improving validation epochs.
+  minimum_delta: 0.001                                 # Minimum G improvement, not W-based checkpoint selection.
+  precision: "auto"                                    # Use supported mixed precision.
+  surface_metrics: true                                # Evaluation-only local ground truth.
+  surface_metrics_interval: 1                          # Record local metrics each validation epoch.
+  visualization:                                    # Presentation only; generated once at this Run's best checkpoint.
+    mode: none                                      # none disables all viewers; report embeds HTML without duplicate files.
+    content: predictions                            # Probability, original logits and soft/hard GT only; full adds structural layers.
+    maximum_points: 2000                            # Deterministic display-only sample; metrics retain every point.
+    maximum_proteins: 4                             # Balanced proteins per evaluated split; zero displays all.
+    report_budget_mib: 4.0                          # Maximum embedded document size, not evaluation coverage.
+    # identifiers: [1ABC_A]                         # Optional exact evaluated IDs instead of automatic balanced sampling.
+
+  # Visualization defaults: mode=none (none/report/viewer/full), content=predictions
+  # (predictions/full), maximum_points=2000 (>0), maximum_proteins=12 (>=0),
+  # report_budget_mib=4.0 in (0,16], identifiers=(), threshold=0.5 in [0,1],
+  # embed_report=true. report writes embedded pages only; viewer adds HTML/PLY;
+  # full additionally saves prediction NPZ. none overrides embed_report completely.
+  # This is per completed Run, not per epoch or a post-Study best-seed callback.
+  # LF has a 64 MiB combined report limit: keep mode=none for large sweeps/HPO.
+  faithfulness_audit: false                            # Vertex deletion changes refiner operators; the audit is unavailable.
+  evaluate_test: false                                 # Keep held-out test sealed.
+  data_workers: 4                                      # Persistent NPZ-decoding workers per Run.
+
+# Selected Training arguments: dataset is required; model_version=1, subset=full,
+# profiles=custom, architecture_spike=custom, head_type=single. V6 freezes the V5c overrides.
+# Default widths/depths: hidden_dim=128, embedding_dim=32, residue_embedding_dim=null,
+# atomic_layers=2, projection_depth=1, surface_layers=2; widths/depths must be positive.
+# Default topology: atom_spatial_k=16, surface_atom_k=16, diffusion_spectral_modes=128,
+# surface_atom_radius=6 Å; positive active budgets cannot exceed stored geometry support.
+# dropout=0.2 in [0,1), learning_rate=3e-4 (>0), weight_decay=1e-4 (>=0),
+# gate_lambda=1e-3 (>=0); baseline initialization/optimization keep historical AdamW.
+# Weak defaults: all seven *_lambda=0 (nonnegative); custom preserves authored coefficients.
+# regional_loss_length=2.5 Å, regional_ranking_margin=0.5, minimum_positive_area=0,
+# maximum_positive_area=null. These controls are inactive when their lambda is zero.
+# Heat defaults: type=none, heat_length=3 Å (>=0); zero is identity, learned_heat is not active.
+# Pooling defaults: type=max, area=legacy, LSE mode=fixed/beta=5 (>0),
+# attention_variant=simple (simple/gated), attention_hidden_dim=32 (>0).
+# Other poolers remain implemented but inactive: topk_fraction=0.05 in (0,1],
+# regional_scale_mode=fixed/length=2.5 Å, autopool_alpha=1 (>=0), gem_power=1 (>=1),
+# max_mean_lambda=0.5 in [0,1]; learned modes and curricula are not V6 factors.
+# Runtime defaults: batch_size=2, epochs=100, patience=30 (>0), minimum_delta=0.001 (>=0),
+# precision=auto (auto/bfloat16/float16/float32), surface_metrics=true,
+# surface_metrics_interval=0 (best checkpoint only; positive N adds every N epochs),
+# faithfulness_audit=false, evaluate_test=true, data_workers=4 (>=0).
+# V6 explicitly seals test and records surface metrics each epoch; local GT is evaluation-only.
+# Other public Training arguments/defaults are documented in README 5.3 and Training.run.
+
+seeds: [4, 7, 32, 54]  # Four mandatory paired replications; no seed racing or competitive pruning.
+
+sweep:  # Execute exact sparse candidates, never the Cartesian product of all loss domains.
+  space:  # Inactive child parameters do not create extra scientific Trials.
+    pooling_type:  # Retain all three V5c pooling philosophies.
+      values: [max, log_sum_exp, attention]  # MAX control, fixed area LSE, simple area Attention.
+    pooling_area_mode:  # Use represented area for distributed pooling only.
+      values: [area]  # Frozen V5c measure, not an additional factor.
+      when: {pooling_type: {in: [log_sum_exp, attention]}}  # MAX retains with.point.
+    log_sum_exp_mode:  # Freeze the V5a/V5b retained LSE policy.
+      values: [fixed]  # No learned temperature or curriculum.
+      when: {pooling_type: log_sum_exp}  # Absent from non-LSE Trials.
+    log_sum_exp_beta:  # Freeze the retained LSE concentration.
+      values: [0.25]  # Exact V5c value, not a pooling search.
+      when: {pooling_type: log_sum_exp}  # Absent from MAX and Attention.
+    attention_variant:  # Freeze the retained embedding-based attention scorer.
+      values: [simple]  # No alternative attention mechanism.
+      when: {pooling_type: attention}  # Absent from non-Attention Trials.
+    attention_hidden_dim:  # Freeze the retained scorer capacity.
+      values: [256]  # Exact V5c width; backbone embeddings remain unchanged.
+      when: {pooling_type: attention}  # Absent from MAX and LSE.
+
+    negative_surface_lambda:  # N: tested distributed suppression; pooling-specific anchors below.
+      values: [0.0, 0.03, 0.3, 1.0]  # Domain only; candidates select no unlisted cross-products.
+    positive_existence_lambda:  # E: require a positive point; MAX duplicates positive global BCE.
+      values: [0.0, 0.03]  # MAX evidence supports 0.03; other poolers are exploratory controls.
+    regional_positive_lambda:  # P: replace point existence, or probe redundancy in full mixtures.
+      values: [0.0, 0.03, 0.1, 0.3]  # Provisional branch-specific strengths, not confirmed winners.
+    regional_ranking_lambda:  # R: contrast positive and negative regional evidence.
+      values: [0.0, 0.03, 0.1]  # MAX uses 0.1; area poolers use conservative 0.03.
+    cardinality_lambda:  # C: preserve the existing squared lower-mass hinge and its scale.
+      values: [0.0, 0.03, 0.1]  # Weak/inactive effects must be diagnosed, not assumed beneficial.
+    minimum_positive_area:  # Conditional mass bound; inactive candidates omit this key.
+      values: [0.02]  # Two percent expected probability mass, not a true interface-area target.
+      when: {cardinality_lambda: {in: [0.03, 0.1]}}  # Only active C branches need this bound.
+    total_variation_lambda:  # T: use a small TV anchor, not the higher-range extension.
+      values: [0.0, 0.005]  # LSE/Heat evidence at 0.005; other poolers are exploratory.
+    dirichlet_lambda:  # D: provisional sensitivity branch while V6g results are unavailable.
+      values: [0.0, 0.001]  # Not evidence of a selected Dirichlet intensity.
+
+  candidates:  # Native sparse execution: every complete point below, and nothing else.
+    # max: N=0.3, E=0.03, P=0.3, R=0.1, C=0.03, T=0.005, D=0.001.
+    - &max_control  # Contemporary zero-prior control; YAML anchor reuses these exact defaults.
+      pooling_type: max  # Retained V5c pooling; no pooling hyperparameter search.
+      negative_surface_lambda: 0.0  # Disabled in this pooling's matched control.
+      positive_existence_lambda: 0.0  # Disabled in this pooling's matched control.
+      regional_positive_lambda: 0.0  # Disabled in this pooling's matched control.
+      regional_ranking_lambda: 0.0  # Disabled in this pooling's matched control.
+      cardinality_lambda: 0.0  # Disabled in this pooling's matched control.
+      total_variation_lambda: 0.0  # Disabled in this pooling's matched control.
+      dirichlet_lambda: 0.0  # Disabled in this pooling's matched control.
+    - {<<: *max_control, negative_surface_lambda: 0.3}  # N: Isolated same-code reference; do not pool with historical campaigns.
+    - {<<: *max_control, positive_existence_lambda: 0.03}  # E: Isolated same-code reference; do not pool with historical campaigns.
+    - {<<: *max_control, regional_positive_lambda: 0.3}  # P: Isolated same-code reference; do not pool with historical campaigns.
+    - {<<: *max_control, regional_ranking_lambda: 0.1}  # R: Isolated same-code reference; do not pool with historical campaigns.
+    - {<<: *max_control, cardinality_lambda: 0.03, minimum_positive_area: 0.02}  # C: Isolated same-code reference; do not pool with historical campaigns.
+    - {<<: *max_control, total_variation_lambda: 0.005}  # T: Isolated same-code reference; do not pool with historical campaigns.
+    - {<<: *max_control, dirichlet_lambda: 0.001}  # D: Provisional V6g sensitivity, not a selected winner.
+    - {<<: *max_control, negative_surface_lambda: 0.3, positive_existence_lambda: 0.03}  # N+E: Matched interaction/ablation contrast; compare within pooling and seed.
+    - {<<: *max_control, negative_surface_lambda: 0.3, regional_ranking_lambda: 0.1}  # N+R: Matched interaction/ablation contrast; compare within pooling and seed.
+    - {<<: *max_control, positive_existence_lambda: 0.03, regional_ranking_lambda: 0.1}  # E+R: Matched interaction/ablation contrast; compare within pooling and seed.
+    - {<<: *max_control, negative_surface_lambda: 0.3, positive_existence_lambda: 0.03, regional_ranking_lambda: 0.1}  # N+E+R: Core triple; all eight N/E/R on-off states are present.
+    - {<<: *max_control, negative_surface_lambda: 0.3, regional_positive_lambda: 0.3, regional_ranking_lambda: 0.1}  # N+P+R: Regional replacement for point existence, not a summed existence claim.
+    - {<<: *max_control, negative_surface_lambda: 0.3, positive_existence_lambda: 0.03, regional_ranking_lambda: 0.1, total_variation_lambda: 0.005}  # N+E+R+T: Matched interaction/ablation contrast; compare within pooling and seed.
+    - {<<: *max_control, negative_surface_lambda: 0.3, positive_existence_lambda: 0.03, regional_ranking_lambda: 0.1, dirichlet_lambda: 0.001}  # N+E+R+D: Matched interaction/ablation contrast; compare within pooling and seed.
+    - {<<: *max_control, negative_surface_lambda: 0.3, positive_existence_lambda: 0.03, regional_ranking_lambda: 0.1, cardinality_lambda: 0.03, minimum_positive_area: 0.02}  # N+E+R+C: Matched interaction/ablation contrast; compare within pooling and seed.
+    - {<<: *max_control, negative_surface_lambda: 0.3, positive_existence_lambda: 0.03, regional_positive_lambda: 0.3, regional_ranking_lambda: 0.1, cardinality_lambda: 0.03, total_variation_lambda: 0.005, minimum_positive_area: 0.02}  # N+E+P+R+C+T: All-family stress branch; redundancy is intentional, not a recommended model.
+    - {<<: *max_control, negative_surface_lambda: 0.3, positive_existence_lambda: 0.03, regional_positive_lambda: 0.3, regional_ranking_lambda: 0.1, cardinality_lambda: 0.03, dirichlet_lambda: 0.001, minimum_positive_area: 0.02}  # N+E+P+R+C+D: All-family stress branch; redundancy is intentional, not a recommended model.
+
+    # log_sum_exp: N=1, E=0.03, P=0.1, R=0.03, C=0.1, T=0.005, D=0.001.
+    - &log_sum_exp_control  # Contemporary zero-prior control; YAML anchor reuses these exact defaults.
+      pooling_type: log_sum_exp  # Retained V5c pooling; no pooling hyperparameter search.
+      pooling_area_mode: area  # Represented-area weighting, unchanged from V5c.
+      log_sum_exp_mode: fixed  # No learned temperature or curriculum.
+      log_sum_exp_beta: 0.25  # Frozen distributed pooling concentration.
+      negative_surface_lambda: 0.0  # Disabled in this pooling's matched control.
+      positive_existence_lambda: 0.0  # Disabled in this pooling's matched control.
+      regional_positive_lambda: 0.0  # Disabled in this pooling's matched control.
+      regional_ranking_lambda: 0.0  # Disabled in this pooling's matched control.
+      cardinality_lambda: 0.0  # Disabled in this pooling's matched control.
+      total_variation_lambda: 0.0  # Disabled in this pooling's matched control.
+      dirichlet_lambda: 0.0  # Disabled in this pooling's matched control.
+    - {<<: *log_sum_exp_control, negative_surface_lambda: 1.0}  # N: Isolated same-code reference; do not pool with historical campaigns.
+    - {<<: *log_sum_exp_control, positive_existence_lambda: 0.03}  # E: Isolated same-code reference; do not pool with historical campaigns.
+    - {<<: *log_sum_exp_control, regional_positive_lambda: 0.1}  # P: Isolated same-code reference; do not pool with historical campaigns.
+    - {<<: *log_sum_exp_control, regional_ranking_lambda: 0.03}  # R: Isolated same-code reference; do not pool with historical campaigns.
+    - {<<: *log_sum_exp_control, cardinality_lambda: 0.1, minimum_positive_area: 0.02}  # C: Isolated same-code reference; do not pool with historical campaigns.
+    - {<<: *log_sum_exp_control, total_variation_lambda: 0.005}  # T: Isolated same-code reference; do not pool with historical campaigns.
+    - {<<: *log_sum_exp_control, dirichlet_lambda: 0.001}  # D: Provisional V6g sensitivity, not a selected winner.
+    - {<<: *log_sum_exp_control, negative_surface_lambda: 1.0, positive_existence_lambda: 0.03}  # N+E: Matched interaction/ablation contrast; compare within pooling and seed.
+    - {<<: *log_sum_exp_control, negative_surface_lambda: 1.0, regional_ranking_lambda: 0.03}  # N+R: Matched interaction/ablation contrast; compare within pooling and seed.
+    - {<<: *log_sum_exp_control, positive_existence_lambda: 0.03, regional_ranking_lambda: 0.03}  # E+R: Matched interaction/ablation contrast; compare within pooling and seed.
+    - {<<: *log_sum_exp_control, negative_surface_lambda: 1.0, positive_existence_lambda: 0.03, regional_ranking_lambda: 0.03}  # N+E+R: Core triple; all eight N/E/R on-off states are present.
+    - {<<: *log_sum_exp_control, negative_surface_lambda: 1.0, regional_positive_lambda: 0.1, regional_ranking_lambda: 0.03}  # N+P+R: Regional replacement for point existence, not a summed existence claim.
+    - {<<: *log_sum_exp_control, negative_surface_lambda: 1.0, positive_existence_lambda: 0.03, regional_ranking_lambda: 0.03, total_variation_lambda: 0.005}  # N+E+R+T: Matched interaction/ablation contrast; compare within pooling and seed.
+    - {<<: *log_sum_exp_control, negative_surface_lambda: 1.0, positive_existence_lambda: 0.03, regional_ranking_lambda: 0.03, dirichlet_lambda: 0.001}  # N+E+R+D: Matched interaction/ablation contrast; compare within pooling and seed.
+    - {<<: *log_sum_exp_control, negative_surface_lambda: 1.0, positive_existence_lambda: 0.03, regional_ranking_lambda: 0.03, cardinality_lambda: 0.1, minimum_positive_area: 0.02}  # N+E+R+C: Matched interaction/ablation contrast; compare within pooling and seed.
+    - {<<: *log_sum_exp_control, negative_surface_lambda: 1.0, positive_existence_lambda: 0.03, regional_positive_lambda: 0.1, regional_ranking_lambda: 0.03, cardinality_lambda: 0.1, total_variation_lambda: 0.005, minimum_positive_area: 0.02}  # N+E+P+R+C+T: All-family stress branch; redundancy is intentional, not a recommended model.
+    - {<<: *log_sum_exp_control, negative_surface_lambda: 1.0, positive_existence_lambda: 0.03, regional_positive_lambda: 0.1, regional_ranking_lambda: 0.03, cardinality_lambda: 0.1, dirichlet_lambda: 0.001, minimum_positive_area: 0.02}  # N+E+P+R+C+D: All-family stress branch; redundancy is intentional, not a recommended model.
+
+    # attention: N=0.03, E=0.03, P=0.03, R=0.03, C=0.03, T=0.005, D=0.001.
+    - &attention_control  # Contemporary zero-prior control; YAML anchor reuses these exact defaults.
+      pooling_type: attention  # Retained V5c pooling; no pooling hyperparameter search.
+      pooling_area_mode: area  # Represented-area weighting, unchanged from V5c.
+      attention_variant: simple  # Same embedding-based scorer as the isolated screens.
+      attention_hidden_dim: 256  # Frozen scorer width, not a new architectural factor.
+      negative_surface_lambda: 0.0  # Disabled in this pooling's matched control.
+      positive_existence_lambda: 0.0  # Disabled in this pooling's matched control.
+      regional_positive_lambda: 0.0  # Disabled in this pooling's matched control.
+      regional_ranking_lambda: 0.0  # Disabled in this pooling's matched control.
+      cardinality_lambda: 0.0  # Disabled in this pooling's matched control.
+      total_variation_lambda: 0.0  # Disabled in this pooling's matched control.
+      dirichlet_lambda: 0.0  # Disabled in this pooling's matched control.
+    - {<<: *attention_control, negative_surface_lambda: 0.03}  # N: Isolated same-code reference; do not pool with historical campaigns.
+    - {<<: *attention_control, positive_existence_lambda: 0.03}  # E: Isolated same-code reference; do not pool with historical campaigns.
+    - {<<: *attention_control, regional_positive_lambda: 0.03}  # P: Isolated same-code reference; do not pool with historical campaigns.
+    - {<<: *attention_control, regional_ranking_lambda: 0.03}  # R: Isolated same-code reference; do not pool with historical campaigns.
+    - {<<: *attention_control, cardinality_lambda: 0.03, minimum_positive_area: 0.02}  # C: Isolated same-code reference; do not pool with historical campaigns.
+    - {<<: *attention_control, total_variation_lambda: 0.005}  # T: Isolated same-code reference; do not pool with historical campaigns.
+    - {<<: *attention_control, dirichlet_lambda: 0.001}  # D: Provisional V6g sensitivity, not a selected winner.
+    - {<<: *attention_control, negative_surface_lambda: 0.03, positive_existence_lambda: 0.03}  # N+E: Matched interaction/ablation contrast; compare within pooling and seed.
+    - {<<: *attention_control, negative_surface_lambda: 0.03, regional_ranking_lambda: 0.03}  # N+R: Matched interaction/ablation contrast; compare within pooling and seed.
+    - {<<: *attention_control, positive_existence_lambda: 0.03, regional_ranking_lambda: 0.03}  # E+R: Matched interaction/ablation contrast; compare within pooling and seed.
+    - {<<: *attention_control, negative_surface_lambda: 0.03, positive_existence_lambda: 0.03, regional_ranking_lambda: 0.03}  # N+E+R: Core triple; all eight N/E/R on-off states are present.
+    - {<<: *attention_control, negative_surface_lambda: 0.03, regional_positive_lambda: 0.03, regional_ranking_lambda: 0.03}  # N+P+R: Regional replacement for point existence, not a summed existence claim.
+    - {<<: *attention_control, negative_surface_lambda: 0.03, positive_existence_lambda: 0.03, regional_ranking_lambda: 0.03, total_variation_lambda: 0.005}  # N+E+R+T: Matched interaction/ablation contrast; compare within pooling and seed.
+    - {<<: *attention_control, negative_surface_lambda: 0.03, positive_existence_lambda: 0.03, regional_ranking_lambda: 0.03, dirichlet_lambda: 0.001}  # N+E+R+D: Matched interaction/ablation contrast; compare within pooling and seed.
+    - {<<: *attention_control, negative_surface_lambda: 0.03, positive_existence_lambda: 0.03, regional_ranking_lambda: 0.03, cardinality_lambda: 0.03, minimum_positive_area: 0.02}  # N+E+R+C: Matched interaction/ablation contrast; compare within pooling and seed.
+    - {<<: *attention_control, negative_surface_lambda: 0.03, positive_existence_lambda: 0.03, regional_positive_lambda: 0.03, regional_ranking_lambda: 0.03, cardinality_lambda: 0.03, total_variation_lambda: 0.005, minimum_positive_area: 0.02}  # N+E+P+R+C+T: All-family stress branch; redundancy is intentional, not a recommended model.
+    - {<<: *attention_control, negative_surface_lambda: 0.03, positive_existence_lambda: 0.03, regional_positive_lambda: 0.03, regional_ranking_lambda: 0.03, cardinality_lambda: 0.03, dirichlet_lambda: 0.001, minimum_positive_area: 0.02}  # N+E+P+R+C+D: All-family stress branch; redundancy is intentional, not a recommended model.
+
+# 54 scientific Trials x four paired seeds = 216 required Runs (18 candidates per pooling).
+# Do not select families by W alone. No training or confirmation has yet been performed.
+# The N/E/R block contains control, three singles, three pairs and the triple (2^3 states).
+# P replaces E in N+P+R; full mixtures deliberately add both to expose possible redundancy.
+# C, T and D have singles and core-plus-one controls. Full mixtures test all compatible families.
+# TV and Dirichlet are alternatives: no authored candidate enables both.
+# Coefficients are frozen exploratory anchors from V6a-V6f, not jointly optimized or normalized.
+# Active branches use pooling-specific coefficients; cross-pooling gaps do not isolate pooling alone.
+# C may remain inactive; do not attribute a gain to C without a nonzero loss contribution.
+# D=0.001 is provisional because no V6g result was available in the reviewed report.
+# The higher-range extensions of a/c/d/f had no results in that report and are not adopted.
+# Evidence sources: TFM/Memoria/docs/seguimiento_experimental.md and v6a-v6f-final summaries,
+# reviewed 2026-10-16; no test metrics or test labels informed these choices.
+# Fixed Heat6 isolates loss mixing here; f/g remain the no-Heat comparisons.
+# These reused seeds are development evidence, not independent confirmation.
+# For any score Q, interaction(A,B)=Q(A+B)-Q(A)-Q(B)+Q(control), within pooling and seed.
+# Positive interaction means super-additivity only on the selected score scale, not biological proof.
+# Current defaults: all weak lambdas=0, regional_loss_length=2.5 Å, ranking margin=0.5,
+# minimum_positive_area=0, maximum_positive_area=null; all weights/lengths/margins >=0.
+# candidates has no default; without it LF enumerates space. Never remove it casually.
+# include and candidates are mutually exclusive. Points must contain all active keys only.
+
+# sweep.space is required; finite values and when use native LF expansion.
+# With explicit seeds, every cell/seed is mandatory; no search, pruning or racing is authored.
+# WISDOM's patience still stops a Run after 30 non-improving global-validation epochs.
+# W is a development utility, NOT the sole scientific decision. Read the G/S frontier,
+# operational/raw AUPRC, refinement gain, negative mass/peak, top-k, regret and seed dispersion.
+# All priors consume operational surface_logits; raw maps remain available for diagnostics.
+# No local ground truth enters any weak term. TV and Dirichlet cannot be active together.
+# Regional ranking is zero for single-class batches. Cardinality is a squared mass hinge,
+# not a hard-positive area constraint; inspect its actual activation before drawing conclusions.
+
+objective:  # Preserve W and its practical margin; never use held-out test.
+  metric: val_wisdom_hpo_score  # Existing global/surface/coupling development utility.
+  mode: max  # Higher utility is better, but no single-metric scientific winner is assumed.
+  range: [0.0, 1.0]  # Known mathematical bounds.
+  practical_margin: 0.015  # Frozen threshold of practical equivalence.
+
+# Objective requires metric; mode=max by default; range/practical_margin are optional.
+# W's formula and global-only checkpoint selection remain unchanged.
+
+resources:  # Operational enclosing allocation, not a scientific factor.
+  gpu: 2  # Preserve the authored three-accelerator allocation; LF handles concurrency.
+  cpu: 36  # Shared host decoding and orchestration budget.
+  memory: 96GiB  # Shared host-memory allocation.
+  time: 168h  # Seven-day scheduler ceiling.
+
+# Resource defaults: cpu=1, gpu=0, processes=1; memory/gpu_memory/storage=0, time=null.
+# cpu/processes>=1, gpu>=0, processes<=cpu; sizes and positive durations are native LF values.
+# Packing is automatically planned; no hard-coded runs_per_gpu/max_parallel/VRAM reservation.
+
+execution:  # Logical dispatch budget, separate from the scheduler ceiling.
+  max_time: 168h  # Seven days may leave coverage incomplete; audit all required Runs afterwards.
+
+# Execution defaults: max_time/max_runs/max_parallel/runs_per_gpu=null, failure_retries=1.
+# A complete sweep requires sufficient wall time; neither budget guarantees completion.
+# Existing Training.analysis_profile exposes G/S/raw/refinement/coupling/support/cost metrics.
+# Use native lf results analysis/report; reviews only run forwards on frozen checkpoints.

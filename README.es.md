@@ -811,207 +811,211 @@ de contenido depende de miembros y bytes exactos, no del equipo ni del clúster.
 
 ### 3.7. Una segunda tarea: coordinación de zinc verificada
 
-El zinc (Zn) es un ion metálico que puede estabilizar estructuras proteicas o participar en catálisis.
-Que aparezca Zn en un depósito no demuestra que todas sus cadenas lo unan, ni que ese contacto sea
-fisiológico: pueden intervenir aditivos de cristalización, ocupación incompleta o una cadena vecina.
-El flujo distingue un **sitio de coordinación estructuralmente verificado** de una **especificidad
-fisiológica por Zn** respaldada de forma independiente. Las comprobaciones geométricas actuales solo
-establecen lo primero; conservan la confianza de la evidencia sin elevarla artificialmente.
+El zinc (Zn) es un ion metálico que puede ayudar a mantener la forma de una proteína o participar
+en una reacción. Encontrar Zn en una estructura depositada **no** demuestra que cada proteína cercana
+se una a él en células vivas. Los aditivos de cristalización, la ocupación baja y los contactos de
+otras cadenas pueden producir candidatos engañosos. WISDOM distingue coordinación observada,
+capacidad biológica de unión y especificidad fisiológica por Zn. El positivo significa **coordinación
+de Zn verificada en la estructura depositada según la política del benchmark**: una aproximación
+estructural, no prueba de las otras dos afirmaciones. Se conserva el target `zinc_binding` y
+`physiological_specificity_claimed: false` en la procedencia.
 
-SAGLZn-II aporta antecedentes e hipótesis químicas, no un dataset que copiar. No se adoptan sus
-negativos por ausencia de ligando ni sus splits aleatorios. Un negativo necesita un experimento
-explícito de no unión o una anotación experimental curada `NOT` de unión a ion zinc, con
-referencia, alcance y SHA-256 de la secuencia exacta del sujeto. Así la evidencia queda vinculada a
-una proteína y no solo a un nombre PDB parecido. `NOT` niega expresamente una anotación; una anotación
-ausente no lo hace. Su interpretación sigue dependiendo de sensibilidad, cobertura y curación del
-ensayo. Selección adquiere ahora esa evidencia automáticamente: **no necesitas un fichero negativo**.
-La construcción sigue deteniéndose si la evidencia no permite splits con ambas clases y sin compartir
-homólogos. La adquisición automática no garantiza que existan suficientes proteínas con apoyo experimental.
-
-|Acción|Entrada|Decisión o salida|
-|---|---|---|
-|`ZincDiscovery`|Nombre de captura; JSONL negativo revisado opcional|Negaciones GO experimentales, correspondencias UniProt/PDB exactas y candidatos Zn de RCSB congelados|
-|`ZincSelection`|Adquisición automática o JSONL de candidatos/diseño congelado|Coordinación verificada, grupos de fuga RAW, fenotipos separados y splits fijos|
-|`ZincPreprocessing`|Diseño portable exacto y captura mmCIF|El mismo NPZ universal sin ligandos que para ADN y referencias de Zn separadas|
-|`Visualization`|DatasetVersion recién publicada|Galería HTML interactiva muestreada y PLY completos; sin cambiar los datos|
-|`ZincValidation`|DatasetVersion gestionada|Veredicto legible y errores científicos ordenados por proteína|
-
-**Adquisición automática de negativos.** QuickGO proporciona anotaciones de Gene Ontology (GO):
-afirmaciones curadas sobre la función de una proteína, con referencia y categoría de evidencia.
-Selección consulta anotaciones exactas `NOT|enables` para GO:0008270 (unión a ion zinc) y GO:0046872
-(unión a ion metálico), y conserva los códigos experimentales referenciados EXP, IDA, IPI, IMP, IGI
-e IEP. Excluye inferencias por secuencia, anotaciones restringidas a un contexto e isoformas específicas.
-Las negaciones GO se propagan a funciones más concretas: negar unión a metales también niega unión
-a Zn; negar una función particular dependiente de Zn o unirse a otro metal **no** niega toda unión
-a Zn. La ontología congelada comprueba esa dirección. `negative_go_terms` también admite los términos
-más generales de unión a cationes e iones GO:0043169 y GO:0043167. Consulta las
-[reglas de anotación GO](https://geneontology.org/docs/go-annotations/) y la
-[API de QuickGO](https://www.ebi.ac.uk/QuickGO/api/index.html).
-
-UniProt, una base curada de secuencias y funciones proteicas, proporciona la secuencia canónica del
-sujeto y referencias a PDB mediante su [API pública](https://www.uniprot.org/help/api). Una cadena
-depositada solo es candidata si su **secuencia completa declarada** coincide exactamente con esa
-secuencia: no basta con comparar los átomos observados ni una secuencia parecida. Las etiquetas de
-purificación, mutaciones y construcciones truncadas no heredan la negación. Se elige determinísticamente
-el primer ensamblaje/copia declarado que contiene una cadena exacta, sin buscar una copia que evite Zn.
-Las anotaciones experimentales positivas contradictorias excluyen al sujeto; las comprobaciones
-posteriores de coordenadas también ponen en cuarentena negativos con contactos a Zn. El digest generado
-vincula la negación a su secuencia exacta; se conservan todas las anotaciones originales que la apoyan.
-
-Esta búsqueda conservadora puede devolver muy pocos sujetos. Varias estructuras de una misma proteína
-no crean negativos biológicos independientes; agrupar homólogos sobre todo RAW puede reducir aún más
-el número. Los recursos de coordinación ZincBind/MetalPDB no aportan por sí solos negativos experimentales
-de proteína completa. Un conjunto aleatorio de residuos no coordinantes de un sitio no es una proteína
-negativa. No se habilita ninguna alternativa por ausencia de ligando para ampliar el benchmark. Si ningún
-negativo consigue una correspondencia exacta, la adquisición se detiene **antes** de escanear todos los
-positivos Zn. Incluso con candidatos, pueden fallar las condiciones de los splits; se necesitan más
-evidencias explícitas, no relajar las comprobaciones de fuga.
-
-**Sustitución revisada opcional.** Descomenta `negative_evidence` para usar un fichero del investigador
-en lugar de la búsqueda automática. Cada registro necesita
-`identifier` (`PDB_AQ` significa una cadena llamada AQ), `sequence`, `label: 0`, `assembly_id`,
-`protein_copy` comenzando en uno, `origin` y `label_evidence`. La evidencia experimental contiene
-`kind: experimental_non_binding`, `scope: zinc_binding`, `reference`, `assay` y `sequence_sha256`.
-Una negación experimental curada utiliza `kind: curated_not_annotation`, el mismo alcance/referencia/
-digest, `qualifier: NOT`, uno de los cuatro términos anteriores y `evidence_code` EXP, IDA, IPI, IMP, IGI o IEP. Son
-categorías de evidencia experimental, no una garantía de cobertura del ensayo. Una secuencia distinta
-provoca un error; la evidencia contradictoria sobre una identidad o secuencia exacta queda en
-cuarentena, nunca se resuelve cambiando la etiqueta silenciosamente.
+**Ejecutar el flujo completo.** No hay que preparar una lista de PDB, negativos ni evidencia RAW:
 
 ```bash
-# Elige release_id; este flujo de tres pasos no necesita un fichero negativo previo.
 lf run experiments/preprocess/zinc/zinc_preprocess.yaml
 lf datasets verify wisdom-zinc@1
-lf run experiments/preprocess/zinc/validate_zinc.yaml
 ```
 
-El flujo es **select → preprocess → visualize**. Sin `raw_path`, select adquiere candidatos
-y los congela en `data/zinc/raw`; después publica el diseño científico completo en
-`data/zinc/design`. La geometría consume ese diseño exacto y publica `wisdom-zinc@1`;
-la visualización consume la salida dataset nativa del paso anterior y escribe
-`data/zinc/visualizations`. `maximum_proteins: 12` limita la galería, no el dataset; usa cero
-para inspeccionar todos los miembros. `zinc_discovery.yaml` es un comando opcional de adquisición
-únicamente, útil para inspeccionar/corregir la captura de candidatos por separado. Su salida
-puede indicarse mediante el `raw_path` tipado de select, evitando discovery pero no la selección.
+|Work visible|Consume|Produce; límite de la fase siguiente|
+|---|---|---|
+|`discover`: ZincDiscovery|Respuestas públicas de RCSB, QuickGO y UniProt|Evidencia RAW y coordenadas congeladas; sin particiones ni publicación|
+|`select`: ZincSelection|La captura mediante `{from: discover.raw}`|Verificación sin conexión, grupos de fuga sobre todo RAW, fenotipos y diseño fijo|
+|`preprocess`: ZincPreprocessing|Diseño exacto|NPZ universal solo proteico, referencias de Zn separadas y DatasetVersion validado|
+|`validate`: ZincValidation|La ubicación publicada|Veredicto científico independiente y errores por proteína|
+|`visualize`: Visualization|La misma ubicación, tras validar|Inspección interactiva HTML/PLY sin modificar arrays científicos|
 
-La adquisición automática añade `negative-evidence.jsonl`, `negative-discovery.json` y las respuestas
-API exactas en `sources/` a la salida raw. La auditoría distingue **anotaciones** consultadas (varias
-afirmaciones pueden referirse a una proteína), **sujetos** elegibles (proteínas UniProt antes de buscar
-estructuras), **candidatos** correspondidos (cadenas PDB) y **secuencias negativas únicas** (antes de
-agrupar homólogos). Ninguna cuenta mide casos de prueba independientes. Los motivos de exclusión y
-digests de las respuestas permiten revisar la evidencia descartada. Si falla, estos ficheros permanecen
-en el directorio del artefacto gestionado `zinc-raw` del Work; LF solo publica copias externas al completar
-correctamente la ejecución. La caché y los mapas reanudables nativos reutilizan consultas, descargas y
-correspondencias terminadas tras una interrupción. `release_id` nombra una adquisición congelada: cámbialo
-para adoptar anotaciones nuevas, no simplemente para reintentar.
+Las carpetas son `data/zinc/raw`, `design`, `validation` y `visualizations`. Una galería de
+12 proteínas limita la representación, no el dataset; `maximum_proteins: 0` solicita todos los miembros.
+La validación independiente forma parte del comando normal. `zinc_discovery.yaml` y
+`validate_zinc.yaml` siguen permitiendo adquirir evidencia o repetir una auditoría por separado.
+La selección de ADN recibe evidencia congelada por un script de adquisición separado; Zn necesita
+un Work público propio para reunir candidatos estructurales y negaciones experimentales explícitas.
 
-**Reutilizar la selección congelada.** Pon `select.with.skip: true`, descomenta
-`existing_design: {file: ../../../data/zinc/design}` y deja sin indicar entradas de adquisición.
-Deja preprocess activo. Selección solo reenvía `zinc-design`: no comprueba herramientas,
-descarga, hace clustering ni asigna splits. Conserva el diseño completo, incluidos
-`selection.jsonl`, `dilutions.json` y los bytes exactos de `structures/`; los TXT etiquetados
-solos no permiten recuperar la evidencia de coordinación. Los checkpoints nativos también
-conservan registros de adquisición/geometría terminados tras una interrupción; una selección
-completa puede recalcular los resúmenes de población baratos. Un contenido de dataset distinto
-requiere otra `dataset_version`, nunca sobrescribir una publicación inmutable. Para visualizar
-solo un dataset existente, comenta los dos primeros bloques de pasos y cambia el enlace `from`
-de visualize por `{dataset: wisdom-zinc@1}`. Pon su `skip: true` para construir sin renderizar.
+**Qué congela Discovery.** RCSB PDB, archivo público de estructuras moleculares depositadas, aporta
+todos los depósitos con Zn cuando `maximum_entries: 0`; un límite positivo marca un piloto, no
+cobertura completa. Un depósito es una estructura registrada, una cadena es una identidad de polímero,
+y un ensamblaje reúne las copias transformadas de cadenas que se declaran como conjunto funcional.
+Discovery examina esas copias con Gemmi, el lector de coordenadas usado en WISDOM. Para cada cadena
+depositada elige el ensamblaje/copia con más donantes de sitios aceptados, desempata de manera
+determinista y conserva las alternativas. Las cadenas vecinas sin coordinación verificada permanecen
+como posibles puentes RAW, **no como positivos aceptados**.
 
-Discovery examina los ensamblajes biológicos declarados y cada copia de cadena, incluidas cadenas
-de varios caracteres; no confunde la unidad asimétrica depositada con el objeto biológico. Registra
-las alternativas y elige, por cadena depositada, la copia con más donantes de sitios aceptados;
-desempata por ensamblaje/copia de forma determinista. Es una regla estructural auditable, no una
-inferencia de relevancia fisiológica. Las cadenas sin coordinación aceptada permanecen como
-candidatos RAW para conservar sus conexiones de secuencia/estructura antes de excluirlas.
+El inventario de Zn usa el campo consultable de RCSB Search
+`rcsb_nonpolymer_entity_container_identifiers.nonpolymer_comp_id`, con valor exacto `ZN` y
+`return_all_hits: true`. Un campo inválido devuelve HTTP 400 (petición rechazada), no una población
+proteica vacía. WISDOM incluye la explicación del servidor y la URL/clave exactas de la fuente en
+el log del fallo, sin omitir esa fuente en silencio. LambdaForge gestiona los fallos transitorios de
+red, HTTP 408/425/429 y errores del servidor con hasta cinco reintentos tras la petición inicial,
+90 segundos de timeout por petición JSON y esperas exponenciales que empiezan en dos segundos.
+Los errores permanentes de consulta HTTP 400/422 no se repiten. La caché nativa comprueba que las
+respuestas JSON son objetos válidos antes de publicar o reutilizar sus archivos; rechaza páginas
+HTML de error y JSON truncados. Un fallo conserva archivos válidos en caché y checkpoints de mapas
+completados, pero no publica un inventario de evidencia incompleto.
 
-Por defecto se exige ocupación del Zn y sus donantes ≥0,5, al menos dos átomos N/O/S proteicos de
-la copia seleccionada a ≤3 Å del Zn y al menos dos residuos coordinantes. La ocupación expresa la
-fracción depositada del sitio representada por ese átomo. Agua y ligandos no proteicos no satisfacen
-el criterio. No se exige que los residuos sean exclusivamente Cys/His/Glu/Asp. Se conservan socios
-entre cadenas, posiciones metálicas, identidades y recuentos; varios sitios de Zn forman una unión,
-no un sitio único forzado. El primer conformero de Gemmi es una simplificación determinista, no
-un conjunto de estados alternativos. La geometría no resuelve oxidación, protonación, afinidad
-fisiológica ni especificidad metálica; hay que revisar los umbrales para el benchmark previsto.
+Se conservan `raw.jsonl`, `provenance.json`, `rcsb-query.json`, `negative-evidence.jsonl`,
+`negative-discovery.json`, `acquisition.json`, respuestas JSON originales en `sources/` y cada
+depósito RAW en `structures/`. Las huellas SHA-256 identifican bytes exactos, no similitud biológica.
+Las coordenadas tienen huellas del archivo comprimido y de los bytes depositados sin comprimir.
+Cada comprobante guarda la URL y la primera observación dentro de la adquisición; no afirma una
+fecha de publicación del servidor ni cuándo una caché anterior descargó el archivo. Las versiones
+que la fuente declare siguen disponibles en las respuestas originales. Selection no descarga una
+revisión actual de RCSB para sustituir la captura.
 
-MMseqs2 y Foldseek trabajan sobre **toda la población RAW interpretable**, incluidos descartes
-científicos. Sus pares y las conexiones de secuencia exacta/depósito forman los grupos transitivos
-de fuga de 3.4; se filtra después. La morfología global se agrupa conjuntamente sobre positivos
-**y** negativos que cumplen calidad. Los fenotipos locales describen cada sitio de Zn aceptado:
-recuentos de donantes/residuos, pertenencia entre cadenas, media/desviación de distancias,
-fracciones N/O/S y recuentos separados de Cys/His/Glu/Asp. Conservan multiplicidad: Cys₂His₂ y
-Cys₁His₃ son distintos. Una proteína con varios sitios conserva la composición de sus etiquetas,
-no una media que oculte sitios diferentes. `zinc-sites.jsonl` muestra ensamblaje/copia, huella del
-archivo, socios donantes, distancias, ángulos entre donantes, química, soporte superficial y
-fenotipo de cada sitio. Son descripciones estructurales, no especificidad metálica ni familias.
+Un checkpoint duradero nativo conserva la sesión de adquisición entre intentos interrumpidos; las
+cachés y mapas reanudables acotados restauran descargas e inspecciones completadas. Un Run nuevo inicia
+otra sesión. `snapshot_label` es un nombre humano opcional, **no** una clave de caché.
+`snapshot_id` deriva de la política científica, la evidencia RAW y el contenido de fuentes y
+coordenadas; excluye fechas, nombres humanos y número de workers. Si cambia la fuente, cambia la
+captura aunque los parámetros científicos sean iguales. Cambiar un nombre humano no cambia la
+identidad científica. Reutilizar entradas congeladas conserva una observación deliberada;
+reanudar no equivale a adquirir una revisión pública nueva.
 
-Ambos ajustes usan mediana/IQR y HDBSCAN/stability de LambdaForge. Para interpretar varios grupos
-robustos se exigen al menos dos sin contar ruido y ARI mínimo 0,7 entre ajustes. ARI mide acuerdo
-(1: idénticas; cerca de 0: acuerdo por azar). El acuerdo cuando todo es ruido no aporta evidencia.
-Se perturban parámetros, no se hace bootstrap de población. `local_phenotype` describe la física
-local de una tarea; nunca constituye una conexión de fuga.
+**Los negativos fiables pueden ser escasos.** QuickGO proporciona anotaciones de Gene Ontology
+(GO): afirmaciones sobre una función proteica, su referencia y categoría de evidencia.
+Una anotación `NOT` niega explícitamente una función; que no haya anotación o Zn depositado no
+la niega. Discovery consulta `NOT|enables` exactos para unión a Zn (GO:0008270) y a metales
+(GO:0046872) por defecto. Solo admite códigos experimentales EXP, IDA, IPI, IMP, IGI e IEP con
+referencia; excluye inferencias, extensiones contextuales e isoformas no soportadas (productos
+alternativos del mismo gen). Una ontología congelada comprueba la dirección de la implicación:
+negar unión a metales niega unión a Zn, pero negar una actividad más específica o unión a otro
+metal no niega toda unión a Zn.
 
-Antes de repartir, Selection muestrea la misma frontera superficial determinista de proteína que
-se usará después, sin calcular curvatura ni operadores espectrales. Usa los filtros del lector
-universal, el marco centrado del depósito y arrays float32 **antes** de transformar al ensamblaje:
-remuestrear una copia rotada cambiaría la selección de vóxeles. Con resolución 1 Å, sonda
-1,4 Å y gap positivo al donante 1,4 Å por defecto, cuenta puntos positivos accesibles por sitio.
-Una proteína positiva por coordinación sin ninguno queda `buried_global_only`: sigue siendo
-positiva, pero su grupo de fuga completo se restringe a train.
-«Enterrada» significa aquí sin soporte sobre la superficie de proteína seleccionada de WISDOM,
-no inaccesibilidad al solvente demostrada para el ensamblaje completo.
-La anotación final repite el control; otros ajustes de muestreo pueden invalidar un miembro de validación/test, nunca convertirlo
-silenciosamente en una superficie totalmente negativa.
+`negative_evidence_go_terms` elige las funciones de unión cuyas anotaciones NOT se buscan: los términos
+no son negativos por sí mismos. Los ancestros revisados de unión a cationes/iones
+GO:0043169/GO:0043167 son opcionales.
+Los informes separan NOT directo de Zn, NOT de metales, de cationes y de iones.
+UniProt aporta la secuencia completa canónica y referencias a PDB. La secuencia completa declarada
+del polímero debe coincidir **exactamente**: similitud, etiquetas añadidas, mutaciones y truncamientos
+no heredan un ensayo. Las contradicciones experimentales positivas/negativas se ponen en cuarentena.
+Selection vuelve a comprobar secuencia, coordinación ocupada e incluso contactos ambiguos con Zn
+en el ensamblaje congelado. Varias estructuras de un sujeto no son varios ensayos negativos independientes.
 
-Selection conserva negativos fiables y reparte la cuota positiva entre grupos de fuga, fenotipos,
-fuentes, métodos experimentales y familias/firmas de coordinación disponibles.
-`positive_policy: diverse_quota` respeta `positive_negative_ratio` cuando el soporte lo permite;
-`positive_policy: all` conserva todos los positivos elegibles e informa la proporción real, sin
-llamarlo balanceado. El JSONL opcional congelado `functional_metadata` exige `identifier`,
-`sequence_sha256`, `source`, `version`; puede añadir `uniprot`, `pfam`, `interpro`, `cath`, `ec` o
-`family`. Se comprueban secuencia/versión y huella del archivo; no cambia etiquetas ni crea conexiones
-de fuga. No se consultan servicios vivos automáticamente. `site_metadata` enlaza por separado exportaciones
-congeladas y revisadas de sitios metálicos: cada registro JSONL exige `identifier`, `site_id`,
-`structure_sha256`, `source`, `version`, `external_id`, y admite `family`/`reference`. Un sitio
-desconocido o bytes de coordenadas distintos producen error; no puede cambiar aceptación de donantes.
-Permite enlazar [exportaciones de ZincBind](https://zincbind.net/help/) y
-[sitios de MetalPDB](https://metalpdb.cerm.unifi.it/downloadMetalSites) mapeados por el investigador,
-no incorpora un adaptador vivo automático ni evidencia negativa nueva. `evaluate_shortcuts: true` ajusta en train
-un clasificador sencillo de tamaño/resolución/morfología/fuente y evalúa solo en validación. Una
-puntuación alta alerta de que variables ajenas a la unión pueden predecir la etiqueta, no demuestra
-comprensión bioquímica. Con soporte insuficiente, el resultado no está disponible. Los splits por grupos son 70/15/15% por defecto; grupos indivisibles pueden impedir
-el balanceo exacto, que se informa en vez de afirmarlo. Las diluciones solo reducen train una vez
-fijados los grupos; validation/test permanecen iguales. `report.md`, `audit.json`, `split-counts.csv`,
-tablas de pares, TXT etiquetados, `selection.jsonl` y `dilutions.json` muestran las decisiones. Un
-`diversity.md` explica gráficas de clases y tamaños de grupos, cobertura de fuentes y química,
-y diferencias de medias estandarizadas (SMD) para tamaño, resolución y morfología. SMD compara
-medias de clases en unidades de desviación combinada; |SMD|≥0,5 señala un posible atajo, no
-significancia estadística. Soporte ausente o constante queda no disponible, no cero. Las familias
-funcionales se cuentan solo si se aportan; los grupos de fuga no son familias biológicas. Un
-TXT de dos columnas no recupera ensamblaje ni coordinación. Preprocessing no debe redescubrir ni
-repartir las proteínas a partir de él.
+Si no se mapea ningún negativo, Discovery se detiene antes del rastreo positivo costoso; si quedan
+pocos grupos independientes pueden fallar después las particiones con ambas clases. No se inventan
+controles por ausencia para evitar esta limitación. MetalPDB y ZincBind no aportan negativos de
+proteína completa por enumerar sitios coordinantes. SAGLZn-II sirve como antecedente de hipótesis
+químicas, no como política de etiquetas ni de particiones aleatorias. `negative_evidence` permite
+un JSONL revisado en lugar de la consulta automática: requiere identificador, secuencia, etiqueta 0,
+ensamblaje/copia, origen y `label_evidence` con ámbito `zinc_binding`, referencia y
+`sequence_sha256` exacto. Se admite `experimental_non_binding` con ensayo, o
+`curated_not_annotation` con término revisado, NOT y código experimental. Las condiciones del
+experimento siguen limitando la interpretación.
 
-La referencia local de Zn mide el mínimo **gap a un átomo proteico coordinante**: distancia euclídea
-del punto al centro del donante menos su radio de van der Waals. El mínimo considera los radios
-de todos los donantes relevantes. La región positiva une los sitios verificados. Por defecto los
-gaps ≤1,4 Å son positivos, ≥3 Å negativos y los intermedios ambiguos; una transición coseno produce
-etiquetas suaves. `zinc_gap` conserva aparte la distancia al centro del Zn menos el radio diagnóstico
-1,39 Å; no define la etiqueta principal. Sensibilidades a 1/1,4/2 Å permiten evaluar dependencia del
-umbral sin regenerar geometría. Son referencias por proximidad, no probabilidades experimentales
-medidas sobre la superficie.
+**Selección sin conexión y cobertura.** Por defecto se exige ocupación de metal/donantes >=0,5,
+al menos dos átomos donantes proteicos N/O/S de la copia seleccionada a <=3 Å de Zn y al menos dos
+residuos distintos. La ocupación es la fracción depositada representada en una posición atómica.
+Agua y ligandos no proteicos no satisfacen estos mínimos. Se usa el primer conformero de Gemmi;
+esta política geométrica no modela protonación, afinidad ni especificidad fisiológica.
+No se limita a Cys/His/Glu/Asp. Cada sitio conserva donantes, multiplicidades de residuos, elementos,
+distancias, ocupación, ángulos entre donantes, socios de otras cadenas y ensamblaje/copia.
+Los distintos sitios aceptados permanecen separados en `zinc-sites.jsonl`.
 
-Las coordenadas reales de Zn solo aparecen en evidencia y sidecars de evaluación, nunca en el NPZ
-universal ni en la entrada del modelo. Un positivo sin puntos de referencia positivos queda no
-disponible, no todo-negativo: puede permanecer en train/clasificación global, pero bloquea publicar
-si pertenece a validation/test. No se filtra por comodidad del área positiva o número de fragmentos.
-`ZincValidation` comprueba bytes, secuencia, coordinación reproducible, arrays universales completos,
-alineación local, grupos/splits y presencia de ambas clases. Una ampliación posterior de campos
-explícitos sirve para ambas tareas. También informa cobertura de fuentes/fenotipos/familias, SMD
-y química coordinante rara sobre miembros verificados. Tamaños superficiales fuera del intervalo
-de 1,5 IQR (cuartiles ampliados 1,5 veces su separación) y fracciones de puntos positivos ≥0,5
-piden inspección, no exclusión. Son avisos descriptivos, no pruebas de invalidez física; la fracción
-de puntos no estima área ponderada. Las referencias locales ausentes quedan no disponibles y se
-informa el soporte del análisis. Este cambio no ha producido un benchmark real de Zn ni resultados
-de rendimiento sobre él.
+Los niveles de confianza son descripciones revisables, no probabilidades de unión:
+`structural_basic` satisface la aceptación; `structural_strong` exige además cuatro donantes locales,
+tres residuos, ocupación de metal y donantes locales >=0,8 y distancia local máxima <=2,8 Å.
+`externally_supported` requiere una correspondencia revisada de fuente/sitio exactos.
+Una rejilla de sensibilidad combina cortes 2,8/3/3,2 Å, mínimos de donantes 2/3/4 y residuos 1/2/3,
+manteniendo ensamblaje y ocupación. Cuenta sitios conservados, perdidos y nuevos **sin** cambiar
+etiquetas, construir otros datasets ni repetir particiones. Una variación grande revela dependencia
+de la definición operativa, no automáticamente datos malos.
+
+MMseqs2/Foldseek calculan relaciones de secuencia y estructura sobre todo RAW antes de filtrar.
+Se conservan identidad 0,30, cobertura bidireccional de secuencia 0,80 y valor E <=1e-3;
+probabilidad estructural 0,90, TM-score bidireccional 0,75, cobertura 0,80 y valor E <=1e-3.
+Las relaciones de identidad, secuencia, estructura y mismo depósito forman grupos transitivos de
+fuga: A-B y B-C mantienen A,B,C juntos aunque B se excluya después. Expresan dependencia,
+**no familias funcionales**. Los fenotipos físicos describen por separado morfología global en
+ambas clases y geometría local de sitios positivos individuales. Mediana/IQR y HDBSCAN/stability
+de LF mantienen el ruido explícito; una solución robusta requiere ARI >=0,7 y al menos dos clusters
+sin ruido. ARI mide acuerdo (1 idéntico, cercano a 0 acuerdo por azar); todo-ruido no demuestra
+clusters útiles. Comprobar la rejilla no sustituye repetir muestras de la población.
+
+`positive_policy: all` conserva por defecto todos los positivos elegibles y negativos fiables.
+Se permite desequilibrio: 1:1 no es científicamente preferible. `diverse_quota` aplica
+`positive_negative_ratio` y prioriza grupos, fenotipos, orígenes, firmas de coordinación, métodos
+y anotaciones Pfam/InterPro/EC disponibles. El informe compara cobertura **elegible y seleccionada**
+para valorar qué diversidad se pierde. Cada grupo permanece entero en una partición; las
+fracciones por defecto son 70/15/15 %. Las diluciones son deterministas, anidadas y solo de train;
+validación y test permanecen fijos.
+
+Discovery congela automáticamente anotaciones descriptivas de entidades RCSB: enlaces UniProt,
+dominios Pfam/InterPro, clasificación estructural CATH y taxonomía cuando existen.
+Un dominio es una parte recurrente de secuencia/estructura; las anotaciones describen cobertura,
+no etiquetas ni entradas del modelo. Los datos adicionales de UniProt y códigos de función
+enzimática EC requieren secuencia completa exacta. La ausencia permanece ausente, no se inventa
+una familia “desconocida”. `functional_metadata` permite anotaciones congeladas adicionales ligadas
+a identificador, huella de secuencia, fuente y versión. MetalPDB tiene una API documentada y
+ZincBind publica acceso a sus datos, pero sus identificadores no prueban el mismo ensamblaje/copia/
+revisión de coordenadas. No se afirma corroboración automática de sitios exactos.
+`site_metadata` revisado requiere identificador, site_id, huella estructural, fuente, versión e
+external_id; sitios desconocidos o bytes distintos fallan y la falta de respaldo es neutral.
+
+**Leer el informe de construcción.** `design/report.md` explica los valores obtenidos punto por
+punto. `coverage.csv` y `benchmark.json` registran embudos positivos/negativos, exclusiones primarias
+y retención solo entre unidades iguales: depósitos, anotaciones, sujetos, cadenas, secuencias y
+grupos no deben confundirse. Los motivos primarios reparten las cadenas excluidas; los adicionales
+pueden solaparse. También se informa de categorías raras soportadas por un solo grupo independiente,
+categorías exclusivas de train/evaluación, sitios entre cadenas, soporte local, química, sensibilidad
+y representación elegible/seleccionada. `benchmark.json` también registra las anotaciones y
+ausencias por clase en cada partición, separando miembros de familias y grupos independientes.
+`audit.json`, `leakage.json`, tablas de pares, TXT
+etiquetados y `dilutions.json` conservan las decisiones.
+
+`diversity.svg` compara clases por partición y el tamaño ordenado de grupos RAW. Muchos miembros de
+un grupo no son muchos experimentos independientes. `diversity.md` explica la diferencia de medias
+estandarizada (SMD): diferencia entre medias de clase dividida por la desviación típica combinada;
+cero significa medias parecidas, no distribuciones idénticas, y |SMD|>=0,5 señala algo a revisar,
+no significación estadística. Soporte ausente o constante queda no disponible, no cero.
+El sesgo de adquisición se describe por origen, método, año y resolución. Con
+`evaluate_shortcuts: true` (por defecto), un clasificador logístico pequeño usa solo longitud,
+radio de giro normalizado, proporción de ejes y densidad de empaquetamiento; ajusta train e informa
+AUROC/AUPRC/accuracy balanceada en validación, sin variables de adquisición ni test.
+Un resultado alto avisa de un posible atajo de forma; la referencia sin habilidad de AUPRC es la
+fracción positiva de validación, no necesariamente 0,5.
+
+**Referencia local y publicación inmutable.** La referencia une las vecindades superficiales de
+los donantes proteicos verificados. El gap firmado es distancia al centro del donante menos su radio
+de van der Waals, tomando el mínimo entre todos los donantes relevantes. Gaps <=1,4 Å son positivos,
+>=3 Å negativos; los intermedios son ambiguos y tienen etiquetas suaves con transición coseno.
+Los canales diagnósticos del centro Zn usan distancia menos 1,39 Å, separados del target principal.
+Los sidecars guardan sensibilidades 1/1,4/2 Å; el Zn real nunca entra en NPZ universales ni en el
+predictor. Son referencias de proximidad, no probabilidades de unión medidas.
+
+Antes de partir se comprueba soporte con espaciado superficial 1 Å, sonda 1,4 Å y gap 1,4 Å.
+Un positivo sin puntos soportados sigue siendo positivo, pero `buried_global_only`: todo su grupo
+queda en train. “Enterrado” se refiere a la superficie solo proteica de WISDOM, no a accesibilidad
+del ensamblaje completo. La anotación final repite la comprobación; cambiar el muestreo no puede
+asignar silenciosamente GT local todo-negativo a un positivo de evaluación.
+Validation comprueba fuentes, secuencias, coordinación, arrays, alineación, grupos, particiones y
+soporte de ambas clases, independientemente de la integridad de bytes de LF. PASS indica que se
+cumplen estos contratos, no verdad biológica ni éxito del modelo.
+
+**Reanudar o ejecutar una fase.** Para reutilizar RAW, activar `skip: true` en discover y
+descomentar `existing_raw: {file: ../../../data/zinc/raw}`. Para reutilizar un diseño, quitar/comentar
+discover, activar `skip: true` en select, comentar `raw_path` y descomentar `existing_design`.
+Para Selection aislado, conservar solo select y apuntar `raw_path` al raw.jsonl con su procedencia/
+estructuras adyacentes. Para Preprocessing aislado, conservar solo preprocess y usar
+`design: {file: ../../../data/zinc/design}`. Para validar/visualizar una versión existente, conservar
+esos Works y sustituir enlaces previos por `{dataset: wisdom-zinc@1}`. Saltar Preprocessing
+**no** publica un dataset. El TXT no reconstruye evidencia de ensamblaje/sitio.
+Los checkpoints conservan geometría de proteínas completadas; nuevos contenidos científicos
+requieren otro `dataset_version` inmutable. Los informes de adquisición fallida quedan como
+artefactos gestionados; las copias externas se publican solo al completar el Work.
+
+La implementación y las pruebas sin conexión no establecen tamaño ni rendimiento biológico de
+un dataset real de Zn. Las fuentes pueden seguir siendo escasas o sesgadas; adquirir metadatos
+no corrige esa limitación.
 
 ## 4. Preprocesado estructural
 
@@ -3049,7 +3053,7 @@ una prueba preliminar antes de asignar una versión formal a un estudio de pooli
 `wisdom_v10.yaml`. Estas etiquetas ordenan la campaña de construcción; no representan diez
 generaciones validadas del modelo. V1a–V1c diagnostican la variación entre semillas, V2 elige la
 inicialización, V3 el estabilizador del optimizador, V4 hace el HPO general, V5 comprueba el pooling,
-V6a–V6c estudian por separado las familias de pérdidas débiles y V6d ajusta su contribución conjunta.
+V6 estudia siete regularizadores débiles aislados antes de una combinación pendiente.
 V7 compara cabezas, V8 prueba cambios arquitectónicos aislados, V9 hace el reajuste final y V10
 confirma la configuración congelada con semillas nuevas. [`experiments/README.md`](experiments/README.md)
 contiene el orden autoritativo. Las generaciones científicas formales del roadmap son otro concepto.
@@ -3323,8 +3327,8 @@ variación entre semillas emparejadas, G, S, coupling, regret, fidelidad y tiemp
 define estas métricas). Una familia queda dominada solo si otra no es significativamente peor en
 las dimensiones revisadas y es mejor en al menos una, considerando la incertidumbre. Se mantienen
 aproximadamente **2–4 familias no dominadas**, no un único ganador. Cuatro semillas permiten una
-comparación controlada, no garantizan certeza estadística. Los espacios de pérdidas de V6 no se
-modifican: adaptarlos a esa shortlist será otra tarea. Mejorar en el nuevo máximo de beta, alpha,
+comparación controlada, no garantizan certeza estadística. V6 continúa la comparación cerrada
+MAX/LSE/Attention de V5c con priors aislados e interacciones Heat controladas (sección 5.5). Mejorar en el máximo de beta, alpha,
 potencia o longitud sigue dejando el rango abierto; no justifica cambiar esta rejilla a mitad del estudio.
 
 La fidelidad por borrado/inserción no está disponible para las dos familias regionales porque
@@ -3351,8 +3355,8 @@ El flujo es embeddings H → cabeza local → logits crudos r → refinador → 
 pooling existente → BCE de proteína. Un logit es una puntuación real cuya sigmoide es una
 probabilidad. Los gradientes de BCE atraviesan el refinador hasta la cabeza local y el backbone,
 incluso si el operador no tiene parámetros. Attention sigue calculando pesos desde H; solo refina
-los valores agregados. DiffusionNet difunde embeddings, V5c refina evidencia escalar y las pérdidas
-de suavidad V6 penalizan el campo en la pérdida. Son mecanismos distintos; V5c no activa V6.
+los valores agregados. DiffusionNet difunde embeddings, V5c refina evidencia escalar y V6 estudia
+priors aislados de etiquetas y geometría. V6f/g cruzan suavidad y Heat; V5c no añade pérdidas débiles.
 
 **Contexto geométrico compartido.** Posiciones x_i en Å, normales unitarias n_i, áreas a_i,
 curvaturas, embeddings y operadores espectrales existentes entran por referencia en un contexto
@@ -3576,8 +3580,8 @@ compatibilidad ocultaría un cambio científico.
 | `V2`–`V3` | Eligen inicialización y estabilidad del optimizador por separado para combinar ambos ganadores. |
 | `wisdom_v4.yaml` | Busca anchuras, profundidades, vecindades y regularización del núcleo con MAX fijo. |
 | `wisdom_v5a.yaml`, `wisdom_v5b.yaml` | Caracterizan familias fijas/adaptativas y conservan una shortlist antes de la supervisión local débil. |
-| `V6a`–`V6c` | Añaden familias de pérdidas débiles secuencialmente y solo cuando la decisión previa lo justifica. |
-| `wisdom_v6d.yaml` | Ajusta conjuntamente pérdidas negativas, regionales y de suavidad que ya mostraron señal. |
+| `V6a`–`V6g` | Estudian un regularizador débil por Study; TV/Dirichlet cruzan Heat activado/desactivado. |
+| `wisdom_v6h.yaml` | Plantilla pendiente para interacciones justificadas individualmente. |
 | `V7`–`V8` | Comparan relaciones entre cabezas y después spikes arquitectónicos aislados. |
 | `V9`–`V10` | Reajustan valores sensibles y confirman la configuración congelada con semillas nuevas. |
 | `interpretability_sparse_concepts.yaml` | Analiza a posteriori un checkpoint congelado explícito. |
@@ -3594,14 +3598,15 @@ como `gate_warmup` sigue activa cuando la V3 prueba `ema_0999`. El antiguo
 selectores nuevos.
 
 El baseline usa las diez semillas ordenadas `[4,7,32,54,65,94,109,124,142,167]` y ninguna puede
-podarse. Las comparaciones finitas de un factor (V2, V3, V5, V6a–V6c, V7 y V8) usan el
+podarse. Las comparaciones finitas (V2, V3, V5, V6a–V6g, V7 y V8) usan el
 `sweep.space` explícito de LambdaForge 0.15. Todas las celdas declaradas son obligatorias. El
 controlador inicia cada celda con la misma semilla del proyecto, abre otro bloque completo de
 semillas compartidas cuando termina el anterior y se detiene mediante un análisis emparejado válido
-bajo inspecciones repetidas del `objective.practical_margin` declarado. V5a/V5b fijan en cambio
-exactamente cuatro semillas históricas emparejadas por candidato, sin ampliación automática.
+bajo inspecciones repetidas del `objective.practical_margin` declarado cuando las semillas son
+automáticas. V5a/V5b/V5c y los siete barridos V6 aislados fijan exactamente cuatro semillas históricas
+emparejadas por candidato, sin ampliación automática.
 Los sweeps fijos nunca usan
-pruning HPO de curvas, seed racing por celda ni confirmación exclusiva del ganador. V4, V6d y V9
+pruning HPO de curvas, seed racing por celda ni confirmación exclusiva del ganador. V4 y V9
 usan en cambio `search.goal: optimize`: LambdaForge elige automáticamente propuestas, replicación,
 pruning, convergencia y semillas de confirmación disjuntas porque su objetivo es una optimización
 multidimensional eficiente. En ambos modos, omitir los límites de ejecución permite que ARI asigne
@@ -3615,43 +3620,198 @@ muestra sus valores concretos resueltos. V1a/V1b/V1c
 conservan las semillas históricas explícitas y V10 mantiene un conjunto de confirmación nuevo porque
 esas identidades forman parte de su pregunta científica, no de la planificación de recursos.
 
-El baseline fija `negative_surface_lambda: 0.0`. Un estudio posterior puede activarlo. Para una
-proteína negativa `i`, sean `l_ip` el logit local y `a_ip` el peso de área normalizado para que los
-pesos de la proteína sumen uno. La pérdida añadida es
+V6 conserva el backbone real de V5c y sus políticas baseline. Prueba siete familias de pérdidas
+independientes con MAX, LSE por área beta .25 y Attention simple por área anchura256.
+V6a/c/d/f conservan sus parrillas originales y añaden ampliaciones selectivas; V6b/e/g no cambian.
+V6h ya explora mezclas explícitas y señala como provisional la evidencia ausente de V6g.
+Las reservas GPU se leen de cada YAML: son operativas, no factores científicos del backbone.
+La fuente y el contenido requerido están en
+[la guía V6](experiments/v6/README.es.md).
+
+| Estudio / regularización | Hipótesis / patología que aborda | Parámetros activos | Interacción con Heat | Trials / Runs |
+|---|---|---|---|---:|
+| V6a negativo | Eliminar masa/picos positivos espurios en proteínas negativas | parrilla original más puntos altos selectivos LSE/Attention | fijo 6 Å | 23 / 92 |
+| V6b existencia (congelado) | Exigir al menos un pico positivo en cada proteína positiva | lambda 0, .03, .10, .30 | fijo 6 Å | 12 / 48 |
+| V6c positivo regional | Exigir una región positiva, no solo un pico puntual | parrilla original más ampliaciones LSE/MAX; longitud 2.5 Å | difusión extra tras Heat6 | 19 / 76 |
+| V6d ranking regional | Separar máximos regionales positivos/negativos | parrilla original más ampliaciones LSE/Attention; longitud 2.5 Å; margen .5 | puntuación regional tras Heat6 | 20 / 80 |
+| V6e cardinalidad | Evitar masa probabilística positiva insuficiente; probar dependencia del prior | lambda 0, .03, .10, .30; mínimo activo .005, .010, .020; sin máximo | fijo 6 Å | 30 / 120 |
+| V6f TV | Penalizar saltos locales sin borrar necesariamente las fronteras | parrilla original más ampliaciones LSE/none y MAX/Heat | none / Heat6 | 31 / 124 |
+| V6g Dirichlet | Penalizar variaciones probabilísticas de alta frecuencia | lambda 0, .001, .010, .050, .100 | none / Heat6 | 30 / 120 |
+| V6h mezclas exploratorias | Separar interacciones, redundancia y estrés con todas las familias | 18 combinaciones explícitas por pooling; coeficientes provisionales | fijo 6 Å; TV/Dirichlet excluyentes | 54 / 216 |
+
+Los YAML aislados actuales declaran **165 Trials / 660 Runs en V6a–V6g**. Incluyen los 30 / 120
+añadidos selectivos de a/c/d/f y los cinco valores ya escritos en V6g (30 / 120).
+Son recuentos del diseño, no ejecuciones completadas. V6h añade por separado 54 / 216.
+El coeficiente cero de cardinalidad no tiene un mínimo activo: hay un control, no tres.
+La longitud Heat no aparece en Trials identidad. Las condiciones nativas `when` también omiten
+campos de pooling inactivos. Los barridos completos desactivan pruning adaptativo y seed racing,
+pero la paciencia de G sigue deteniendo la optimización de cada Run. El límite de 168 horas puede
+dejar cobertura incompleta; comprueba todos los Runs requeridos antes de cerrar el estudio.
+
+
+Una proteína es un conjunto de puntos superficiales: el entrenamiento conoce su etiqueta binaria,
+no qué puntos unen ADN. Sean B+ y B− las proteínas positivas y negativas del lote; P_b sus puntos;
+l_p el **logit operacional** del punto p, q_p = sigmoid(l_p) su probabilidad y a_p su área
+representada dividida por el área total de su proteína: los a_p suman uno por proteína.
+Define softplus(x) = log(1 + exp(x)) y [x]+ = max(0,x). El mismo l operacional entra en
+pooling y pérdidas débiles; los logits crudos de la cabeza quedan como diagnóstico.
+Cada término dependiente de una clase aporta cero diferenciable si esa clase falta.
+
+El prior negativo promedia BCE negativa puntual ponderada por área entre proteínas negativas.
+Existencia exige un pico positivo en cada proteína positiva:
 
 ```math
-L_{neg}=\frac{1}{|B_-|}\sum_{i\in B_-}\sum_p a_{ip}\,\operatorname{softplus}(l_{ip}).
+L_{neg}=\frac{1}{|B_-|}\sum_{b\in B_-}\sum_{p\in P_b}a_p\operatorname{softplus}(l_p),
+\qquad
+L_{exist}=\frac{1}{|B_+|}\sum_{b\in B_+}\operatorname{softplus}(-\max_{p\in P_b}l_p).
 ```
 
-`softplus(l)=-log(sigmoid(-l))` es la entropía cruzada de un punto negativo. No usa ground truth
-superficial: deriva de la definición curada del bag negativo. Las proteínas positivas se excluyen
-porque su etiqueta débil solo afirma que existe alguna región positiva, no cuál. La primera criba
-prevista usa pesos 0,1, 0,3 y 1,0 después de fijar el pooling.
+Con MAX, existencia repite la BCE positiva global: cambia el peso relativo de las clases, no la
+restricción de localización. LSE/Attention por área no tienen esa identidad. Una presión negativa
+fuerte puede eliminar indirectamente evidencia positiva real por compartir parámetros: revisa ambas clases.
 
-V6b prueba por separado la existencia positiva, la existencia tras una difusión intrínseca fija y
-el ranking de regiones positivas por encima de las negativas. V6c prueba por separado un intervalo
-esperado de área positiva, la variación total entre puntos vecinos y la energía intrínseca de
-Dirichlet. Son priors débiles: usan la etiqueta de proteína y la geometría superficial, pero nunca
-el ground truth local de contacto con ADN. Estudiarlos primero por separado permite saber qué
-supuesto ayuda y evita que un coeficiente oculte el efecto de otro.
-
-V6d solo se ejecuta si hay un término creíble de cada familia. Su configuración por defecto combina
-la pérdida negativa anterior, la existencia positiva regional y el suavizado de Dirichlet. Sea
-`L_BCE` la entropía cruzada binaria de proteína, `L_reg` la pérdida que exige que el mayor logit
-difundido de una proteína positiva sea positivo y `L_D` la energía espectral normalizada de su mapa
-de probabilidades. La pérdida de entrenamiento optimizada es
+**Términos regionales.** Phi_b contiene los modos superficiales almacenados, ortonormales con masa;
+M_b es la diagonal de áreas y Lambda_b sus autovalores no negativos en Å inversos al cuadrado.
+La difusión usa la base truncada existente, no un nuevo preprocesado. Con longitud r = 2.5 Å produce
+u_b = Phi_b exp(−r² Lambda_b) Phi_bᵀ M_b l_b. Sea R_b = max(u_b).
+La pérdida positiva regional aplica existencia a estos máximos; ranking compara **cada par
+positivo-negativo del lote**, con margen de logits fijo delta = .5:
 
 ```math
-L_{V6d}=L_{BCE}+\lambda_{neg}L_{neg}+\lambda_{reg}L_{reg}
-         +\lambda_D L_D+\lambda_{gate}L_{gate}.
+L_{regional+}=\frac{1}{|B_+|}\sum_{b\in B_+}\operatorname{softplus}(-R_b),
+\qquad
+L_{rank}=\frac{1}{|B_+||B_-|}\sum_{b\in B_+}\sum_{c\in B_-}[\delta-R_b+R_c]_+.
 ```
 
-El generador de candidatos toma valores del producto cartesiano de tres alternativas para
-`lambda_neg`, `lambda_reg` y `lambda_D`. Es un HPO de interacciones, no un barrido de un solo
-factor, por lo que LambdaForge asigna evidencia de forma adaptativa, detiene curvas de aprendizaje
-no competitivas y confirma las mezclas mejor respaldadas con su flujo disjunto de semillas de
-confirmación. Si V6b o V6c elige otra familia, su clave `*_lambda` existente sustituye a la regional
-o Dirichlet en `wisdom_v6d.yaml`; TV y Dirichlet nunca se activan a la vez.
+Ranking vale cero en lotes de una sola clase. En c/d la difusión regional sigue al Heat6
+operacional: su aportación puede ser redundante. No es un segundo encoder aprendido ni un objetivo
+supervisado con anotaciones espaciales.
+
+**Cardinalidad.** La masa esperada m_b = sum(a_p q_p) es una probabilidad ponderada por área,
+no la fracción que supera un umbral binario. Con mínimo mu y sin máximo, la pérdida actual es:
+
+```math
+L_{card}=\frac{1}{|B_+|}\sum_{b\in B_+}[\mu-m_b]_+^2,
+\qquad m_b=\sum_{p\in P_b}a_p q_p.
+```
+
+Vale cero cuando se alcanza el mínimo. Con el mayor mínimo .02, su máximo sin ponderar es .0004;
+con lambda .30 aporta como máximo .00012. Estos valores conservadores pueden resultar inactivos
+o débiles: comprueba la pérdida registrada y la masa antes de interpretar un efecto nulo como
+fracaso de la idea. No se cambia a escondidas su escala ni se añade un máximo.
+
+**TV no es Heat.** E es el conjunto con multiplicidades de entradas dirigidas válidas en la tabla
+acotada de vecinos superficiales. TV promedia diferencias absolutas de probabilidad, sin ponderar por área o distancia:
+
+```math
+L_{TV}=\frac{1}{|E|}\sum_{(i,j)\in E}|q_i-q_j|.
+```
+
+Una tabla vacía aporta cero diferenciable. La penalización L1 puede favorecer regiones homogéneas
+y permitir fronteras más marcadas que un suavizado cuadrático, pero no lo garantiza: pueden
+desaparecer zonas de unión pequeñas reales. El promedio del lote pondera las proteínas según
+su número de vecinos válidos, no por igual como los términos anteriores.
+
+**Dirichlet tampoco es Heat.** Calcula los coeficientes c_b = Phi_bᵀ M_b q_b.
+La energía normalizada actual, promediada por igual entre proteínas, es:
+
+```math
+L_D=\frac{1}{B}\sum_{b=1}^{B}
+\frac{\sum_k\lambda_{bk}c_{bk}^2}
+     {\max(\sum_k c_{bk}^2,\epsilon)}.
+```
+
+B es el tamaño del lote, k recorre los modos almacenados y epsilon es el épsilon de máquina FP32.
+Es un cociente espectral de Rayleigh en Å inversos al cuadrado, no una energía de grafo sin
+normalizar. Autovalores grandes representan variación superficial rápida. Una constante tiene
+energía aproximadamente cero si su modo constante está bien representado. La truncación no ve
+frecuencias superiores a las almacenadas; los operadores numéricos pueden dejar residuos pequeños.
+El denominador se protege con epsilon cuando la potencia probabilística es cero.
+
+Heat transforma explícitamente **logits durante el forward** mediante exp(−r² Lambda), y el pooling
+ve el mapa filtrado. TV y Dirichlet penalizan **probabilidades durante entrenamiento**, sin añadir
+por sí mismos un filtro final. En f/g compara, por pooling y semilla: none/lambda0, Heat6/lambda0,
+none/pérdida activa, Heat6/pérdida activa. Esos cuatro estados distinguen sustitución, redundancia,
+complementariedad y exceso de suavizado. S crudo, S operacional y su diferencia sin recortar muestran
+si mejora la evidencia anterior al refinador o solo el mapa filtrado.
+
+Sean L_BCE la BCE global, L_gate la penalización existente de gates semánticos y F las siete familias.
+La composición exacta del entrenamiento es:
+
+```math
+L=L_{BCE}+0.04L_{gate}+\sum_{f\in F}\lambda_f L_f.
+```
+
+En a–g solo varía una familia lambda; las demás quedan a cero. TV y Dirichlet nunca se activan
+simultáneamente. Evalúa G, S operacional/crudo, masa/pico negativos, recall/enriquecimiento top-k,
+regret de selección, relación global-superficial, dispersión emparejada y coste. Las métricas
+indefinidas conservan soportes en lugar de convertirse en cero. Un W alto no justifica por sí solo
+añadir complejidad.
+
+
+V6h es ahora un **estudio exploratorio de combinaciones**, no una plantilla vacía ni un modelo
+final confirmado. Declara 18 candidatos exactos por pooling (54 configuraciones, 216 Runs), todos
+con Heat de 6 Å, longitud regional auxiliar de 2.5 Å, margen de ranking 0.5 y el backbone V5c intacto.
+`sweep.candidates` ejecuta solo los puntos enumerados: los dominios de parámetros no crean un
+producto cartesiano enorme. Los anclajes YAML reutilizan controles a cero sin añadir parámetros científicos.
+
+Los coeficientes siguientes se fijaron tras leer los resúmenes completos V6a–V6f y el seguimiento
+experimental de la memoria del TFM el 16 de octubre de 2026. Son hipótesis iniciales, no pesos
+optimizados conjuntamente. El informe todavía no contenía resultados de V6g ni de los rangos ampliados.
+
+| Pooling | Negativos N | Existencia puntual E | Existencia regional P | Ranking R | Masa mínima C | TV T | Dirichlet D |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| MAX | 0.3 | 0.03 | 0.3 | 0.1 | 0.03 | 0.005 | 0.001 |
+| LSE por área, beta 0.25 | 1 | 0.03 | 0.1 | 0.03 | 0.1 | 0.005 | 0.001 |
+| Attention por área, anchura 256 | 0.03 | 0.03 | 0.03 | 0.03 | 0.03 | 0.005 | 0.001 |
+
+Cada C activo usa un mínimo de masa probabilística esperada de 0.02, sin máximo. No es un área
+de interfaz medida. Los coeficientes multiplican pérdidas con escalas distintas; el mismo valor
+numérico no implica la misma intensidad de gradiente.
+
+Los coeficientes difieren entre poolings: compara cada mezcla con su control del mismo pooling.
+Una diferencia entre MAX activo y LSE activo no aísla solo el mecanismo de pooling, porque pueden
+cambiar también los pesos de las pérdidas. Los controles sin priors conservan esa comparación limpia.
+
+Cada pooling tiene su control cero y los siete términos aislados. El núcleo N/E/R contiene todos
+los estados activado/desactivado: control, N, E, R, N+E, N+R, E+R y N+E+R. Otros candidatos
+sustituyen E por P, añaden C, T o D por separado al núcleo y acumulan N+E+P+R+C con T o con D.
+Estas dos últimas mezclas son pruebas de estrés con todas las familias compatibles, no modelos
+recomendados para producción. Nunca se activan TV y Dirichlet juntos. La sustitución E por P ayuda
+a identificar redundancia entre dos restricciones de existencia, sin atribuir su suma a un mecanismo nuevo.
+
+Sean A y B dos priors activados con sus coeficientes fijos. Para una puntuación Q, con el mismo
+pooling y semilla, se compara la pareja mediante
+`interacción = Q(A+B) - Q(A) - Q(B) + Q(control)`. Un valor positivo indica una mejora mayor que
+la suma de los cambios individuales en la escala de esa puntuación; uno negativo indica menos.
+Si G y S cambian en sentidos opuestos hay un compromiso, no una sinergia universal.
+Los controles aislados emparejados deben proceder de V6h, no agruparse con Runs históricos cuyo
+código o trayectoria de optimización puedan diferir.
+
+La evidencia es desigual: existencia MAX 0.03 y ranking MAX 0.1 mejoraron métricas locales;
+negativos LSE 1 mejoró discriminación global y redujo masa negativa; TV LSE/Heat 0.005 mejoró S
+operacional sin mejorar S crudo medio ni limpiar negativos. Atención conserva negativos 0.03
+porque los valores observados mayores perjudicaron la discriminación global. Los demás coeficientes
+son pruebas conservadoras de sensibilidad, no ganadores acreditados. En particular, C fue a menudo
+inactivo en V6e y D=0.001 es provisional hasta revisar V6g. Comprueba las contribuciones registradas
+antes de atribuir una mejora a cardinalidad: una contribución cero no demuestra un mecanismo efectivo.
+La implementación actual prohíbe combinar las dos penalizaciones de suavidad.
+
+El checkpoint sigue seleccionándose solo por G; test permanece sellado. Examina S operacional/crudo,
+G, AUPRC/AUROC globales independientes del umbral, masa/pico negativos, enriquecimiento, regret y
+trayectorias temporales, no solo W o accuracy a 0.5. Las semillas históricas 4, 7, 32 y 54 sirven
+para comparaciones emparejadas de desarrollo, no para confirmación independiente. Adoptar una mezcla
+requiere semillas nuevas y una confirmación congelada aparte. Este YAML no lanza esa confirmación
+ni da por disponible la evidencia de V6g.
+
+Los YAML de revisión evalúan checkpoints guardados sin entrenar. Seleccionan una semilla registrada
+(los ejemplos usan 4), proteínas contrastantes automáticamente y filtros opcionales de parámetros;
+las métricas conservan toda la partición y todos los puntos. Activa canales aprendidos con
+`content: features`. Los casos automáticos pueden diferir entre configuraciones: la galería compara
+mapas disponibles, no garantiza un panel completo emparejado. Los límites visuales de puntos/bytes
+son independientes de la evaluación científica; si faltan pesos se necesita recuperación nativa,
+no reentrenamiento oculto. La sección 5.10 del README principal explica la sintaxis actual y las
+limitaciones de archivos gestionados en los informes LF.
 
 WISDOM busca producir un mapa superficial con significado, no solo una etiqueta correcta para la
 proteína. Por ello, el protocolo de desarrollo registra tres cantidades distintas. `G` mide la
@@ -3905,7 +4065,7 @@ se controlan de forma independiente.
 ```yaml
 visualization:                      # Presentation only; no scientific hyperparameter changes.
   mode: report                      # Embedded LF report; none disables viewers completely.
-  content: predictions              # Probability, raw logits and soft/hard GT; full adds structure.
+  content: predictions              # Probability/logits/GT; features adds learned channels; full adds structure.
   maximum_points: 2000               # Display only; all points still contribute to metrics.
   maximum_proteins: 4                # Balanced sample per evaluated split; zero requests all.
   report_budget_mib: 4.0             # Per-Run document budget; LF also caps the whole report.
@@ -3914,7 +4074,7 @@ visualization:                      # Presentation only; no scientific hyperpara
 
 Los valores por defecto son: `mode=none`, `content=predictions`, `maximum_points=2000`,
 `maximum_proteins=12`, `report_budget_mib=4.0`, `identifiers=()`, `threshold=0.5`,
-`embed_report=true`. Los modos son `none/report/viewer/full`; los contenidos, `predictions/full`.
+`embed_report=true`. Los modos son `none/report/viewer/full`; los contenidos, `predictions/features/full`.
 El límite de puntos es positivo, el de proteínas no negativo, el presupuesto está en (0,16] MiB
 y el umbral en [0,1]. Los valores indicados sustituyen sus equivalentes antiguos `surface_*`,
 que siguen disponibles en llamadas por compatibilidad. No mezcles ambas formas en YAML nuevos.
@@ -3923,7 +4083,8 @@ que siguen disponibles en llamadas por compatibilidad. No mezcles ambas formas e
 de proteínas abiertas bajo demanda. `viewer` escribe además HTML/PLY; `full` añade
 `surface_prediction_probability[M]`, `surface_prediction_hard[M]`, umbral y mejor epoch
 en un NPZ por proteína evaluada. `content: predictions` incorpora solo predicción, logits originales
-y GT disponible; `content: full` recupera el inspector estructural. La sección 5.9 explica el
+y GT disponible; `content: features` añade canales aprendidos muestreados sin átomos/malla;
+`content: full` recupera el inspector estructural. La sección 5.9 explica el
 muestreo de representación, las omisiones por tamaño y las limitaciones.
 
 Con `evaluate_test: false`, los informes usan solo validación. El acceso a test sigue siendo
@@ -4062,18 +4223,19 @@ lf run experiments/v5/wisdom_v5b.yaml
 lf results analyze EXECUTION_ID
 ```
 
-Continúa solo cuando se supere cada barrera. Las etapas de pérdidas son secuenciales y condicionales;
-después vienen cabezas, arquitectura, reajuste final y confirmación sin poda:
+V6 usa el parent congelado de V5c. V6h ya compara mezclas provisionales tras revisar V6a–V6f;
+V6g sigue pendiente. Cabezas y arquitectura siguen a una combinación revisada y confirmada:
 
 ```bash
 lf run experiments/v6/wisdom_v6a.yaml
-lf run experiments/v6/wisdom_v6b.yaml       # existencia positiva; solo si V6a aporta señal
-lf run experiments/v6/wisdom_v6b2.yaml      # existencia regional, independiente
-lf run experiments/v6/wisdom_v6b3.yaml      # ranking regional, independiente
-lf run experiments/v6/wisdom_v6c.yaml       # cardinalidad; solo ante un fallo restante diagnosticado
-lf run experiments/v6/wisdom_v6c2.yaml      # variación total, independiente
-lf run experiments/v6/wisdom_v6c3.yaml      # energía de Dirichlet, independiente
-lf run experiments/v6/wisdom_v6d.yaml       # solo si una pérdida de cada familia aporta señal
+lf run experiments/v6/wisdom_v6b.yaml       # existencia x pooling; controles cero independientes
+lf run experiments/v6/wisdom_v6c.yaml       # solo positivo regional
+lf run experiments/v6/wisdom_v6d.yaml       # solo ranking regional
+lf run experiments/v6/wisdom_v6e.yaml       # cardinalidad conservadora
+lf run experiments/v6/wisdom_v6f.yaml       # TV x Heat activado/desactivado
+lf run experiments/v6/wisdom_v6g.yaml       # Dirichlet x Heat activado/desactivado
+lf validate experiments/v6/wisdom_v6h.yaml  # 54 exploratory configurations, not a confirmed winner
+lf run experiments/v6/wisdom_v6h.yaml --dry-run
 lf run experiments/v7/wisdom_v7.yaml
 lf run experiments/v8/wisdom_v8.yaml
 lf run experiments/v9/wisdom_v9.yaml
@@ -4081,7 +4243,7 @@ lf run experiments/v10/wisdom_v10.yaml
 lf results analyze EXECUTION_ID
 ```
 
-Antes de cada ejecución posterior, copia cada ganador revisado en los campos marcados `REPLACE`.
+V6h tiene un diseño exploratorio concreto; las etapas posteriores aún requieren decisiones revisadas.
 La tabla completa está en [`experiments/README.md`](experiments/README.md).
 
 Cada Training Work completo y no podado escribe estas salidas explícitas junto a la evidencia normal
@@ -4451,6 +4613,53 @@ enumera las limitaciones exactas pendientes.
 
 ### 5.9. Interpretar mapas de proteínas y recuperar informes
 
+La galería sigue **proteína → configuración → inspector**. Elige una proteína para ver sus mapas
+con distintos poolings e hiperparámetros; un menú dentro del inspector cambia entre esos mapas sin
+mantener varios renderizadores 3D abiertos. La tabla muestra etiqueta real, predicción binaria,
+probabilidad y AUPRC superficial. Los filtros combinan etiqueta, partición, semilla, error binario
+y un umbral de métrica. Una AUPRC no disponible no se convierte en cero: una proteína totalmente
+negativa no tiene puntos positivos que ordenar, por lo que conviene mirar la masa o el máximo de
+probabilidad. Las configuraciones se nombran con sus parámetros registrados, no con números de
+Trial opacos. Otros ajustes, métricas y datos de origen están en paneles desplegables, sin bloques
+de JSON al inicio.
+
+El mismo inspector sirve al preprocesado, entrenamiento y revisión de checkpoints. Arrastra el
+borde interior de un panel para redimensionarlo (o selecciónalo y pulsa una flecha); los botones
+de cerrar/reabrir conservan la escena. **Compare GT / prediction** divide la superficie en dos
+vistas con cámaras sincronizadas e idénticos índices de puntos. Elige un canal en cada lado.
+Los rangos de color permiten el rango robusto guardado, mínimo–máximo mostrado, 0–1, simétrico
+o límites personalizados. El panel derecho distingue las métricas de la proteína completa del
+histograma de la muestra representada. Medir dos puntos superficiales o centros atómicos da su
+distancia euclídea en ångströms; se ignoran clics que no corresponden a puntos.
+
+Usa `visualization.content: features` en Training, o `content: features` en una revisión, para
+predicción/GT más canales aprendidos de embedding, evidencia y características explícitas
+**realmente emitidos por el checkpoint**. A diferencia de `full`, no incorpora mallas ni átomos.
+Cada canal de embedding es una coordenada aprendida, no una propiedad física con nombre. La
+revisión los conserva solo para proteínas elegidas; si la selección diagnóstica ocurre después
+de la inferencia, hace una segunda pasada del modelo congelado solo para los casos que faltan.
+Las métricas siguen procediendo de la primera pasada completa. Un HTML de `predictions` ya
+exportado no puede recuperar características aprendidas ausentes cambiando su interfaz.
+
+Para actualizar una galería antigua sin inferencia, crea un archivo derivado separado. Incluye
+su auditoría de revisión correspondiente para sustituir los nombres de Trial por configuraciones:
+
+```bash
+python -m wisdom.visualization.ProteinReportPage \
+  --source /path/to/protein-report/index.html \
+  --audit /path/to/review-audit.json \
+  --output ./runs/visualizations/v5a/index.html --open
+```
+
+`--open` pide al navegador del escritorio que abra el archivo nuevo; requiere una sesión gráfica.
+Nunca se sobrescribe el artefacto registrado y el documento independiente no sustituye
+automáticamente el informe histórico de LF. Se conservan los mapas y omisiones del origen.
+El diagnóstico automático puede elegir proteínas distintas para cada configuración; indica IDs
+explícitos en una revisión nueva de checkpoints congelados cuando necesites las mismas proteínas
+para cada método. Actualizar el HTML no reconstruye mapas omitidos por el presupuesto original.
+Las comparaciones grandes pueden necesitar filtros explícitos de configuraciones separados para
+respetar el límite de LF de 16 MiB por documento.
+
 Una galería vacía no siempre significa que falten predicciones. Lee el mensaje:
 
 | Mensaje | Significado y acción |
@@ -4459,6 +4668,14 @@ Una galería vacía no siempre significa que falten predicciones. Lee el mensaje
 | Visores omitidos por presupuesto | Se generaron inspectores, pero no cabían: usa `content: predictions`, reduce `maximum_points` o aumenta `report_budget_mib` hasta 16 |
 | Run fallido antes de publicar | No existe un visor terminado de ese Run; recupera su ejecución original mediante LF |
 | IDs solicitados ausentes | Elige IDs del split evaluado; las imágenes no autorizan abrir otras particiones |
+
+La galería cuenta el HTML de la interfaz, el contexto, la lista de omisiones y la biblioteca
+compartida tal como se serializan, antes de añadir visores. Una revisión grande como los 206
+checkpoints de V5a respeta así `report_maximum_mib` sin eliminar modelos evaluados ni métricas.
+Solo se omiten las imágenes que no caben; sus identificadores completos quedan en el resumen.
+No hace falta aumentar el presupuesto para corregir un error de cálculo. Un límite excepcionalmente
+pequeño que no permite guardar ni interfaz y metadatos sigue fallando e indica los bytes necesarios
+y los configurados.
 
 Un estudio fallido puede contener Runs correctos con informes. Comprueba el Run y la semilla de
 origen: la galería de una semilla correcta no es el resultado de la semilla fallida. Cambiar el YAML
@@ -4469,6 +4686,8 @@ referencia soft/hard disponible (GT). Un logit es la puntuación sin acotar del 
 convertirla en probabilidad; los logits positivos corresponden a probabilidades superiores a 0.5.
 Cambiar un umbral visual cambia una decisión, no el modelo ni sus métricas científicas.
 La referencia ausente sigue siendo no disponible.
+Los puntos de GT hard fuera de la máscara válida se muestran como no disponibles, no negativos.
+El GT soft conserva su valor continuo basado en distancia, incluida la banda de etiqueta hard incierta.
 
 Solo se reduce la representación: se incorporan como máximo `maximum_points` índices originales
 espaciados uniformemente, con coordenadas y valores redondeados a cuatro decimales. Los índices
@@ -4530,10 +4749,11 @@ lf import ./exports/PRINTED_PACKAGE_DIRECTORY --apply
 lf results list
 ~~~
 
-Pon el ID registrado en source_execution de experiments/v1/visualization/wisdom_v1a.yaml. Su política
-muestra juntas las semillas mejor/mediana/peor; usa mode: median para una repetición típica o all
-para todas las elegibles. El DatasetVersion exacto del entrenamiento también necesita una
-ubicación local registrada en LF.
+Pon el ID registrado en `source_execution` del YAML de visualización del estudio. Elige
+`source_seed` (una semilla ya entrenada, no un nuevo entrenamiento) y `maximum_proteins`
+(imágenes por configuración y partición). Se revisan todas las configuraciones elegibles de esa
+semilla salvo que actives `parameter_filter`. El dataset exacto también necesita una ubicación local
+registrada en LF.
 
 ~~~bash
 lf validate experiments/v1/visualization/wisdom_v1a.yaml
@@ -4548,8 +4768,23 @@ y partición conservan la cobertura numérica y el motivo de selección de cada 
 Los Runs fallidos o recortados se excluyen, no se convierten en modelos de puntuación cero.
 Un estudio fallido puede contener Runs completados que sí se pueden revisar.
 
-**Elige qué inspeccionar.** Si hay varios Trials, hace falta una política explícita: all, índices
-explicit, parameter_filter, best_by_metric, top_k_by_metric o pareto. Los rankings agregan las
+**Elige qué inspeccionar.** El filtro simple usa los hiperparámetros registrados. Todos los campos
+de un diccionario deben coincidir; una lista de valores acepta cualquiera de ellos. Una lista de
+diccionarios acepta cualquiera de sus ramas, por lo que MAX no necesita un parámetro de attention:
+
+```yaml
+source_seed: 4  # Inspect this saved training replication; do not fit new weights.
+maximum_proteins: 8  # Automatic contrasting cases per configuration and split.
+parameter_filter:  # Keep either branch; omit this field to review all configurations.
+  - pooling_type: max  # Retain parameter-free MAX.
+  - pooling_type: attention  # Every condition in this branch must match.
+    attention_hidden_dim: [16, 32]  # Either recorded width, not a numerical interval.
+```
+
+Sin filtro, ninguna configuración se elimina simplemente por tener malos resultados. Siguen
+disponibles las políticas avanzadas `trial_selection`: all, índices explicit, best_by_metric,
+top_k_by_metric, parameter_filter o pareto. No las combines con el filtro simple.
+Los rankings agregan las
 métricas del checkpoint entre semillas mediante la mediana por defecto; se puede escoger mean.
 Pareto conserva configuraciones que no son peores en todas las métricas solicitadas: muestra
 compromisos entre clasificación y superficie, sin sustituirlos por la puntuación combinada.
@@ -4557,25 +4792,32 @@ Las políticas de semillas incluyen median, worst, best, representative, all y e
 Una semilla mediana es una repetición central observada, no unos pesos promediados.
 
 La importación histórica de V5a no tiene métricas asociadas al artefacto best-model. Su YAML usa
-`trial_selection: {mode: all}` y `seed_selection: {mode: explicit, seeds: [4]}`: todas las configuraciones,
+`source_seed: 4`, sin ranking: todas las configuraciones,
 una repetición fijada deliberadamente, sin afirmar que la semilla sea la mejor o la mediana. Esta
 importación tiene 206 configuraciones, por lo que la revisión hace 206 evaluaciones sin entrenar.
 Puedes reducir el coste mediante índices de Trial explícitos o los filtros comentados. El límite
-de bytes del visor puede omitir imágenes, no la evaluación numérica. Pareto y mediana quedan como
-ejemplos comentados para checkpoints nuevos con las métricas asociadas necesarias; las métricas
+de bytes del visor puede omitir imágenes, no la evaluación numérica. Pareto y mediana requieren
+checkpoints nuevos con las métricas asociadas necesarias; las métricas
 más recientes del Run no las sustituyen porque pueden describir otro epoch.
 V5b revisa cinco escalares aprendidos informados por V5a;
 LSE fijo o curriculum pertenece a V5a. Un parámetro condicional inactivo no equivale a uno activo
 con valor null. Los V1b y V1c actuales son estudios separados con un Work: sus controles de azar
 no deben inventarse como dos Trials de un mismo estudio.
 
-Para revisar rápidamente tres proteínas, edita templates/explicit_proteins.yaml: elige Trial,
-semilla y tres identificadores exactos. evaluation_scope: explicit filtra **antes** de que el
-modelo reciba un batch. Solo se evalúan esas proteínas y las métricas agregadas indican que
-describen ese subconjunto. El modo full por defecto evalúa toda la partición y después selecciona
-imágenes contrastantes. Los casos diagnósticos incluyen extremos de localización positiva,
-falsos positivos/negativos globales, picos en negativos y discordancia global/local.
-Estas imágenes deliberadamente inusuales no estiman la precisión biológica media.
+Para un panel diagnóstico rápido, pon `maximum_proteins: 3`; no necesitas indicar IDs manualmente.
+El modo full evalúa toda la partición y después alterna entre categorías con casos disponibles:
+mejor/peor localización positiva, falsos positivos/negativos, negativos correctos con poca activación
+superficial, positivos correctos con alta confianza, picos superficiales en negativos y confianza
+global alta con localización débil. Cada proteína aparece una vez, con sus motivos en la galería
+y el visor. Se completa el número solicitado cuando es posible; no se inventan categorías sin casos.
+Los rankings locales usan AUPRC normalizada solo cuando el GT permite calcularla. Estos extremos
+relativos no estiman la precisión biológica media. Cada configuración puede seleccionar proteínas
+distintas; la galería compara las configuraciones disponibles de cada proteína, no garantiza un
+panel completo emparejado.
+
+Siguen disponibles los IDs explícitos mediante `protein_selection`; `evaluation_scope: explicit`
+evalúa solo esos IDs e indica cobertura numérica parcial. El nombre histórico
+`templates/explicit_proteins.yaml` ahora también tiene selección automática por defecto.
 
 **Transfiere solo modelos seleccionados.** La selección nativa crea copias independientes:
 
@@ -4606,17 +4848,27 @@ revisar con políticas all/explicit tanto de Trials como de semillas; las últim
 Run no permiten llamarlos honestamente «mejor» o «mediano».
 ModelValidation conserva únicamente la compatibilidad con lectura directa de exports.
 
-Valores por defecto: solo validación, test bloqueado, semilla mediana por wisdom_score,
-cobertura numérica completa, imágenes diagnósticas (dos por categoría), predicción/logit/GT,
+Valores por defecto del Work: solo validación, test bloqueado, semilla mediana por wisdom_score
+si no se indica una semilla explícita, cobertura numérica completa, imágenes diagnósticas sin cuota
+separada por categoría, predicción/logit/GT,
 2.000 puntos de representación, 12 visores por modelo/partición, umbral 0,5,
-14 MiB por documento y sin copias NPZ de predicciones. Los ejemplos limitan los visores a ocho.
+14 MiB por documento y sin copias NPZ de predicciones. Los YAML eligen en cambio la semilla guardada 4
+y ocho visores (V5a: doce), con una proteína por batch de inferencia para GPU locales pequeñas.
+Solicitan una GPU explícitamente; pon `resources.gpu` a cero si solo tienes CPU.
 Los límites visuales no reducen puntos ni precisión de las métricas; las omisiones y GT ausente
 se indican. Test requiere allow_test: true y sigue siendo descriptivo, nunca una nueva fuente
 para seleccionar hiperparámetros. Si faltan pesos, se necesita recuperación nativa, no reentrenado
 oculto. La identidad del dataset debe coincidir aunque cambie su ubicación.
 
-**Requisito de build.** Estas APIs existen en el main de LF inspeccionado, que aún declara 0.17.0
-aunque las documenta como Unreleased. El número de versión no basta: comprueba ProductInput,
+**Informes integrados completos: pendiente.** Los YAML ya no repiten límites de puntos/bytes, pero
+siguen vigentes los valores del Work (2.000 puntos y 14 MiB) y los límites obligatorios de LF:
+16 MiB por documento y 64 MiB por informe. Quitar un campo YAML no elimina esas restricciones.
+Una galería integrada con todos los puntos y sin omisiones necesita una API pública de LF para
+cargar archivos gestionados bajo demanda. Se ha elegido solicitar ese soporte antes de añadir una
+galería independiente; consulta la [petición de implementación para LambdaForge](docs/LAMBDAFORGE_REPORT_ASSET_SUPPORT.md).
+
+**Requisito de build.** Estas APIs se comprobaron con LF local 0.19.0. El número de versión
+no basta: comprueba ProductInput,
 SelectionPolicy, importación/execution_directory de ResultStore y outputs.html_section.
 WISDOM no inventa un mínimo de dependencia publicado. La
 [guía completa de revisión y configuración](experiments/reviews/README.md), en inglés,
@@ -4699,9 +4951,13 @@ y limitaciones sin inventar resultados.
 ## 6. Bibliografía
 
 Fuentes adicionales para campos opcionales/Zn: [RCSB Search API](https://search.rcsb.org/),
+[RCSB Data API](https://data.rcsb.org/index.html),
+[QuickGO API](https://www.ebi.ac.uk/QuickGO/api/index.html),
+[UniProt API](https://www.uniprot.org/help/api),
 [calificadores de anotación Gene Ontology](https://geneontology.org/docs/go-annotations/),
-[MetalPDB](https://metalpdb.cerm.unifi.it/),
+[MetalPDB API](https://metalpdb.cerm.unifi.it/api_help),
 [ZincBind](https://pmc.ncbi.nlm.nih.gov/articles/PMC6361820/),
+[ZincBind 2](https://pmc.ncbi.nlm.nih.gov/articles/PMC9108989/),
 [transporte óptimo estructurado / FGW](https://proceedings.mlr.press/v97/titouan19a.html) y
 [Deep Sets](https://papers.nips.cc/paper/6931-deep-sets). Las bases metálicas pueden ayudar a curar
 sitios positivos, pero no aportan automáticamente inventarios de negativos explícitos.

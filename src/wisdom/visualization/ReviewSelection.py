@@ -14,6 +14,33 @@ class ReviewSelection:
     """Keep Trial aggregation and representative-seed selection separate and reproducible."""
 
     @staticmethod
+    def matches(
+        parameters: Mapping[str, Any],
+        where: Mapping[str, Any] | Sequence[Mapping[str, Any]],
+    ) -> bool:
+        """Match researcher-authored parameter choices without ranking a scientific winner.
+
+        Args:
+            parameters: Recorded native Run parameters; absent inactive fields are not null.
+            where: One mapping of conjunctive conditions, or a list of alternative mappings.
+                A scalar selects one exact value; a list selects any of its values. A list of
+                mappings permits different controls for different pooling families.
+
+        Returns:
+            True when at least one alternative matches every specified field. An empty mapping
+            matches all records; an empty alternative list matches none. No metrics are read.
+        """
+        alternatives = [where] if isinstance(where, Mapping) else where
+        return any(
+            all(
+                key in parameters
+                and parameters[key] in (value if isinstance(value, list) else [value])
+                for key, value in conditions.items()
+            )
+            for conditions in alternatives
+        )
+
+    @staticmethod
     def eligible(runs: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
         """Retain the latest completed, unpruned, full-fidelity Attempt per native Run.
 
@@ -86,7 +113,8 @@ class ReviewSelection:
             policy: mode=all/explicit/best_by_metric/top_k_by_metric/parameter_filter/pareto.
                 Ranked policies use metric, direction=max|min, k, aggregation=median|mean.
                 Pareto uses metrics={name: direction} and maximum_trials. Filters use where
-                with scalar/list values: absent (inactive) parameters never match explicit null.
+                with scalar/list values, or alternative mappings; absent inactive fields never
+                match explicit null.
 
         Returns:
             All eligible seed records of selected native Trials, in stable native-index order.
@@ -115,12 +143,7 @@ class ReviewSelection:
             chosen = [
                 index
                 for index in chosen
-                if all(
-                    key in groups[index][0]["parameters"]
-                    and groups[index][0]["parameters"][key]
-                    in (value if isinstance(value, list) else [value])
-                    for key, value in where.items()
-                )
+                if cls.matches(groups[index][0]["parameters"], where)
             ]
         elif mode in ("best_by_metric", "top_k_by_metric", "pareto"):
             aggregate = {"median": statistics.median, "mean": statistics.mean}[

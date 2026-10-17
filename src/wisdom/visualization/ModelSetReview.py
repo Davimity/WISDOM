@@ -10,6 +10,7 @@ from wisdom.Training import Training
 from lambdaforge.products import ProductInput
 from collections.abc import Mapping, Sequence
 from wisdom.visualization.ReviewInference import ReviewInference
+from wisdom.visualization.ReviewSelection import ReviewSelection
 
 
 class ModelSetReview(lf.Work):
@@ -31,22 +32,25 @@ class ModelSetReview(lf.Work):
         prediction_threshold  : float = 0.5,
         report_maximum_mib    : float = 14.0,
         save_predictions      : bool = False,
-        batch_size            : int = 4,
+        batch_size            : int = 1,
         data_workers          : int = 0,
         strict_checkpoints    : bool = True,
+        source_seed           : int | None = None,
+        parameter_filter      : Mapping[str, Any] | Sequence[Mapping[str, Any]] | None = None,
     ) -> dict[str, Any]:
-        """Forward every deliberately promoted model; never reselect seeds inside a ModelSet.
+        """Forward promoted models, optionally narrowed by explicit researcher-authored filters.
 
         Args:
             models: Typed native ProductInput with ModelSet kind and wisdom/review-models:v1
                 contract. ProductInput.artifact verifies durable bytes; producer may be absent.
             dataset: Exact training dataset resolved independently through LF's typed inputs.
             evaluation_scope: full for complete requested splits, explicit for requested IDs only.
-            protein_selection: Default automatic/diagnostic/two cases per category; automatic
-                best/worst/mixed, explicit identifiers, or all are supported.
+            protein_selection: Default automatic diagnostic mixture up to maximum_proteins;
+                automatic best/worst/mixed, explicit identifiers, or all are supported.
             splits: train/val/test names; validation only by default.
             allow_test: Explicit permission for descriptive test views, never model selection.
-            content: predictions includes prediction/logit/GT; full adds structural channels.
+            content: predictions includes prediction/logit/GT; features adds learned model
+                channels without structural traces; full includes structural layers too.
             maximum_surface_points: Positive display point ceiling, not a metric subsample.
             maximum_proteins: Viewer ceiling per model/split; zero permits all with a warning.
             prediction_threshold: Hard prediction and diagnostic decision cutoff in [0,1].
@@ -57,6 +61,10 @@ class ModelSetReview(lf.Work):
             strict_checkpoints: Missing files reported as FileNotFoundError can be audited
                 instead of failing. Native product integrity errors, including missing files
                 reported as ValueError, always propagate: this flag cannot bypass LF verification.
+            source_seed: Optional exact recorded seed filter within the promoted models. None
+                keeps every promoted seed; no new seed or metric-driven ranking is invented.
+            parameter_filter: Optional exact scalar/list choices, or alternative condition mappings,
+                evaluated only against promoted model parameters. None keeps every promoted model.
 
         Returns:
             Product identity, reviewed model count and HTML presentation summary.
@@ -77,6 +85,12 @@ class ModelSetReview(lf.Work):
         ReviewInference.matching_dataset(inputs, self.inputs["dataset"])
         descriptors = []
         for index, row in enumerate(models.payload["models"]):
+            if source_seed is not None and row.get("seed") != source_seed:
+                continue
+            if parameter_filter is not None and not ReviewSelection.matches(
+                row["parameters"], parameter_filter,
+            ):
+                continue
             # The artifact API verifies promoted files, not paths under a former Run directory.
 
             try:
@@ -96,6 +110,8 @@ class ModelSetReview(lf.Work):
                     ),
                 }
             )
+        if not descriptors:
+            raise ValueError("source_seed/parameter_filter selected no promoted models")
         return ReviewInference().run(
             self,
             dataset,
@@ -105,6 +121,8 @@ class ModelSetReview(lf.Work):
                 "source_kind": "ModelSet",
                 "product_name": models.product.name,
                 "selection": models.product.scientific_meaning["selection"],
+                "source_seed": source_seed,
+                "parameter_filter": parameter_filter,
             },
             splits,
             allow_test,

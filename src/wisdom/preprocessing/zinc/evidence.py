@@ -57,6 +57,15 @@ def load_evidence(path: Path) -> list[dict[str, Any]]:
         previous = rows.get(row["identifier"])
         if previous is not None and previous["sequence"] != row["sequence"]:
             raise ValueError("one Zn identity has conflicting sequences; revise frozen evidence")
+        # A co-deposited chain without verified coordination is only a RAW bridge hypothesis,
+        # not positive evidence contradicting an explicit denial. Keep that denial and reverify
+        # its exact assembly later. Two genuinely conflicting assertions remain quarantined.
+
+        if previous is not None and previous["label"] != row["label"]:
+            positive = previous if previous["label"] == 1 else row
+            if positive.get("candidate_verified") is False:
+                rows[row["identifier"]] = previous if previous["label"] == 0 else row
+                continue
         if previous is not None and previous != row:
             previous["evidence_conflict"] = True
             previous.setdefault("conflicting_evidence", []).append(evidence)
@@ -104,6 +113,7 @@ def annotate_sites(rows: Sequence[Mapping[str, Any]], path: Path) -> list[dict[s
                 field: entry[field] for field in
                 ("source", "version", "external_id", "family", "reference") if field in entry}
             site["external_metadata"]["input_sha256"] = digest
+            site["confidence_tier"] = "externally_supported" if site["accepted"] else "not_accepted"
             matched.add(key)
         output.append(row)
     if matched != set(annotations):

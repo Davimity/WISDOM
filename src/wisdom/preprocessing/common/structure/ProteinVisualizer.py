@@ -4,15 +4,17 @@
 
 from __future__ import annotations
 
+import re
 import json
 import hashlib
 import numpy as np
 import plotly.graph_objects as go
 
 from pathlib import Path
-from typing import Any, cast
 from itertools import pairwise
 from collections.abc import Mapping
+from typing import Any, cast, ClassVar
+from plotly.colors import get_colorscale
 from scipy.spatial import Delaunay, ConvexHull, QhullError
 from wisdom.preprocessing.common.structure.ProteinArchive import ProteinArchive
 from wisdom.preprocessing.common.structure.VisualizationContent import VisualizationContent
@@ -20,6 +22,52 @@ from wisdom.preprocessing.common.structure.VisualizationContent import Visualiza
 
 class ProteinVisualizer:
     """Render scientific arrays as switchable point, mesh, atom, graph, and normal layers."""
+
+    # A single presentation vocabulary serves both the gallery and the shared inspector.
+    # Extremes describe this checkpoint/split, not an absolute scientific quality threshold.
+
+    CASE_DESCRIPTIONS: ClassVar[dict[str, list[str]]] = {
+        "best_localization": ["Best localization", "Among the highest normalized surface AUPRC values for this checkpoint and split; a relative rank, not proof of good absolute localization."],
+        "worst_localization": ["Worst localization", "Among the lowest normalized surface AUPRC values for this checkpoint and split. Only available local GT enters this ranking."],
+        "false_positive": ["False positive", "A negative protein whose binary probability reaches the configured positive decision threshold."],
+        "false_negative": ["False negative", "A positive protein whose binary probability stays below the configured decision threshold."],
+        "correct_negative": ["Correct negative", "A correctly rejected negative, prioritizing low area-weighted surface probability to show favorable surface rejection."],
+        "correct_positive": ["Correct positive", "A correctly classified positive, prioritizing high protein probability. Correct binary classification does not guarantee good localization."],
+        "negative_peak": ["Negative surface peak", "A negative protein with a relatively high maximum surface probability, even if its binary decision is correct."],
+        "global_surface_disagreement": ["Global / surface mismatch", "High protein probability relative to normalized surface AUPRC: a confident binary decision can coexist with weak localization."],
+        "explicit": ["Requested case", "An exact protein ID was requested by an advanced inspection policy."],
+        "all": ["Complete panel", "The inspection policy requested every available protein."],
+    }
+
+    @staticmethod
+    def refresh(source: str) -> str:
+        """Refresh a saved inspector's interface without changing scientific display arrays.
+
+        Args:
+            source: HTML produced by the shared WISDOM inspector, without external Plotly links.
+
+        Returns:
+            A new inspector reusing the exact stored plot, scalar channels and audit tables.
+
+        Raises:
+            ValueError: If the source does not contain the renderer's supported embedded format.
+        """
+        controls = re.search(r"const C=(.*?);\nconst gd=", source, re.DOTALL)
+        plot = re.search(
+            r'(<div style="height:100%; width:100%;">.*?</script>\s*</div>)\s*</main>',
+            source, re.DOTALL,
+        )
+        title = re.search(r"<title>WISDOM protein inspector · (.*?)</title>", source)
+        if controls is None or plot is None or title is None:
+            raise ValueError("unsupported saved WISDOM inspector format")
+        tables = re.findall(r"<tbody>(.*?)</tbody>", source, re.DOTALL)
+        provenance = re.search(r"<pre>(.*?)</pre>", source, re.DOTALL)
+        status = re.search(r'<span class="badge [^"]*">(.*?)</span>', source)
+        return ProteinVisualizer._html(
+            title.group(1), status.group(1) if status else "DISPLAY", tables[0] if tables else "",
+            tables[1] if len(tables) > 1 else "", provenance.group(1) if provenance else "",
+            plot.group(1), controls.group(1),
+        )
 
     def __init__(
         self,
@@ -154,6 +202,7 @@ class ProteinVisualizer:
         additional_channels  : Mapping[str, np.ndarray] | None = None,
         prediction_threshold : float = 0.5,
         content              : str   = "full",
+        review_context       : Mapping[str, Any] | None = None,
     ) -> tuple[str, Mapping[str, Any]]:
         """Render the shared inspector in memory for standalone or embedded presentation.
 
@@ -167,8 +216,11 @@ class ProteinVisualizer:
                 Plotly, and a string references the existing standalone gallery's local library.
             additional_channels: Numeric scalar arrays of shape [M], in base surface point order.
             prediction_threshold: Initial interactive hard-prediction cutoff in [0,1].
-            content: full retains all structural layers; predictions embeds only bounded surface
+            content: full retains all structural layers; features adds sampled learned/explicit
+                model channels without structural traces; predictions embeds only bounded surface
                 points and prediction/GT channels, without atoms, mesh or structural features.
+            review_context: Optional label, full-resolution metrics and recorded configuration
+                for a standalone prediction report; containing galleries can supply their own.
 
         Returns:
             Complete HTML and numerical geometry diagnostics, without writing either to disk.
@@ -198,7 +250,7 @@ class ProteinVisualizer:
         )
         channels                 = self._extend_surface_channels(
             channels,
-            additional_channels if profile is VisualizationContent.FULL else {
+            additional_channels if profile is not VisualizationContent.PREDICTIONS else {
                 name: values for name, values in (additional_channels or {}).items()
                 if name.startswith("model_prediction_")
             },
@@ -263,6 +315,7 @@ class ProteinVisualizer:
                 sort_keys=True,
             )
         )
+        controls["review"] = dict(review_context or {})
         control_data = json.dumps(controls, separators=(",", ":"), allow_nan=False).replace(
             "<", "\\u003c"
         )
@@ -1221,6 +1274,7 @@ window.wisdomViewerReady=(async()=>{
 await window.wisdomPlotReady;
 const C=@@CONTROLS@@;
 const gd=document.getElementById('wisdom-plot');
+const colourPalettes=@@COLOR_PALETTES@@;
 const state={surface:C.defaultSurface,atom:C.defaultAtom,predictionThreshold:Number(C.predictionThreshold),measure:false,measurePoints:[],selected:null,pending:0,queue:Promise.resolve()};
 const palettes=['Turbo','Viridis','Cividis','Plasma','Magma','Inferno','RdBu','Portland','Jet','Greys'];
 const presets={surface:['surface'],mesh:['mesh'],atoms:['atoms'],vdw:['vdw'],cartoon:['cartoon'],combined:['surface','cartoon'],bonds:['atoms','covalent','both'],graphs:['atoms','covalent','spatial','both','surface_edges']};
@@ -1231,7 +1285,7 @@ const finite=value=>Number.isFinite(Number(value));
 const layer=name=>document.querySelector(`[data-layer="${name}"]`);
 function fillOptions(select,names,selected){for(const name of names){const option=document.createElement('option');option.value=name;option.textContent=human(name);option.selected=name===selected;select.appendChild(option)}}
 function setBusy(active,message='Updating'){state.pending+=active?1:-1;state.pending=Math.max(0,state.pending);byId('loading-shade').classList.toggle('visible',state.pending>0);byId('viewer-state').classList.toggle('busy',state.pending>0);byId('viewer-state').textContent=state.pending>0?message:'Ready'}
-function schedule(operation,message){setBusy(true,message);state.queue=state.queue.then(operation,operation).catch(error=>{console.error(error);byId('viewer-state').textContent='Update failed — inspect console'}).finally(()=>setBusy(false));return state.queue}
+function schedule(operation,message){setBusy(true,message);let failure=null;state.queue=state.queue.then(operation,operation).catch(error=>{console.error(error);failure=error.message||String(error)}).finally(()=>{setBusy(false);if(failure){byId('viewer-state').textContent=`Update failed: ${failure}`;byId('viewer-state').classList.add('busy')}});return state.queue}
 function setRange(kind,range){byId(`${kind}-min`).value=Number(range[0]).toPrecision(6);byId(`${kind}-max`).value=Number(range[1]).toPrecision(6)}
 function readRange(kind,fallback){const lower=Number(byId(`${kind}-min`).value),upper=Number(byId(`${kind}-max`).value);return finite(lower)&&finite(upper)&&lower<upper?[lower,upper]:fallback}
 function thresholdValues(values){return values.map(value=>value===null?null:(Number(value)>=state.predictionThreshold?1:0))}
@@ -1248,10 +1302,10 @@ updatePredictionThreshold();updateStyleLabels();
 byId('mesh-method').textContent=C.meshMethod;byId('mesh-count').textContent=C.meshTriangles.toLocaleString();byId('vdw-count').textContent=C.vdwAtoms.toLocaleString();byId('atom-count').textContent=C.atomCount.toLocaleString();
 function applyLayers(){const indices=[],values=[];document.querySelectorAll('[data-layer]').forEach(input=>{if(input.dataset.layer in C.traces){indices.push(C.traces[input.dataset.layer]);values.push(input.checked)}});return Plotly.restyle(gd,{visible:values},indices).then(updateSurface)}
 function choosePreset(name){const enabled=new Set(presets[name]);document.querySelectorAll('[data-layer]').forEach(input=>input.checked=enabled.has(input.dataset.layer));document.querySelectorAll('[data-preset]').forEach(button=>button.classList.toggle('active',button.dataset.preset===name));schedule(applyLayers,`Applying ${name} view`)}
-function updateSurface(){const channel=surfaceChannel(),range=readRange('surface',channel.range),scale=byId('surface-palette').value,reversed=byId('surface-reverse').checked,uniform=byId('mesh-colour-mode').value==='uniform',meshColour=byId('mesh-colour').value,surfaceVisible=layer('surface').checked,meshVisible=layer('mesh').checked;byId('mesh-colour').disabled=!uniform;updatePredictionThreshold();updateStyleLabels();return Plotly.restyle(gd,{'marker.color':[channel.cloud],'marker.cmin':[range[0]],'marker.cmax':[range[1]],'marker.colorscale':[scale],'marker.reversescale':[reversed],'marker.size':[Number(byId('surface-size').value)],'marker.opacity':[Number(byId('surface-opacity').value)],'marker.showscale':[surfaceVisible],'marker.colorbar.title.text':[human(state.surface)]},[C.traces.surface]).then(()=>('mesh' in C.traces)?Plotly.restyle(gd,{intensity:[uniform?uniformMesh:channel.mesh],cmin:[uniform?0:range[0]],cmax:[uniform?1:range[1]],colorscale:[uniform?[[0,meshColour],[1,meshColour]]:scale],reversescale:[uniform?false:reversed],opacity:[Number(byId('mesh-opacity').value)],showscale:[!uniform&&meshVisible&&!surfaceVisible]},[C.traces.mesh]):undefined)}
-function updateAtoms(){if(!C.defaultAtom)return Promise.resolve();const channel=C.atoms[state.atom],range=readRange('atom',channel.range),scale=byId('atom-palette').value,reversed=byId('atom-reverse').checked,sphere=C.sphereAtomIds.map(index=>channel.values[index]);return Plotly.restyle(gd,{'marker.color':[channel.values],'marker.cmin':[range[0]],'marker.cmax':[range[1]],'marker.colorscale':[scale],'marker.reversescale':[reversed]},[C.traces.atoms]).then(()=>Plotly.restyle(gd,{intensity:[sphere],cmin:[range[0]],cmax:[range[1]],colorscale:[scale],reversescale:[reversed]},[C.traces.vdw]))}
+function updateSurface(){const channel=surfaceChannel(),range=readRange('surface',channel.range),scale=colourPalettes[byId('surface-palette').value],reversed=byId('surface-reverse').checked,uniform=byId('mesh-colour-mode').value==='uniform',meshColour=byId('mesh-colour').value,surfaceVisible=layer('surface').checked,meshVisible=layer('mesh').checked;byId('mesh-colour').disabled=!uniform;updatePredictionThreshold();updateStyleLabels();return Plotly.restyle(gd,{'marker.color':[channel.cloud],'marker.cmin':[range[0]],'marker.cmax':[range[1]],'marker.colorscale':[scale],'marker.reversescale':[reversed],'marker.size':[Number(byId('surface-size').value)],'marker.opacity':[Number(byId('surface-opacity').value)],'marker.showscale':[surfaceVisible],'marker.colorbar.title.text':[human(state.surface)]},[C.traces.surface]).then(()=>('mesh' in C.traces)?Plotly.restyle(gd,{intensity:[uniform?uniformMesh:channel.mesh],cmin:[uniform?0:range[0]],cmax:[uniform?1:range[1]],colorscale:[uniform?[[0,meshColour],[1,meshColour]]:scale],reversescale:[uniform?false:reversed],opacity:[Number(byId('mesh-opacity').value)],showscale:[!uniform&&meshVisible&&!surfaceVisible]},[C.traces.mesh]):undefined)}
+function updateAtoms(){if(!C.defaultAtom)return Promise.resolve();const channel=C.atoms[state.atom],range=readRange('atom',channel.range),scale=colourPalettes[byId('atom-palette').value],reversed=byId('atom-reverse').checked,sphere=C.sphereAtomIds.map(index=>channel.values[index]);return Plotly.restyle(gd,{'marker.color':[channel.values],'marker.cmin':[range[0]],'marker.cmax':[range[1]],'marker.colorscale':[scale],'marker.reversescale':[reversed]},[C.traces.atoms]).then(()=>Plotly.restyle(gd,{intensity:[sphere],cmin:[range[0]],cmax:[range[1]],colorscale:[scale],reversescale:[reversed]},[C.traces.vdw]))}
 function appendRow(table,name,value){const row=table.insertRow(),key=row.insertCell(),cell=row.insertCell();key.textContent=name;cell.textContent=value===null?'unavailable':String(value)}
-function inspectPoint(point){const card=byId('selection-card'),table=document.createElement('table');table.className='selection-table';card.replaceChildren();const title=document.createElement('h3');if(point.curveNumber===C.traces.surface){const local=point.pointNumber,index=Number(point.customdata);title.textContent=`Surface point ${index}`;appendRow(table,'position',`${Number(point.x).toFixed(4)}, ${Number(point.y).toFixed(4)}, ${Number(point.z).toFixed(4)} Å`);for(const [name] of Object.entries(C.surface))appendRow(table,human(name),surfaceChannel(name).cloud[local])}else if(point.curveNumber===C.traces.atoms){const local=point.pointNumber,data=point.customdata;title.textContent=`Atom ${data[0]} · ${data[1]}`;appendRow(table,'residue',`${data[2]} ${data[3]}`);appendRow(table,'chain index',data[4]);appendRow(table,'position',`${Number(point.x).toFixed(4)}, ${Number(point.y).toFixed(4)}, ${Number(point.z).toFixed(4)} Å`);for(const [name,channel] of Object.entries(C.atoms))appendRow(table,human(name),channel.values[local])}else{return false}card.append(title,table);state.selected=point;return true}
+function inspectPoint(point){if(!point||!Number.isInteger(point.pointNumber))return false;const card=byId('selection-card'),table=document.createElement('table');table.className='selection-table';const title=document.createElement('h3');if(point.curveNumber===C.traces.surface){const local=point.pointNumber;if(local<0||local>=surfaceChannel().cloud.length)return false;const index=point.customdata??C.surfaceIndices?.[local]??local;title.textContent=`Surface point ${index}`;appendRow(table,'position',`${Number(point.x).toFixed(4)}, ${Number(point.y).toFixed(4)}, ${Number(point.z).toFixed(4)} Å`);for(const [name] of Object.entries(C.surface))appendRow(table,human(name),surfaceChannel(name).cloud[local])}else if(point.curveNumber===C.traces.atoms){const local=point.pointNumber,data=point.customdata;if(!Array.isArray(data)||data.length<5)return false;title.textContent=`Atom ${data[0]} · ${data[1]}`;appendRow(table,'residue',`${data[2]} ${data[3]}`);appendRow(table,'chain index',data[4]);appendRow(table,'position',`${Number(point.x).toFixed(4)}, ${Number(point.y).toFixed(4)}, ${Number(point.z).toFixed(4)} Å`);for(const [name,channel] of Object.entries(C.atoms))appendRow(table,human(name),channel.values[local])}else{return false}card.replaceChildren(title,table);state.selected=point;return true}
 function updateMeasurementTrace(){const coordinates=axis=>state.measurePoints.map(point=>point[axis]);return Plotly.restyle(gd,{x:[coordinates('x')],y:[coordinates('y')],z:[coordinates('z')],visible:[state.measurePoints.length>0]},[C.traces.measurement])}
 function measurementClick(point){if(!state.measure||!inspectPoint(point))return;if(state.measurePoints.length===2)state.measurePoints=[];state.measurePoints.push({x:Number(point.x),y:Number(point.y),z:Number(point.z),label:point.curveNumber===C.traces.atoms?`atom ${point.customdata[0]}`:`surface ${point.customdata}`});if(state.measurePoints.length===1){byId('measure-result').textContent=`First point: ${state.measurePoints[0].label}. Select the second point.`}else{const [a,b]=state.measurePoints,distance=Math.hypot(a.x-b.x,a.y-b.y,a.z-b.z);byId('measure-result').replaceChildren();const strong=document.createElement('strong');strong.textContent=`${distance.toFixed(4)} Å`;byId('measure-result').append(strong,document.createTextNode(` · ${a.label} ↔ ${b.label}`))}schedule(updateMeasurementTrace,'Updating measurement')}
 gd.on('plotly_click',event=>{const point=event.points[0];if(state.measure)measurementClick(point);else inspectPoint(point)});
@@ -1270,6 +1324,7 @@ if(window.innerWidth<1100){document.body.classList.add('left-closed','right-clos
 const resize=()=>{if(gd.isConnected)Plotly.Plots.resize(gd)};
 window.addEventListener('resize',resize);
 window.wisdomDispose=async()=>{await state.queue;window.removeEventListener('resize',resize);Plotly.purge(gd)};
+@@ENHANCEMENTS@@
 })();
 </script></body></html>"""
         replacements = {
@@ -1281,6 +1336,15 @@ window.wisdomDispose=async()=>{await state.queue;window.removeEventListener('res
             "@@PROVENANCE@@":   provenance,
             "@@PLOT@@":         plot,
             "@@CONTROLS@@":     controls,
+            "@@COLOR_PALETTES@@": json.dumps({
+                name: get_colorscale(name) for name in (
+                    "Turbo", "Viridis", "Cividis", "Plasma", "Magma", "Inferno",
+                    "RdBu", "Portland", "Jet", "Greys",
+                )
+            }),
+            "@@ENHANCEMENTS@@": Path(__file__).with_name("protein_inspector.js").read_text(
+                encoding="utf-8"
+            ).replace("@@CASE_DESCRIPTIONS@@", json.dumps(ProteinVisualizer.CASE_DESCRIPTIONS)),
         }
         for token, value in replacements.items():
             template = template.replace(token, value)

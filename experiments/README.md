@@ -58,11 +58,15 @@ that a formal scientific WISDOM generation has already been validated.
 | 4 | `v4/wisdom_v4.yaml` | Which width, depth, topology, and regularization define the strongest fixed-MAX core? | Initialization and optimizer winners copied into `with` | Core model and AdamW hyperparameters | `val_wisdom_hpo_score` | 5 |
 | 5a | `v5/wisdom_v5a.yaml` | How do fixed pooling families behave across their parameter curves? | Existing V5 ledger frozen exactly | Family, point/area measure, applicable fixed parameter | G, S, coupling, regret, seed stability, faithfulness, cost | 5b |
 | 5b | `v5/wisdom_v5b.yaml` | Does scalar adaptation improve the selected fixed family reference? | Same frozen ledger and four paired seeds as 5a | Five learned scalars, one selected start/measure each | Same metrics plus parameter trajectories | 5c |
-| 5c | `v5/wisdom_v5c.yaml` | Does spatial coherence of evidence before pooling improve localization/classification? | Same frozen V5 ledger; pooling choices currently provisional | Eight refiner types crossed with MAX/LSE/Attention; 54 candidates × 4 seeds = 216 Runs | Refined S, G, raw S/gain, negative controls, ranking, coupling and cost; not W alone | Post-hoc review before adapting 6a |
-| 6a | `v6/wisdom_v6a.yaml` | Do curated negatives provide useful weak local supervision? | Pooling winner copied into `with` | `negative_surface_lambda` | `val_wisdom_hpo_score` and surface diagnostics | 6b only if useful, otherwise 7 |
-| 6b/6b2/6b3 | `v6/wisdom_v6b.yaml`, `v6/wisdom_v6b2.yaml`, `v6/wisdom_v6b3.yaml` | Does existence, regional existence, or ranking add signal over 6a? | Credible 6a signal | One additional loss family per independent Study, respectively | `val_wisdom_hpo_score` | 6c only if a diagnosed failure remains, otherwise 7 |
-| 6c/6c2/6c3 | `v6/wisdom_v6c.yaml`, `v6/wisdom_v6c2.yaml`, `v6/wisdom_v6c3.yaml` | Does an identified map pathology justify cardinality, TV, or Dirichlet regularization? | Reviewed 6a/6b winner and explicit failure mode | One regularizer per independent Study, respectively | `val_wisdom_hpo_score` plus pathology-specific diagnostics | 6d if three families are credible; otherwise 7 |
-| 6d | `v6/wisdom_v6d.yaml` | Do the selected negative, regional, and regularization terms cooperate? | One credible family from each of 6a–6c | Three contribution weights jointly | `val_wisdom_hpo_score`, then fresh-seed confirmation | 7 |
+| 5c | `v5/wisdom_v5c.yaml` | Does evidence coherence improve localization/classification? | Same frozen V5 ledger; retained MAX/LSE/Attention | Eight refiner types, ten settings × three poolers × four seeds = 120 Runs | Refined S, G, raw S/gain, negative controls, ranking, coupling and cost | Isolated priors in 6a–6g; Heat interactions in 6f/g |
+| 6a | `v6/wisdom_v6a.yaml` | negative (frozen) | Frozen V5c backbone; Heat6 | Three poolers × negative lambda | G/S, raw/gain, negative mass/peak, regret, seeds and cost | Individual evidence for 6h |
+| 6b | `v6/wisdom_v6b.yaml` | existence (frozen) | Frozen V5c backbone; Heat6 | Three poolers × existence lambda | G/S, raw/gain, negative mass/peak, regret, seeds and cost | Individual evidence for 6h |
+| 6c | `v6/wisdom_v6c.yaml` | regional positive | Frozen V5c backbone; Heat6 | Three poolers × regional lambda; length 2.5 Å | G/S, raw/gain, negative mass/peak, regret, seeds and cost | Individual evidence for 6h |
+| 6d | `v6/wisdom_v6d.yaml` | regional ranking | Frozen V5c backbone; Heat6 | Three poolers × ranking lambda; length 2.5 Å; margin .5 | G/S, raw/gain, negative mass/peak, regret, seeds and cost | Individual evidence for 6h |
+| 6e | `v6/wisdom_v6e.yaml` | cardinality | Frozen V5c backbone; Heat6 | Three poolers × lambda × conditional lower mass; no upper bound | G/S, raw/gain, negative mass/peak, regret, seeds and cost | Individual evidence for 6h |
+| 6f | `v6/wisdom_v6f.yaml` | TV | Frozen V5c backbone; none / Heat6 | Three poolers × TV lambda × refiner | G/S, raw/gain, negative mass/peak, regret, seeds and cost | Individual evidence for 6h |
+| 6g | `v6/wisdom_v6g.yaml` | Dirichlet | Frozen V5c backbone; none / Heat6 | Three poolers × Dirichlet lambda × refiner | G/S, raw/gain, negative mass/peak, regret, seeds and cost | Individual evidence for 6h |
+| 6h | `v6/wisdom_v6h.yaml` | exploratory weak-loss mixtures | Frozen V5c/Heat6; V6a–V6f report reviewed, V6g pending | 18 exact candidates × three poolers × four seeds = 216 Runs; core interactions and all-family stress | G/S, raw/gain, negative mass/peak, regret, seeds, term activation and cost | Fresh-seed confirmation before 7 |
 | 7 | `v7/wisdom_v7.yaml` | Which global/local head relationship is accurate and faithful? | Selected weak-loss policy copied into `with` | `head_type` | `val_wisdom_hpo_score` and faithfulness | 8 |
 | 8 | `v8/wisdom_v8.yaml` | Does one isolated architectural spike beat its proper control? | Head winner copied into `with` | `architecture_spike` | `val_wisdom_hpo_score`, faithfulness, compute | 9 |
 | 9 | `v9/wisdom_v9.yaml` | What small numerical retune best fits the selected final architecture? | Complete winner ledger from 2–8 | Four sensitive continuous parameters | `val_wisdom_hpo_score` | 10 |
@@ -71,12 +75,12 @@ that a formal scientific WISDOM generation has already been validated.
 Run experiments in this order, but do not run a conditional experiment merely because its YAML exists. Each
 file begins with `OBJECTIVE`, `PREREQUISITES`, `VARIES`, `FIXED`, and `DECISION`. Values marked
 `REPLACE` are an explicit decision ledger: copy the reviewed previous-stage winner before launch.
-This manual freeze is preferable to silently selecting a trial or allowing a downstream YAML to
-revert to defaults.
+V6a–V6g resolve the V5c ledger; V6h now declares provisional mixtures, not a confirmed winner.
+Later stages still require an explicit manual freeze, not silent winner selection.
 
 Every training study is a single executable Work: none contains `steps`. Only the
-dataset-construction YAML composes sequential actions. Splitting the old 1b, 6b and 6c does not
-change their grids or controls; it makes each question independently launchable and reviewable.
+dataset-construction YAML composes sequential actions. Seven isolated V6 Studies share the frozen
+parent; V6h combines loss anchors and labels missing or weak evidence explicitly.
 
 ## Why V1a, V1b and V1c have no `search`
 
@@ -92,18 +96,18 @@ variance estimate, so it also has no `search` section.
 ## Diagnostics, complete sweeps, and adaptive HPO
 
 - **Diagnostics:** V1a, V1b and V1c estimate variance and causation; they select nothing.
-- **Complete finite sweeps:** V2, V3, V5a/V5b, V6a–V6c, V7, and V8 use LambdaForge's explicit
+- **Complete finite sweeps:** V2, V3, V5a/V5b/V5c, V6a–V6g, V7, and V8 use LambdaForge's explicit
   `sweep.space`. V5c also uses a complete conditional sweep. Every authored cell is mandatory.
-  LambdaForge adds one complete shared-seed block
-  at a time and stops with an anytime-valid paired analysis; HPO pruning and per-cell seed racing
-  are disabled by the sweep contract.
-- **Adaptive HPO:** V4, V6d, and V9 use `search.goal: optimize` plus `search.space`. Candidate
+  V5 and V6 require exactly four explicit paired seeds; stages with automatic seeds use native
+  shared-seed blocks and an anytime-valid paired analysis. HPO pruning and per-cell seed racing
+  are disabled by the sweep contract; ordinary within-Run validation patience remains active.
+- **Adaptive HPO:** V4 and V9 use `search.goal: optimize` plus `search.space`. Candidate
   generation, seed allocation, curve pruning, convergence, fresh confirmation, and child-Run
   packing remain automatic. The authored `objective.practical_margin` defines which score gaps are
   scientifically negligible.
-- **Conditional weak-loss sequence:** V6a is mandatory if weak supervision is considered; V6b
-  requires useful V6a signal; V6c requires a diagnosed remaining map pathology; V6d runs only when
-  one credible term from each family should be tested jointly.
+- **V6 weak-prior campaign:** seven isolated families share the V5c backbone and poolers.
+  V6c–V6e keep Heat6; V6f/g cross none/Heat6. V6a/c/d/f have selective range extensions.
+  V6h uses explicit mixtures, not a Cartesian sweep of all seven losses. See [v6/README.md](v6/README.md).
 - **Confirmation:** V10 is not HPO. It freezes the ledger, uses fresh seeds, and opens test.
 - **Post-hoc analysis:** `interpretability/interpretability_sparse_concepts.yaml` analyzes one explicit frozen
   checkpoint. It is not a scientific WISDOM version and must not influence V1 selection.
@@ -123,9 +127,9 @@ pooler, inside the training forward. It does not change the backbone or add loca
 The refiner choices are none, fixed/learned heat, geometric/embedding/learned anisotropy,
 unrolled graph-TV, and sparse Potts CRF. Only learned heat and learned conductance add parameters.
 The unchanged protein BCE differentiates through every operator; embedding guidance detaches
-only its guide branch by default. V5c crosses 18 refiner settings with three provisional poolers:
-MAX, area-LSE beta=0.25, area-Attention simple/256. This gives 54 candidates × four paired seeds
-= 216 Runs. Replace the marked LSE/Attention representatives before a definitive campaign.
+only its guide branch by default. V5c crosses ten refiner settings with three retained poolers:
+MAX, area-LSE beta=0.25, area-Attention simple/256. This gives 30 candidates × four paired seeds
+= 120 Runs. V6 preserves these poolers; only V6f/g cross identity/Heat6 to isolate smoothness interactions.
 No local GT enters training or checkpoint selection; refined metrics, raw diagnostics and unclipped
 refinement gain are recorded for development. Existing W remains the objective, not the sole
 decision criterion. Vertex-deletion faithfulness is unavailable because it changes refiner operators.
@@ -201,10 +205,9 @@ their diffusion operator. Learned scalar values and multiscale weights have epoc
 the last optimizer update. Area-aware pooling is an ablation, not an assumed improvement.
 
 The output is a reviewed shortlist of approximately **2–4 nondominated families**, not a single
-`pooling_winner`. Account for uncertainty: four seeds do not prove a ranking. Keep V6a–V6d's
-current loss spaces unchanged; revising them to cover the shortlist is a subsequent task, not an
-implicit change in this implementation. Their current single-pooling ledger must therefore be
-reviewed before launching V6.
+`pooling_winner`. Account for uncertainty: four seeds do not prove a ranking. The current V6
+campaign crosses MAX/LSE/Attention with seven isolated weak priors before a deferred combination.
+It includes contemporary zero controls, preserves the V5c backbone, and never selects a favorable seed.
 
 ## Protein reports
 

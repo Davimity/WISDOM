@@ -3,6 +3,7 @@
 import gzip
 import json
 import gemmi
+import shutil
 import hashlib
 import lambdaforge as lf
 
@@ -11,6 +12,43 @@ from pathlib import Path
 from functools import partial
 from collections.abc import Mapping, Sequence
 from wisdom.preprocessing.common.ProgressHeartbeat import ProgressHeartbeat
+
+
+def restore_structure_snapshot(work: lf.Work, structures: Path) -> dict[str, Path]:
+    """Restore verified portable coordinate archives into the native reconstructible cache.
+
+    Args:
+        work: Work owning native cache files and dependency tracking.
+        structures: Snapshot directory already checked by validate_structure_snapshot.
+
+    Returns:
+        Lowercase PDB IDs mapped to uncompressed mmCIF files. The cache key contains the
+        scientific coordinate digest; no URL is fetched and no public revision is consulted.
+
+    Raises:
+        OSError: A verified archive cannot be decompressed or the managed cache is unwritable.
+    """
+    entries = json.loads((structures / "index.json").read_text())["structures"]
+    return {entry["pdb_id"].lower(): Path(work.cache.file(
+        f"frozen-structures/{entry['uncompressed_sha256']}.cif",
+        build=partial(_unpack_structure, archive=structures / entry["file"]))) for entry in entries}
+
+
+def _unpack_structure(path: Path, archive: Path) -> None:
+    """Stream a validated gzip snapshot to a native cache construction destination.
+
+    Args:
+        path: Temporary mmCIF destination owned and atomically published by LambdaForge.
+        archive: Exact portable gzip archive; integrity was checked at the Work boundary.
+
+    Returns:
+        None; writes uncompressed deposited bytes without coordinate transformations.
+
+    Raises:
+        OSError: The archive is unreadable or its destination cannot be written.
+    """
+    with gzip.open(archive, "rb") as source, path.open("wb") as target:
+        shutil.copyfileobj(source, target)
 
 
 def validate_structure_snapshot(

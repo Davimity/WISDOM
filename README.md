@@ -801,200 +801,197 @@ the workstation or cluster path.
 
 ### 3.7. A second task: verified zinc coordination
 
-Zinc (Zn) is a metal ion that can stabilize protein structure or participate in catalysis. A deposited
-Zn ion is not sufficient evidence that every protein chain binds it, nor that the contact is
-physiological. Crystallization additives, incomplete occupancy and an adjacent chain can all produce
-misleading candidates. The Zn workflow therefore distinguishes a **structurally verified coordination
-site** from independently supported **physiological Zn specificity**. Only the former is established
-by the current geometry checks; evidence confidence is retained rather than silently upgraded.
+Zinc (Zn) is a metal ion that can help a protein keep its shape or catalyze a reaction. A Zn atom
+in a deposited structure does **not** establish that every neighboring protein binds Zn in living
+cells. Crystallization additives, low occupancy and contacts from a neighboring chain can produce
+misleading candidates. WISDOM therefore distinguishes observed coordination, biological binding
+capability and physiological metal specificity. Its positive label is **verified deposited Zn
+coordination under the benchmark policy**, a structural proxy rather than proof of the latter two
+claims. The target stays `zinc_binding`; provenance states `physiological_specificity_claimed: false`.
 
-The historical SAGLZn-II project motivates chemical hypotheses, not a dataset to copy. Its use of
-ligand absence to find negatives and random splits is not adopted. A negative must have an explicit
-non-binding experiment or an experimental curated `NOT` annotation for zinc-ion binding,
-with a reference, scope and the exact subject sequence's SHA-256 digest. The digest binds an experiment
-to a protein rather than merely to a similar PDB name. `NOT` explicitly denies an annotation; an absent
-annotation does not. Such evidence remains conditional on assay sensitivity, coverage and curation.
-Selection now acquires that evidence automatically; a negative file is **not required**. Construction
-still stops if the evidence cannot support both-class, homology-disjoint splits. Automatic acquisition
-is not a guarantee that enough experimentally supported proteins exist.
-
-|Action|Input|Decision or output|
-|---|---|---|
-|`ZincDiscovery`|Snapshot name; optional reviewed negative JSONL|Experimental GO denials, exact UniProt/PDB mappings and frozen RCSB Zn candidates|
-|`ZincSelection`|Automatic acquisition, or frozen candidate JSONL/design|Contact revalidation, full-RAW leakage groups, separate phenotypes and fixed splits|
-|`ZincPreprocessing`|Exact portable design and its mmCIF snapshot|The same universal protein-only NPZ as DNA, plus separate Zn reference arrays|
-|`Visualization`|The newly published DatasetVersion|A sampled interactive HTML gallery and full-point PLY files; no data changes|
-|`ZincValidation`|Managed DatasetVersion|Readable verdict and ordered, per-protein scientific errors|
-
-**Automatic negative acquisition.** QuickGO supplies Gene Ontology (GO) annotations: curated statements
-about a protein's function, together with their supporting reference and evidence category. Selection
-queries exact `NOT|enables` annotations for GO:0008270 (zinc-ion binding) and GO:0046872 (metal-ion
-binding), then retains referenced experimental codes EXP, IDA, IPI, IMP, IGI and IEP. It excludes
-sequence-based inference, context-restricted annotations and isoform-specific records. GO denials
-propagate to more specific functions: denying metal-ion binding also denies Zn binding; denying a
-particular Zn-dependent function or binding another metal does **not** deny all Zn binding. The frozen
-ontology verifies this direction. `negative_go_terms` may also include the reviewed broader cation-
-and ion-binding terms GO:0043169 and GO:0043167. See the authoritative
-[GO annotation rules](https://geneontology.org/docs/go-annotations/) and
-[QuickGO API](https://www.ebi.ac.uk/QuickGO/api/index.html).
-
-UniProt, a curated protein sequence/function database, supplies the subject's canonical sequence and
-PDB cross-references through its [public API](https://www.uniprot.org/help/api). A deposited chain is
-eligible only when its **complete declared polymer sequence** equals that sequence, not merely its
-observed atoms or a similar sequence. Tags, mutations and truncated constructs do not inherit the
-denial. The first declared assembly/copy containing an exact chain match is selected deterministically,
-without choosing a copy to avoid Zn. Contradictory experimental Zn annotations exclude the subject;
-downstream coordinate checks also quarantine negative chains with Zn contacts. The generated digest
-binds each denial to its exact sequence, and every original supporting annotation is retained.
-
-This conservative search can yield very few subjects. Several structures of the same protein do not
-create independent biological negatives; full-RAW homology grouping can reduce the count further.
-ZincBind/MetalPDB coordination resources do not, by themselves, supply experimental whole-protein
-negatives. A site's random non-coordinating residue set is not a negative protein. No absence-based
-fallback is enabled to enlarge the benchmark. If no negative maps successfully, acquisition stops
-**before** scanning all positive Zn entries. A populated inventory may still fail subsequent split
-requirements; this must be resolved with additional explicit evidence, not relaxed leakage checks.
-
-**Optional reviewed override.** Uncomment `negative_evidence` to use a researcher-supplied file instead
-of automatic negative discovery. Each record needs `identifier`
-(`PDB_AQ` means one chain named AQ), `sequence`, `label: 0`, `assembly_id`, one-based `protein_copy`,
-`origin`, and `label_evidence`. An experimental evidence object has `kind: experimental_non_binding`,
-`scope: zinc_binding`, `reference`, `assay`, and `sequence_sha256`. A curated experimental denial uses
-`kind: curated_not_annotation`, the same scope/reference/digest, `qualifier: NOT`, one of the four terms above
-and `evidence_code` EXP, IDA, IPI, IMP, IGI or IEP. These codes identify experimental evidence categories,
-not a guarantee of assay coverage. Sequence-mismatched evidence fails; contradictory identity or
-exact-sequence evidence is quarantined, never silently relabelled.
+**Run the complete workflow.** No PDB list, negative file or raw evidence needs to be prepared first:
 
 ```bash
-# Choose release_id; no preexisting negative file is needed for the three-step workflow.
 lf run experiments/preprocess/zinc/zinc_preprocess.yaml
 lf datasets verify wisdom-zinc@1
-lf run experiments/preprocess/zinc/validate_zinc.yaml
 ```
 
-The workflow is **select → preprocess → visualize**. With no `raw_path`, select acquires
-candidates and freezes them under `data/zinc/raw`; it then publishes the complete scientific
-design under `data/zinc/design`. Geometry consumes that exact design and publishes `wisdom-zinc@1`;
-visualization consumes the native upstream dataset output and writes `data/zinc/visualizations`.
-`maximum_proteins: 12` limits the gallery, not the dataset; use zero to inspect every member.
-`zinc_discovery.yaml` is an optional acquisition-only command, useful for inspecting/fixing the
-candidate release separately. Its output can be supplied as select's typed `raw_path`, bypassing
-discovery but not scientific selection.
+|Visible Work|Consumes|Produces; next boundary|
+|---|---|---|
+|`discover`: ZincDiscovery|Public RCSB, QuickGO and UniProt responses|Frozen RAW evidence and exact coordinates; no splitting or dataset publication|
+|`select`: ZincSelection|That snapshot through `{from: discover.raw}`|Offline verification, full-RAW leakage groups, phenotypes and fixed portable design|
+|`preprocess`: ZincPreprocessing|Exact design|Protein-only universal NPZ and separate Zn reference arrays; validated DatasetVersion|
+|`validate`: ZincValidation|The published placement|Independent scientific verdict and detailed member errors|
+|`visualize`: Visualization|The same placement, after validation|Interactive HTML and PLY inspection without changing scientific arrays|
 
-Automatic acquisition adds `negative-evidence.jsonl`, `negative-discovery.json` and exact API responses
-under `sources/` to the raw output. The audit distinguishes queried **annotations** (several statements
-may refer to one protein), eligible **subjects** (UniProt proteins before structural mapping), mapped
-**candidates** (PDB chains), and **unique negative sequences** (before homology grouping). None is a
-count of independent test cases. Exclusion reasons and response digests make discarded evidence
-reviewable. On failure these files remain in the Work's managed `zinc-raw` artifact directory; external
-output copies are only published by LF on successful completion. Native cache and reconstructible
-maps reuse completed queries/downloads/mappings after interruption; `release_id` deliberately names
-a frozen acquisition, so change it when adopting updated annotations, not merely to retry.
+The directories are `data/zinc/raw`, `design`, `validation` and `visualizations`. A gallery of
+12 proteins is a display sample, not a 12-member dataset; `maximum_proteins: 0` requests all members.
+The independent validation step is now part of the normal command. The separate
+`zinc_discovery.yaml` and `validate_zinc.yaml` remain useful for acquisition-only or repeat audits.
+Unlike DNA Selection, which receives evidence frozen by a separate acquisition script, Zn needs
+its own public acquisition Work to assemble both structural candidates and explicit experimental denials.
 
-**Reuse the frozen selection.** Set `select.with.skip: true`, uncomment
-`existing_design: {file: ../../../data/zinc/design}`, and leave acquisition inputs unset.
-Leave preprocess enabled. Selection then only forwards `zinc-design`: no tool probes, downloads,
-clustering or split assignment run. Retain the whole design, including `selection.jsonl`,
-`dilutions.json` and exact `structures/`; labelled TXT alone cannot recover coordination evidence.
-Native checkpoints also retain completed acquisition/geometry records after interruption; full
-Selection may still recompute inexpensive population summaries. A different intended dataset
-content needs a new `dataset_version`, never an overwrite of an immutable publication. To render
-an existing dataset only, comment the first two step blocks and replace visualize's `from` binding
-with `{dataset: wisdom-zinc@1}`. Set visualize's `skip: true` to build without rendering.
+**What Discovery freezes.** RCSB PDB, the public archive of deposited molecular structures, supplies
+all entries containing Zn when `maximum_entries: 0`; a positive cap marks a pilot, not full coverage.
+An entry is a deposition, a chain is one polymer identity, and an assembly is the collection of
+transformed chain copies declared to act together. Discovery inspects these copies with Gemmi, the
+coordinate-file reader used throughout WISDOM. For each deposited chain it selects the assembly/copy
+with the greatest accepted-site donor count, breaking ties deterministically and retaining alternatives.
+Co-deposited chains without verified coordination remain RAW bridge candidates, **not accepted positives**.
 
-Discovery examines declared biological assemblies and their individual chain copies, including
-multi-character chains, rather than treating the deposited asymmetric unit as the biological object.
-For each deposited chain it records all assembly alternatives and selects the copy with the greatest
-accepted-site donor count, breaking ties deterministically by assembly/copy. This is an auditable
-structural rule, not a way to infer physiological relevance. Chains without accepted coordination
-remain RAW candidates so their sequence/structure can connect leakage groups before exclusion.
+The Zn inventory uses RCSB Search's searchable field
+`rcsb_nonpolymer_entity_container_identifiers.nonpolymer_comp_id`, with exact value `ZN` and
+`return_all_hits: true`. An invalid field produces HTTP 400 (a rejected request), not an empty
+protein population. WISDOM includes the server's explanation and the exact source URL/key in the
+failure log instead of silently skipping that source. LambdaForge handles transient network failures,
+HTTP 408/425/429 and server errors with at most five retries after the initial request, a 90-second
+JSON request timeout and exponential waits starting at two seconds. Permanent HTTP 400/422 query
+errors are not repeatedly requested. The native cache checks that JSON responses are valid objects
+before publishing or reusing them; HTML error pages and truncated JSON are rejected. A failure keeps
+valid cache files and completed map checkpoints, but publishes no incomplete evidence inventory.
 
-Default acceptance requires Zn and donor occupancy at least 0.5, at least two selected-copy protein
-N/O/S atoms within 3 Å of Zn, and at least two coordinating residues. Occupancy is the deposited
-fraction of the site represented by that atom. Water and non-protein ligands cannot satisfy this
-protein criterion. There is no Cys/His/Glu/Asp-only positive filter. Sites retain inter-chain partners,
-metal positions, residue identities and donor counts; multiple Zn sites form a union, not a forced
-single site. Gemmi's first conformer is a deterministic simplification, not an alternate-state
-ensemble. Geometry alone cannot resolve oxidation state, protonation, physiological affinity or
-metal specificity. Thresholds must be reviewed for the intended benchmark.
+Discovery retains `raw.jsonl`, `provenance.json`, `rcsb-query.json`, `negative-evidence.jsonl`,
+`negative-discovery.json`, `acquisition.json`, original JSON responses in `sources/`, and every RAW
+deposition in `structures/`. SHA-256 fingerprints identify exact bytes, not biological similarity.
+Coordinates have both compressed transport and uncompressed deposited-byte digests. Source receipts
+give the URL and first observation time within the acquisition; they do not claim the server's release
+date or the time an upstream cache originally downloaded a file. Versions present in original responses
+remain available there. Selection never downloads a current RCSB revision to replace this snapshot.
 
-MMseqs2 and Foldseek operate on the **complete parseable RAW population**, including scientific
-rejects. Their thresholded pairs and exact-sequence/deposition edges form transitive leakage groups
-as in section 3.4; filtering happens afterwards. Global morphology is clustered jointly over quality
-eligible positives **and** negatives. Local phenotypes instead describe each accepted Zn site:
-donor/residue counts, interchain membership, coordination-distance mean/std and N/O/S fractions,
-plus separate Cys/His/Glu/Asp counts. These retain multiplicity: Cys₂His₂ and Cys₁His₃ are different.
-A multisite protein keeps a composition of site labels, not a mean that hides different sites.
-`zinc-sites.jsonl` exposes the assembly/copy, source digest, donor partners, distances, donor-pair
-angles, chemistry, surface support and site phenotype. Counts and angles are structural descriptions,
-not a claim about metal specificity or functional families.
+A native durable checkpoint retains one acquisition session across interrupted Attempts; caches and
+bounded resumable maps restore downloads and completed inspections. A fresh Run starts a fresh session.
+The optional `snapshot_label` is a human name, **not** a cache key. `snapshot_id` derives from the
+scientific policy, raw evidence and source/coordinate content, excluding timestamps, labels and worker
+counts. Changing public content changes the snapshot even with unchanged scientific parameters.
+Changing a human label does not make a different scientific snapshot. Reuse frozen inputs to retain
+a deliberate observation; a resumed Run is not a new acquisition.
 
-Both fits use median/IQR scaling and native LambdaForge HDBSCAN/stability. At least two non-noise
-clusters and minimum cross-grid ARI 0.7 are required for a robust multi-cluster interpretation.
-ARI measures assignment agreement (1 means identical; near 0 is chance-level agreement). All-noise
-agreement is not useful evidence. Stability concerns parameter perturbations, not bootstrap stability.
-`local_phenotype` always means a task's local physical descriptor, never a leakage relation.
+**Reliable negatives can be scarce.** QuickGO provides Gene Ontology (GO) annotations: statements
+about a protein function, their reference and evidence category. A `NOT` annotation explicitly
+denies a function; absence of annotation or deposited Zn does not. Discovery searches exact
+`NOT|enables` annotations for Zn binding (GO:0008270) and metal binding (GO:0046872) by default.
+It accepts only referenced experimental codes EXP, IDA, IPI, IMP, IGI and IEP, excluding inferred
+evidence, contextual extensions and unsupported isoforms (alternative products of the same gene).
+A frozen ontology check verifies the direction of implication: NOT metal binding denies Zn binding,
+but NOT a narrower activity or binding a different metal does not deny all Zn binding.
 
-Before partitioning, Selection samples the same deterministic protein surface boundary used later,
-without computing curvature or spectral operators. It uses the universal reader's atom filtering,
-centered deposited frame and float32 arrays **before** transforming to the selected assembly;
-resampling a rotated assembly would otherwise change voxel selection. With defaults 1 Å resolution, 1.4 Å probe and
-1.4 Å positive donor gap, it counts accessible positive points per site. A coordination-positive
-protein with none is marked `buried_global_only`: it remains scientifically positive but its whole
-leakage group is restricted to train. Here “buried” means unsupported on WISDOM's selected
-protein-only surface, not proven solvent inaccessibility in the complete assembly.
-The final annotation repeats the check; changed sampling
-settings can invalidate a held-out member rather than silently giving it all-negative targets.
+`negative_evidence_go_terms` selects the binding functions whose NOT annotations are sought; the terms
+themselves are not negative. The reviewed broader cation/ion-binding ancestors GO:0043169/GO:0043167
+are optional. Reports distinguish direct Zn NOT, broader metal NOT, cation NOT and ion NOT.
+UniProt supplies the canonical full protein sequence and PDB cross-references. The complete declared
+polymer sequence must match **exactly**; similar sequences, tags, mutations or truncations do not
+inherit an assay. Experimental positive/negative contradictions are quarantined. Selection then
+rechecks sequence, occupied coordination and even ambiguous Zn contacts in the exact frozen assembly.
+Multiple structures of one subject do not create multiple independent negative experiments.
 
-Selection keeps reliable negatives and distributes the requested positive quota across leakage
-groups, phenotypes, sources, experimental methods and available families/coordination signatures.
-`positive_policy: diverse_quota` honors `positive_negative_ratio` when support permits;
-`positive_policy: all` keeps every eligible positive and reports the resulting ratio instead of
-claiming balance. Frozen optional `functional_metadata` JSONL records require `identifier`,
-`sequence_sha256`, `source`, `version`, and may add `uniprot`, `pfam`, `interpro`, `cath`, `ec` or
-`family`. Their exact sequence/release and input digest are checked; these annotations neither
-change labels nor create leakage edges. Live annotation services are not queried automatically. Optional `site_metadata` separately links
-reviewed frozen metal-site exports: each JSONL record needs `identifier`, `site_id`,
-`structure_sha256`, `source`, `version`, `external_id`, optionally `family`/`reference`. Unknown
-sites or different coordinate bytes fail; metadata cannot override donor acceptance. This supports
-researcher-mapped [ZincBind database exports](https://zincbind.net/help/) and
-[MetalPDB site exports](https://metalpdb.cerm.unifi.it/downloadMetalSites), not an automatic live
-adapter or new evidence for negative labels.
-`evaluate_shortcuts: true` fits a simple size/resolution/morphology/source classifier on train and
-reports validation performance only. A high score warns that non-binding covariates can predict the
-label; it is not evidence of biochemical understanding. Insufficient support is unavailable. Group-wise splits use 70/15/15% by default; exact balancing can be
-limited by indivisible groups and is reported, not claimed. Dilutions reduce train only, after final
-groups exist, and preserve validation/test. `report.md`, `audit.json`, `split-counts.csv`, pair tables,
-labelled TXT, `selection.jsonl` and `dilutions.json` expose these decisions. `diversity.md` explains
-class-count/group-tail plots, source and chemistry coverage, and standardized mean differences
-(SMD) for size, resolution and morphology. SMD compares the class means in pooled standard-deviation
-units; |SMD|≥0.5 flags a possible shortcut, not statistical significance. Missing/constant support is
-unavailable, not zero. Functional-family annotations are reported only when supplied; leakage groups
-are not biological families. A labelled TXT alone cannot
-restore assembly/contact provenance. Preprocessing must not rediscover or repartition from it.
+No negative mapping stops Discovery before the costly positive scan; too few independent groups
+can subsequently block both-class splits. This is an honest limitation, not a reason to invent
+absence-based controls. MetalPDB and ZincBind do not provide whole-protein negatives merely by listing
+coordinating sites. The historical SAGLZn-II project informs chemical hypotheses, not label acquisition
+or random splits. An optional reviewed `negative_evidence` JSONL overrides the automatic search:
+records need identifier, sequence, label 0, assembly/copy, origin and `label_evidence` with scope
+`zinc_binding`, reference and exact `sequence_sha256`. Evidence is either
+`experimental_non_binding` with an assay, or `curated_not_annotation` with reviewed term, NOT
+qualifier and experimental code. Its experimental conditions remain a limitation.
 
-The Zn local reference measures the smallest **coordinating-protein-atom surface gap**: the Euclidean
-point-to-donor-center distance minus that donor's van der Waals radius. All relevant donor radii are
-considered when taking the minimum. The positive region is the union across verified sites. Defaults
-mark gaps ≤1.4 Å positive, ≥3 Å negative and intermediate gaps ambiguous; a cosine transition supplies
-soft labels. A separate `zinc_gap` uses Zn-center distance minus the diagnostic radius 1.39 Å; it is
-not the primary target. Annotation schema 2 additionally stores diagnostic Zn-center hard/soft/mask
-and sensitivity channels, validated separately; missing metal coordinates in negatives remain
-unavailable for this diagnostic. Sensitivities at 1/1.4/2 Å quantify cutoff dependence without changing the base
-geometry. These are proximity references, not experimentally measured surface binding probabilities.
+**Offline selection and coverage.** Acceptance defaults to occupied metal/donors >=0.5, at least
+two selected-copy protein N/O/S donor atoms within 3 Å of Zn, from at least two distinct residues.
+Occupancy is the deposited fraction represented at an atom position. Water and non-protein ligands
+cannot satisfy these minima. The first Gemmi conformer is used; this geometric policy does not model
+protonation, affinity or physiological specificity. It is not restricted to Cys/His/Glu/Asp.
+A site records donors, residue multiplicities, elements, distances, occupancies, donor-pair angles,
+chain partners and assembly/copy. Multiple accepted Zn sites remain separate in `zinc-sites.jsonl`.
 
-Actual Zn coordinates appear only in evidence and evaluation sidecars. They never enter the universal
-NPZ or model input. A positive with no positive reference point is unavailable, not all-negative:
-it may remain train/global-only, but blocks publication if selected for validation/test. No filters
-on convenient positive area or fragment count are used. `ZincValidation` audits source bytes, chain
-sequence, reproducible coordination, complete universal arrays, sidecar alignment, split/group
-consistency and both-class support. A later explicit-field augmentation can serve either task.
-The validator also reports source/phenotype/family coverage, covariate SMD and rare coordination
-chemistry on verified members. Surface-point counts outside the 1.5-IQR fence (quartiles extended
-by 1.5 times their separation) and local-positive point fractions ≥0.5 prompt inspection, not
-exclusion. These are descriptive flags, not physical-invalidity tests; the point fraction is not an
-area-weighted estimate. Missing local references remain unavailable, and report support is explicit.
-No real Zn benchmark or Zn performance result has been produced by this implementation change.
+Site confidence tiers are transparent review descriptions, not binding probabilities:
+`structural_basic` satisfies acceptance; `structural_strong` additionally needs at least four local
+donors, three residues, all local donor/metal occupancies >=0.8 and maximum local distance <=2.8 Å.
+`externally_supported` requires a reviewed exact source/site match. A sensitivity grid varies
+cutoffs 2.8/3/3.2 Å, donor minima 2/3/4 and residue minima 1/2/3 while fixing assemblies and occupancy.
+It counts surviving/lost/new sites, **without** changing labels, rebuilding datasets or resplitting.
+Strong variation exposes dependence on the operational definition, not automatically bad data.
+
+Full RAW sequence and structure evidence is computed with MMseqs2/Foldseek before filtering.
+Thresholds remain identity .30, bidirectional sequence coverage .80, E-value <=1e-3; structural
+probability .90, bidirectional TM-score .75, coverage .80 and E-value <=1e-3. Transitive identity,
+sequence, structure and same-deposition edges define indivisible leakage groups: A-B and B-C keep
+A,B,C together even if B is later excluded. They express dependency, **not functional families**.
+Physical phenotypes separately describe global morphology in both classes and local geometry of
+individual positive sites. Median/IQR scaling and LF HDBSCAN/stability retain noise explicitly;
+ARI >=.7 plus at least two non-noise clusters is required for a robust grid solution. ARI measures
+assignment agreement (1 identical, near 0 chance); all-noise agreement is not a meaningful cluster.
+The parameter-grid check does not replace repeated population resampling.
+
+Default `positive_policy: all` keeps all eligible positives and all reliable negatives. Imbalance is
+allowed: 1:1 is not scientifically preferable. An explicit `diverse_quota` uses
+`positive_negative_ratio` and prioritizes groups, phenotypes, origins, coordination signatures,
+methods and available Pfam/InterPro/EC annotations. The report compares **eligible versus selected**
+coverage before judging diversity loss. Whole leakage groups remain in one split; default fractions
+are 70/15/15%. Dilutions are deterministic, nested and train-only; validation and test stay fixed.
+
+Discovery automatically freezes descriptive RCSB entity annotations: UniProt links, Pfam/InterPro
+domains, CATH structural classifications and taxonomic identifiers when available. A domain is a
+recurring sequence/structure part; these annotations describe coverage, not labels or input features.
+Additional UniProt annotations and enzyme-function EC identifiers require an exact full-sequence match.
+Missing annotations stay missing, not an invented “unknown family”. Optional frozen
+`functional_metadata` can enrich these records using identifier/sequence digest/source/version.
+MetalPDB has a documented API and ZincBind publishes database access, but their site IDs alone do
+not establish an identical assembly/copy/coordinate revision. Automatic exact-site corroboration is
+therefore not claimed. Reviewed `site_metadata` records require identifier, site_id, structure digest,
+source, version and external_id; unknown sites or changed bytes fail, and missing support is neutral.
+
+**Read the construction report.** `design/report.md` explains the observed values point by point.
+`coverage.csv` and `benchmark.json` expose positive/negative funnels, primary exclusions and
+retention percentages only between equal units: entries, annotations, subjects, chains, sequences
+and groups must not be confused. Primary reasons partition excluded chains; additional reasons
+can overlap. The report also covers rare annotation categories supported by only one independent
+group, categories confined to train/held-out, interchain sites, local support, chemistry,
+threshold sensitivity and eligible/selected representation. `benchmark.json` also records each
+split's class-specific annotations and missing counts, separating family members from independent
+groups. `audit.json`, `leakage.json`,
+pair tables, labelled TXT and `dilutions.json` retain the decisions.
+
+`diversity.svg` compares split class counts and the ranked RAW group-size tail. Many members of
+one group are not many independent experiments. `diversity.md` explains standardized mean differences
+(SMD): a class-mean difference divided by the pooled standard deviation; zero means similar means,
+not identical distributions, and |SMD|>=0.5 is a review flag rather than a significance test.
+Missing or constant support is unavailable, not zero. Acquisition bias is described separately by
+origin, method, year and resolution. With `evaluate_shortcuts: true` (default), a small logistic
+classifier uses only sequence length, normalized radius of gyration, aspect ratio and packing
+density, fits train and reports validation AUROC/AUPRC/balanced accuracy. It excludes acquisition
+fields and test. High discrimination warns of a shape shortcut; AUPRC's no-skill reference is the
+validation positive fraction, not necessarily 0.5.
+
+**Local reference and immutable publication.** The reference is the union of surface neighborhoods
+of verified coordinating protein atoms. The signed gap is point-to-donor-center distance minus that
+donor's van der Waals radius, taking the minimum over all relevant donors. Gaps <=1.4 Å are positive,
+>=3 Å negative; intermediate values are ambiguous with cosine soft labels. Diagnostic Zn-center
+channels use center distance minus 1.39 Å, separately from the primary donor target. Sensitivity gaps
+1/1.4/2 Å are stored in sidecars; actual Zn never enters the universal NPZ or predictor input.
+These are proximity references, not measured binding probabilities.
+
+Before splitting, the same 1 Å surface spacing, 1.4 Å probe and 1.4 Å donor gap check local support.
+A positive with no supported point remains positive but `buried_global_only`: its entire group is
+train-only. “Buried” here refers to WISDOM's protein-only surface, not complete-assembly solvent
+accessibility. Final annotation repeats the check; changed sampling cannot silently assign
+all-negative local GT to a held-out positive. Validation checks exact sources, sequences,
+coordination, universal arrays, sidecar alignment, groups, splits and both-class support independently
+of LF's byte-integrity checks. PASS means those contracts hold, not biological truth or model success.
+
+**Resume or run only one phase.** To reuse RAW, set discover's `skip: true` and uncomment
+`existing_raw: {file: ../../../data/zinc/raw}`. To reuse a design, remove/comment discover, set
+select's `skip: true`, comment `raw_path` and uncomment `existing_design`.
+For standalone Selection, keep only select and bind `raw_path` to the frozen raw.jsonl with its
+adjacent provenance/structures. For standalone Preprocessing, keep only preprocess and bind
+`design: {file: ../../../data/zinc/design}`. For validation/visualization only, keep those Works
+and replace their upstream bindings with `{dataset: wisdom-zinc@1}`. A skipped Preprocessing does
+**not** publish a dataset. TXT alone cannot reconstruct assembly/site evidence. Native checkpoints
+retain successful protein geometry after interruption; intended new scientific content needs a new
+immutable `dataset_version`. Failed acquisition reports remain managed artifacts; external copies
+are published only after success.
+
+The implementation and offline tests do not establish a real Zn dataset's size or biological
+performance. Public evidence may remain too small or biased, and automatic metadata cannot repair
+that limitation.
 
 ## 4. Structural preprocessing
 
@@ -3081,8 +3078,8 @@ pre-freeze sanity check before any formal version is assigned to a pooling study
 **Current experiment order.** The short filenames run from `wisdom_v1a.yaml` to
 `wisdom_v10.yaml`. These labels order the construction campaign; they are not ten validated model
 generations. V1a–V1c diagnose seed variance, V2 selects initialization, V3 selects optimizer
-stability, V4 performs broad core HPO, V5 checks pooling, V6a–V6c screen weak-loss families, and
-V6d tests their joint contribution. V7 compares heads, V8 tests isolated spikes, V9 performs a
+stability, V4 performs broad core HPO, V5 checks pooling and evidence refinement, and V6 screens
+seven isolated weak regularizers before a deferred combination. V7 compares heads, V8 tests isolated spikes, V9 performs a
 small final retune, and V10 confirms the frozen ledger on fresh seeds.
 [`experiments/README.md`](experiments/README.md) gives the authoritative order. Formal scientific
 WISDOM generations in the roadmap remain distinct from these compact experiment labels.
@@ -3347,8 +3344,8 @@ seed variation, G, S, coupling, regret, faithfulness and runtime (Section 5.5 de
 A family is dominated only when another is meaningfully no worse on the reviewed dimensions and
 better on at least one, with uncertainty considered. Keep roughly **2–4 nondominated families**;
 do not collapse the result into a single winner. Four seeds are a controlled comparison, not a
-guarantee of statistical certainty. V6's loss spaces are unchanged; adapting V6 to that shortlist
-is a subsequent task. A benefit at the new largest beta, alpha, power or length remains an open
+guarantee of statistical certainty. V6 continues the closed V5c MAX/LSE/Attention comparison
+with isolated weak priors and controlled Heat interactions (Section 5.5). A benefit at the largest beta, alpha, power or length remains an open
 range question, not a reason to change this registered grid mid-study.
 
 Deletion/insertion faithfulness is unavailable for both regional families because removing points
@@ -3375,8 +3372,8 @@ The flow is embeddings H → local head → raw logits r → refiner → refined
 pooling → protein BCE. A logit is a real score whose sigmoid is a probability. BCE gradients
 cross the refiner and reach the local head/backbone, even for parameterless operators. Attention
 still derives its weights from H; only the values it aggregates are refined. DiffusionNet diffuses
-embeddings; V5c refines scalar evidence; V6 smoothness losses penalize the field through a loss.
-These are three different mechanisms. V5c does not activate V6 penalties.
+embeddings; V5c refines scalar evidence; V6 tests isolated label-derived and geometric priors.
+V6f/g cross smoothness losses with Heat on/off; V5c adds no weak losses.
 
 **Borrowed geometric context.** Existing positions x_i in Å, unit normals n_i, represented areas
 a_i, curvatures, embeddings and spectral operators enter an immutable context without targets.
@@ -3597,8 +3594,8 @@ explicitly; automatic compatibility would hide a scientific change.
 | `V2`–`V3` | Select initialization and optimizer stability independently so both winners compose. |
 | `wisdom_v4.yaml` | Search the complete fixed-MAX core widths, depths, neighbourhoods and regularization. |
 | `wisdom_v5a.yaml`, `wisdom_v5b.yaml` | Characterize fixed/adaptive pooling families and retain a shortlist before weak local supervision. |
-| `V6a`–`V6c` | Add weak-loss families sequentially and only when the previous decision justifies them. |
-| `wisdom_v6d.yaml` | Tune the joint contribution of credible negative, regional, and smoothing losses. |
+| `V6a`–`V6g` | Screen one weak regularizer per Study; TV/Dirichlet cross Heat on/off. |
+| `wisdom_v6h.yaml` | Deferred template for individually justified regularizer interactions. |
 | `V7`–`V8` | Compare head relationships and then isolated architecture spikes. |
 | `V9`–`V10` | Retune sensitive numeric values, then confirm the frozen ledger on fresh seeds. |
 | `interpretability_sparse_concepts.yaml` | Analyze one explicit frozen checkpoint post hoc. |
@@ -3614,12 +3611,13 @@ V3 tests `ema_0999`. The older combined `stability_profile` is accepted only to 
 archived YAMLs and cannot be mixed with either new selector.
 
 The baseline uses all ten ordered seeds `[4,7,32,54,65,94,109,124,142,167]`; none may be pruned.
-Finite one-factor comparisons (V2, V3, V5, V6a–V6c, V7, and V8) use LambdaForge 0.15's explicit
+Finite comparisons (V2, V3, V5, V6a–V6g, V7, and V8) use LambdaForge's explicit
 `sweep.space`. Every authored cell is mandatory. The controller starts every cell with the same
 project seed, opens another complete shared-seed block only after the previous block finishes, and
-stops through an anytime-valid paired analysis of the authored `objective.practical_margin`. V5a/V5b
-instead fix exactly four historical paired seeds per candidate, without automatic extension. Fixed
-sweeps never use HPO curve pruning, per-cell seed racing, or winner-only confirmation. V4, V6d, and
+stops through an anytime-valid paired analysis of the authored `objective.practical_margin` when seeds
+are automatic. V5a/V5b/V5c and all seven isolated V6 sweeps instead fix exactly four historical paired seeds
+per candidate, without automatic extension. Fixed sweeps never use HPO curve pruning, per-cell seed
+racing, or winner-only confirmation. V4 and
 V9 instead use `search.goal: optimize`: LambdaForge automatically chooses proposals, replication,
 curve pruning, convergence, and disjoint confirmation seeds because their purpose is efficient
 multidimensional optimization. In both modes, omitted execution caps let the adaptive resource
@@ -3633,41 +3631,194 @@ the current execution path requires it. Run
 seeds, and V10 keeps a deliberately fresh confirmation set, because those identities are part of
 their scientific question rather than scheduling detail.
 
-The baseline sets `negative_surface_lambda: 0.0`. A later weak-loss screen may make it positive.
-For each globally negative training protein `i`, let `l_ip` be the local logit and `a_ip` its
-surface-area weight normalized so the protein's weights sum to one. The added loss is
+V6 keeps the actual V5c backbone and baseline policies. It tests seven weak-loss families
+independently with retained MAX, area-LSE beta .25 and simple area-Attention width256.
+V6a/c/d/f preserve their original grids plus exact selective extensions; V6b/e/g are unchanged.
+V6h now explores explicit mixtures, with missing V6g evidence clearly marked provisional.
+GPU allocations are operational values read from each YAML, not scientific backbone factors.
+The same source and content requirements are in
+[the V6 guide](experiments/v6/README.md).
+
+| Study / regularizer | Hypothesis / pathology addressed | Active parameters | Heat interaction | Trials / Runs |
+|---|---|---|---|---:|
+| V6a negative | Remove spurious positive mass/peaks on negative proteins | original grid plus selective LSE/Attention high-lambda points | fixed 6 Å | 23 / 92 |
+| V6b existence (frozen) | Ensure a positive protein has at least one positive peak | lambda 0, .03, .10, .30 | fixed 6 Å | 12 / 48 |
+| V6c regional positive | Require a positive region, not only a point peak | original grid plus selective LSE/MAX extensions; length 2.5 Å | extra diffusion after Heat6 | 19 / 76 |
+| V6d regional ranking | Separate positive/negative regional maxima | original grid plus selective LSE/Attention extensions; length 2.5 Å; margin .5 | regional scoring after Heat6 | 20 / 80 |
+| V6e cardinality | Avoid insufficient positive probability mass; test task-prior dependence | lambda 0, .03, .10, .30; active lower mass .005, .010, .020; no upper bound | fixed 6 Å | 30 / 120 |
+| V6f TV | Penalize local jumps without necessarily erasing boundaries | original grid plus LSE/none and MAX/Heat extensions | none / Heat6 | 31 / 124 |
+| V6g Dirichlet | Penalize high-frequency probability variation | lambda 0, .001, .010, .050, .100 | none / Heat6 | 30 / 120 |
+| V6h exploratory mixtures | Separate interactions, redundancy and all-family stress | 18 explicit combinations per pooling; provisional anchors | fixed 6 Å; TV/Dirichlet exclusive | 54 / 216 |
+
+The current isolated YAMLs declare **165 Trials / 660 Runs across V6a–V6g**. This includes the
+30 / 120 selective a/c/d/f additions and V6g's already authored five-value grid (30 / 120).
+These are design counts, not evidence of completed Runs. V6h adds 54 / 216 separately.
+Cardinality's zero coefficient has no active lower-mass child: one control, not three.
+Heat length is absent from identity Trials. Native `when` conditions also omit inactive pooler fields.
+Full sweeps disable adaptive pruning and seed racing, but G-based patience still stops a completed
+Run's optimization. A 168-hour ceiling can censor coverage; verify all required Runs before
+declaring the sweep complete.
+
+
+A protein is a bag of surface points: training knows its binary label, not which points bind DNA.
+Let B+ and B− be the positive and negative proteins in a batch; P_b their point sets;
+l_p the **operational logit** at point p, q_p = sigmoid(l_p) its probability, and
+a_p its represented area divided by the total represented area of its own protein, so the
+a_p sum to one per protein. Define softplus(x) = log(1 + exp(x)) and [x]+ = max(0,x).
+The identical operational l enters pooling and every weak prior; raw head logits remain diagnostics.
+Each class-specific term is differentiable zero if its required class is missing.
+
+The negative penalty averages area-weighted negative binary cross-entropy over negative proteins.
+Existence instead requires one positive peak in each positive protein:
 
 ```math
-L_{neg}=\frac{1}{|B_-|}\sum_{i\in B_-}\sum_p a_{ip}\,\operatorname{softplus}(l_{ip}).
+L_{neg}=\frac{1}{|B_-|}\sum_{b\in B_-}\sum_{p\in P_b}a_p\operatorname{softplus}(l_p),
+\qquad
+L_{exist}=\frac{1}{|B_+|}\sum_{b\in B_+}\operatorname{softplus}(-\max_{p\in P_b}l_p).
 ```
 
-`softplus(l)=-log(sigmoid(-l))` is binary cross-entropy for a negative point. The equation uses no
-surface GT: it follows from the curated negative-bag definition. Positive proteins are excluded
-because their weak label says only that at least one positive region exists, not which points are
-positive. The planned first screen uses weights 0.1, 0.3, and 1.0 only after pooling is fixed.
+With MAX pooling, existence duplicates positive global BCE: it changes relative class weight,
+not localization constraints. Area-LSE/Attention do not have that identity. Strong negative pressure
+can remove real positive evidence indirectly through shared parameters, so inspect both classes.
 
-V6b separately tests positive existence, existence after fixed intrinsic diffusion, and ranking of
-positive regions above negative ones. V6c separately tests an expected positive-area interval,
-edgewise total variation, and intrinsic Dirichlet energy. These are weak priors: they use protein
-labels and surface geometry, never the local DNA-contact ground truth. Testing them separately first
-shows which assumption helps and prevents one coefficient from hiding another.
-
-V6d is run only if one term from each family is credible. Its authored default combines the negative
-term above, regional positive existence, and Dirichlet smoothing. Let `L_BCE` be protein-level binary
-cross-entropy, `L_reg` require the largest diffused logit in a positive protein to be positive, and
-`L_D` be the normalized spectral energy of its probability map. The optimized training loss is
+**Regional terms.** Let Phi_b be stored mass-orthonormal surface modes, M_b the diagonal represented
+mass, and Lambda_b their nonnegative inverse-square-Å eigenvalues. Regional diffusion uses the
+truncated stored basis, not a new preprocessing representation. At length r = 2.5 Å it produces
+u_b = Phi_b exp(−r² Lambda_b) Phi_bᵀ M_b l_b. Let R_b = max(u_b).
+The regional-positive loss is existence on these scores; ranking compares **every positive-negative
+pair in the batch**, with fixed logit margin delta = .5:
 
 ```math
-L_{V6d}=L_{BCE}+\lambda_{neg}L_{neg}+\lambda_{reg}L_{reg}
-         +\lambda_D L_D+\lambda_{gate}L_{gate}.
+L_{regional+}=\frac{1}{|B_+|}\sum_{b\in B_+}\operatorname{softplus}(-R_b),
+\qquad
+L_{rank}=\frac{1}{|B_+||B_-|}\sum_{b\in B_+}\sum_{c\in B_-}[\delta-R_b+R_c]_+.
 ```
 
-The candidate generator draws from the Cartesian product of three values for each of `lambda_neg`,
-`lambda_reg`, and `lambda_D`. This is an interaction HPO rather than a one-factor sweep, so
-LambdaForge allocates evidence adaptively, stops uncompetitive learning curves, and confirms the
-best supported mixtures on its disjoint confirmation-seed stream. If V6b or V6c selects another
-family, its existing `*_lambda` key replaces the regional or Dirichlet key in
-`wisdom_v6d.yaml`; TV and Dirichlet are never enabled together.
+Ranking is zero in single-class batches. Regional diffusion occurs after operational Heat6 in c/d;
+its marginal contribution may be redundant. The additional spectral filter is not a second
+learned encoder and is not a spatially annotated target.
+
+**Cardinality.** The expected positive mass m_b = sum(a_p q_p) is an area-weighted probability,
+not the fraction exceeding a hard threshold. With lower bound mu, no upper bound, the current loss is:
+
+```math
+L_{card}=\frac{1}{|B_+|}\sum_{b\in B_+}[\mu-m_b]_+^2,
+\qquad m_b=\sum_{p\in P_b}a_p q_p.
+```
+
+It is zero once the lower bound is satisfied. At the largest .02 lower bound, its unweighted maximum
+is only .0004, so at lambda .30 its contribution is at most .00012. These conservative settings may
+often be inactive or weak; inspect recorded cardinality loss and mass before interpreting a null
+effect as proof that the idea fails. No change of scale or upper bound is hidden in this screen.
+
+**TV is not Heat.** E is the multiset of valid directed entries in the stored bounded surface
+neighbour table. TV averages absolute probability differences, without area or distance weighting:
+
+```math
+L_{TV}=\frac{1}{|E|}\sum_{(i,j)\in E}|q_i-q_j|.
+```
+
+An empty table contributes differentiable zero. This L1 penalty may favor homogeneous regions
+while permitting sharper boundaries than quadratic smoothing, but offers no guarantee:
+small real hotspots can disappear. Its batch average weights proteins according to their valid
+neighbour counts, unlike the equal-protein averages above.
+
+**Dirichlet is not Heat either.** For each protein compute spectral coefficients
+c_b = Phi_bᵀ M_b q_b. The current normalized energy, averaged equally over proteins, is:
+
+```math
+L_D=\frac{1}{B}\sum_{b=1}^{B}
+\frac{\sum_k\lambda_{bk}c_{bk}^2}
+     {\max(\sum_k c_{bk}^2,\epsilon)}.
+```
+
+B is batch size, k indexes stored modes, and epsilon is FP32 machine epsilon. This is a spectral
+Rayleigh quotient in inverse-square Å, not an unnormalized graph energy. Large eigenvalues measure
+rapid surface variation. A constant has approximately zero energy if the constant mode is faithfully
+represented. Truncation cannot see frequencies above the stored modes; numerical operators can
+leave small residuals. Zero probability power is safely bounded by epsilon.
+
+Heat explicitly transforms **logits in the forward pass** using exp(−r² Lambda), so pooling sees
+the filtered map. TV and Dirichlet instead penalize **probabilities during training**; they do not
+install a final forward filter. In f/g compare, within each pooling and seed: none/lambda0,
+Heat6/lambda0, none/active loss, Heat6/active loss. These four states test replacement, redundancy,
+complementarity and over-smoothing. Raw S, operational S and their unclipped difference reveal
+whether the loss improves evidence before refinement or only its filtered map.
+
+Let L_BCE be global protein BCE, L_gate the existing semantic-gate penalty, and F the seven families
+above. Their exact training composition is:
+
+```math
+L=L_{BCE}+0.04L_{gate}+\sum_{f\in F}\lambda_f L_f.
+```
+
+In a–g only one lambda family varies; the others are zero. TV and Dirichlet may never both be active.
+Judge each regularizer using G, operational/raw S, negative mass/peak, top-k recall/enrichment,
+selection regret, global-surface coupling, paired-seed dispersion and cost. Undefined metrics retain
+support counts instead of becoming zero. A high W alone does not justify adding complexity.
+
+
+V6h is now an **exploratory combination screen**, not an empty template or a confirmed final model.
+It declares 18 exact candidates per pooling (54 configurations, 216 Runs), all with Heat 6 Å,
+auxiliary regional length 2.5 Å, ranking margin 0.5 and the unchanged V5c backbone. Native
+`sweep.candidates` executes only the listed points; the parameter domains do not create a large
+Cartesian product. YAML anchors reuse zero-prior controls without adding a scientific parameter.
+
+The coefficients below were authored after reading the TFM report's completed V6a–V6f summaries
+and experimental tracking on 16 October 2026. They are starting hypotheses, not jointly optimized
+weights. No V6g or newly extended-range result was available in that report.
+
+| Pooling | Negative N | Point existence E | Regional existence P | Ranking R | Minimum mass C | TV T | Dirichlet D |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| MAX | 0.3 | 0.03 | 0.3 | 0.1 | 0.03 | 0.005 | 0.001 |
+| Area LSE, beta 0.25 | 1 | 0.03 | 0.1 | 0.03 | 0.1 | 0.005 | 0.001 |
+| Area Attention, width 256 | 0.03 | 0.03 | 0.03 | 0.03 | 0.03 | 0.005 | 0.001 |
+
+Every active C uses a lower expected probability-mass bound of 0.02 and no upper bound. This is
+not a measured interface-area target. The coefficients multiply differently scaled loss terms;
+equal numerical coefficients do not imply equal gradient strength.
+
+Anchors differ between poolings: compare mixture effects against that pooling's own control.
+A difference between active MAX and active LSE does not isolate the pooling mechanism alone,
+because the loss coefficients can also differ. The zero-prior controls retain that clean comparison.
+
+Each pooling has its own zero control and seven isolated terms. The N/E/R core contains every
+on/off state: control, N, E, R, N+E, N+R, E+R and N+E+R. Additional candidates replace E with P,
+add C, T or D individually to the core, and stack N+E+P+R+C with either T or D.
+These last two are stress tests of all compatible families, not recommended production models.
+TV and Dirichlet are never enabled together. The E-to-P replacement helps identify redundancy
+between two existence constraints instead of attributing their sum to a new spatial mechanism.
+
+Let A and B denote two enabled priors at their fixed coefficients. For a chosen score Q and a
+fixed pooling/seed, compare the pair using
+`interaction = Q(A+B) - Q(A) - Q(B) + Q(control)`. Positive values mean more improvement than
+the sum of the individual changes on that score's scale; negative values mean less.
+For example, opposite changes in G and S are a trade-off, not universal synergy.
+The same-seed single-term controls must come from V6h, not be pooled with historical Runs whose
+code or optimization trajectory differs.
+
+Evidence is uneven: MAX existence 0.03 and ranking 0.1 improved local metrics; LSE negative 1
+improved global ranking and reduced negative mass; LSE/Heat TV 0.005 improved operational S
+without improving mean raw S or cleaning negatives. Attention's negative coefficient is kept at
+0.03 because larger observed values damaged global ranking. Other coefficients are conservative
+sensitivity probes, not claimed winners. In particular, C was often inactive in V6e and D=0.001
+is provisional until V6g is reviewed. Inspect recorded weak-loss contributions before interpreting
+a cardinality gain; a zero contribution does not demonstrate an effective cardinality mechanism.
+Mixing both smoothness penalties is prohibited by the existing implementation.
+
+Checkpoint selection remains G-only; test stays sealed. Inspect operational/raw S, G, threshold-free
+protein AUPRC/AUROC, negative mass/peak, enrichment, regret and time trajectories, not W or
+accuracy at 0.5 alone. The historical seeds 4, 7, 32 and 54 support paired development comparisons,
+not independent confirmation. An adopted mixture still needs fresh seeds and a separate frozen
+confirmation. This YAML neither launches that confirmation nor claims the missing V6g evidence.
+
+The review YAMLs forward saved checkpoints without fitting. They select a recorded source seed
+(default authored seed 4), automatic contrasting proteins and optional parameter filters; numerical
+metrics retain complete split/point coverage. Configure learned channels with `content: features`.
+Automatic cases can differ between configurations: the gallery compares available maps, not an
+implicitly matched complete panel. Presentation byte/point limits remain separate from scientific
+evaluation; missing checkpoints require native recovery, not hidden retraining. See Section 5.10
+of the root README for current review syntax and LF report-asset limitations.
 
 WISDOM is intended to produce a meaningful surface map, not merely a correct protein label. The
 development protocol therefore records three distinct quantities. `G` measures protein
@@ -3914,7 +4065,7 @@ studies keep them off to avoid hundreds of documents. Numerical surface metrics 
 ```yaml
 visualization:                      # Presentation only; no scientific hyperparameter changes.
   mode: report                      # Embedded LF report; none disables viewers completely.
-  content: predictions              # Probability, raw logits and soft/hard GT; full adds structure.
+  content: predictions              # Probability/logits/GT; features adds learned channels; full adds structure.
   maximum_points: 2000               # Display only; all points still contribute to metrics.
   maximum_proteins: 4                # Balanced sample per evaluated split; zero requests all.
   report_budget_mib: 4.0             # Per-Run document budget; LF also caps the whole report.
@@ -3923,7 +4074,7 @@ visualization:                      # Presentation only; no scientific hyperpara
 
 All mapping defaults are: `mode=none`, `content=predictions`, `maximum_points=2000`,
 `maximum_proteins=12`, `report_budget_mib=4.0`, `identifiers=()`, `threshold=0.5`,
-`embed_report=true`. Modes are `none/report/viewer/full`; contents are `predictions/full`.
+`embed_report=true`. Modes are `none/report/viewer/full`; contents are `predictions/features/full`.
 Point limits must be positive, protein limits non-negative, budgets in (0,16] MiB, and thresholds
 in [0,1]. Supplied entries override equivalent legacy `surface_*` arguments, which remain callable
 for compatibility. Do not mix both forms in new YAMLs.
@@ -3932,7 +4083,8 @@ for compatibility. Do not mix both forms in new YAMLs.
 protein pages. `viewer` also writes standalone HTML/PLY; `full` additionally writes
 `surface_prediction_probability[M]`, `surface_prediction_hard[M]`, the threshold and best epoch
 in one NPZ per evaluated protein. `content: predictions` includes only prediction, raw logits
-and available GT; `content: full` restores the structural inspector. See Section 5.9 for display
+and available GT; `content: features` adds sampled learned channels without atoms/mesh;
+`content: full` restores the structural inspector. See Section 5.9 for display
 sampling, byte omissions and limitations.
 
 With `evaluate_test: false`, reports use validation only. Test access remains explicit and follows
@@ -4068,18 +4220,19 @@ lf run experiments/v5/wisdom_v5b.yaml
 lf results analyze EXECUTION_ID
 ```
 
-Continue only after each decision gate passes. The weak-loss stages are sequential and conditional;
-heads, architecture, final retuning and uncensored confirmation follow:
+V6 uses the frozen V5c parent. V6h now screens provisional mixtures after reviewing V6a–V6f;
+V6g remains pending. Head/architecture studies follow a reviewed, confirmed combination:
 
 ```bash
 lf run experiments/v6/wisdom_v6a.yaml
-lf run experiments/v6/wisdom_v6b.yaml       # positive existence; only after useful V6a signal
-lf run experiments/v6/wisdom_v6b2.yaml      # regional existence, independently
-lf run experiments/v6/wisdom_v6b3.yaml      # regional ranking, independently
-lf run experiments/v6/wisdom_v6c.yaml       # cardinality; only for a diagnosed remaining failure
-lf run experiments/v6/wisdom_v6c2.yaml      # total variation, independently
-lf run experiments/v6/wisdom_v6c3.yaml      # Dirichlet energy, independently
-lf run experiments/v6/wisdom_v6d.yaml       # only if one term from each family is credible
+lf run experiments/v6/wisdom_v6b.yaml       # existence x pooling; independent zero controls
+lf run experiments/v6/wisdom_v6c.yaml       # regional-positive only
+lf run experiments/v6/wisdom_v6d.yaml       # regional ranking only
+lf run experiments/v6/wisdom_v6e.yaml       # conservative cardinality
+lf run experiments/v6/wisdom_v6f.yaml       # TV x Heat on/off
+lf run experiments/v6/wisdom_v6g.yaml       # Dirichlet x Heat on/off
+lf validate experiments/v6/wisdom_v6h.yaml  # 54 exploratory configurations, not a confirmed winner
+lf run experiments/v6/wisdom_v6h.yaml --dry-run
 lf run experiments/v7/wisdom_v7.yaml
 lf run experiments/v8/wisdom_v8.yaml
 lf run experiments/v9/wisdom_v9.yaml
@@ -4087,7 +4240,7 @@ lf run experiments/v10/wisdom_v10.yaml
 lf results analyze EXECUTION_ID
 ```
 
-Before each downstream launch, copy every reviewed winner into the fields marked `REPLACE`. The
+V6h has a concrete exploratory design; later stages still require reviewed decisions. The
 complete question/prerequisite/decision table is in [`experiments/README.md`](experiments/README.md).
 
 Each completed, non-pruned Training Work writes these explicit outputs beside LambdaForge's normal
@@ -4455,6 +4608,49 @@ parts; [the integration report](docs/WISDOM_RESEARCH_ANALYSIS.md) lists the exac
 
 ### 5.9. Reading protein maps and recovering reports
 
+The gallery follows **protein → configuration → inspector**. Pick a protein to see its maps
+under different poolings and hyperparameters; a configuration menu inside the inspector switches
+between those maps without keeping multiple WebGL renderers alive. The table shows the true label,
+binary prediction, probability and localization AUPRC. Filters combine label, split, seed, binary
+error and a metric threshold. An unavailable AUPRC does not become zero: on an all-negative
+protein there are no positive points to rank, so use probability mass or peak instead.
+Configuration captions use recorded parameters, not opaque Trial numbers. Additional settings,
+metrics and source information remain available in expandable panels, without raw JSON banners.
+
+The same inspector serves preprocessing, training and checkpoint review. Drag a panel's inner edge
+to resize it (or focus that edge and press an arrow key); its close/reopen buttons preserve the
+scene. **Compare GT / prediction** splits the surface into two synchronized-camera views with
+identical point indices. Choose a channel on each side. Color ranges support the stored robust
+range, displayed min–max, 0–1, symmetric or custom bounds. The right panel explains full-resolution
+protein metrics separately from the histogram of the displayed sample. Measuring two surface
+points or atom centers gives their Euclidean distance in ångströms; non-point clicks are ignored.
+
+Use `visualization.content: features` in Training, or `content: features` in a review, for
+prediction/GT plus learned embedding, evidence and explicit-feature channels **actually emitted
+by the checkpoint**. Unlike `full`, this profile omits structural mesh/atom payloads. Each embedding
+channel is one learned coordinate, not a named physical property. Review retains them only for
+selected proteins; if diagnostic selection chooses them after inference, it makes a second frozen
+forward pass over only those missing cases. Metrics still come from the original complete pass.
+An existing `predictions` export cannot recover missing learned features by changing its HTML.
+
+To update an old gallery's interface without inference, create a separate derived file. Provide
+its matching review audit to replace historical Trial captions with recorded configuration names:
+
+```bash
+python -m wisdom.visualization.ProteinReportPage \
+  --source /path/to/protein-report/index.html \
+  --audit /path/to/review-audit.json \
+  --output ./runs/visualizations/v5a/index.html --open
+```
+
+`--open` asks the desktop browser to open the new file; it needs a graphical session. The old
+registered artifact is never overwritten, and a new standalone document does not replace LF's
+historical report automatically. Existing maps and source omissions are preserved. Automatic
+diagnostics can choose different proteins for each configuration; use explicit protein IDs in a
+new frozen-checkpoint review when you need the same panel for every method. A refresh cannot
+reconstruct maps omitted by the original byte budget. Large comparisons may need separate
+explicit configuration filters to fit LF's 16 MiB per-document limit.
+
 An empty gallery does not always mean missing predictions. Read the message:
 
 | Message | Meaning and action |
@@ -4464,6 +4660,13 @@ An empty gallery does not always mean missing predictions. Read the message:
 | Run failed before publication | No complete viewer exists for that Run; recover its original execution through LF |
 | Requested IDs absent | Choose IDs from the evaluated split; pictures do not authorize access to other partitions |
 
+The gallery counts the actual serialized HTML shell, context, omission list and shared library
+before adding viewers. A large review such as V5a's 206 checkpoints therefore stays inside
+`report_maximum_mib` without dropping evaluated models or metrics. Only pictures that do not fit
+are omitted, with their complete identifiers retained in the report summary. Increasing the budget
+is not needed to fix an accounting error. An exceptionally small budget that cannot hold even
+the interface and metadata still fails, reporting required and configured byte counts.
+
 A failed Study can contain successful Runs with reports. Check the source Run and seed: a successful
 seed's gallery is not the failed seed's result. Changing YAML does not rewrite historical HTML.
 
@@ -4471,6 +4674,8 @@ The lightweight inspector displays probability, original logit, threshold-adjust
 and available soft/hard ground truth (GT). A logit is the model's unbounded score before conversion
 to probability; positive logits correspond to probabilities above 0.5. Changing a display threshold
 changes a decision, not the model or scientific metrics. Missing GT remains unavailable.
+Hard GT points outside the sidecar's valid mask are displayed as unavailable, not negative.
+Soft GT remains the continuous distance-based target, including the uncertain hard-label band.
 
 Only display is sampled: at most `maximum_points` evenly spaced original indices are embedded,
 with coordinates/scalars rounded to four decimals. The indices preserve prediction/GT alignment.
@@ -4528,9 +4733,10 @@ lf import ./exports/PRINTED_PACKAGE_DIRECTORY --apply
 lf results list
 ~~~
 
-Set source_execution in experiments/v1/visualization/wisdom_v1a.yaml to the registered ID. Its authored
-seed policy shows best/median/worst together; use mode: median for one typical replication, or all
-for every eligible seed. The exact training DatasetVersion also needs a local LF placement.
+Set `source_execution` in the study's visualization YAML to the registered ID. Choose
+`source_seed` (an existing training seed, not a new training run) and `maximum_proteins`
+(pictures per configuration and partition). Every eligible configuration of that seed is reviewed
+unless you enable `parameter_filter`. The exact training dataset also needs a local LF placement.
 
 ~~~bash
 lf validate experiments/v1/visualization/wisdom_v1a.yaml
@@ -4544,31 +4750,53 @@ Open review.html and choose **WISDOM proteins**. Its review-audit.json and per-m
 retain numerical coverage and the reason each picture was selected. Failed/pruned Runs are excluded,
 not fabricated as zero-score models. A failed Study may still contain successful reviewable Runs.
 
-**Choose what to inspect.** Multiple Trials require an explicit policy: all, explicit indices,
-parameter_filter, best_by_metric, top_k_by_metric, or pareto. Rankings aggregate checkpoint metrics
+**Choose what to inspect.** The simple filter uses actual recorded hyperparameters. Fields within
+one mapping must all match; a list value accepts any listed choice. A list of mappings accepts any
+branch, so MAX need not have an attention-specific parameter:
+
+```yaml
+source_seed: 4  # Inspect this saved training replication; do not fit new weights.
+maximum_proteins: 8  # Automatic contrasting cases per configuration and split.
+parameter_filter:  # Keep either branch; omit this field to review all configurations.
+  - pooling_type: max  # Retain parameter-free MAX.
+  - pooling_type: attention  # Every condition in this branch must match.
+    attention_hidden_dim: [16, 32]  # Either recorded width, not a numerical interval.
+```
+
+Without a filter, no configuration is discarded merely because it scored badly. Advanced
+`trial_selection` policies remain available: all, explicit indices, best_by_metric,
+top_k_by_metric, parameter_filter or pareto. Do not combine them with the simple filter.
+Rankings aggregate checkpoint metrics
 across seeds by median by default; mean is available explicitly. Pareto retains configurations that
 are not worse on every requested metric, exposing global/surface trade-offs rather than substituting
 the composite score. Seed policies include median, worst, best, representative, all and explicit.
 A median seed means an actual central observed replication, not averaged weights.
 
 The historical V5a import has no scored best-model metadata. Its review YAML therefore uses
-`trial_selection: {mode: all}` and `seed_selection: {mode: explicit, seeds: [4]}`: every configuration,
+`source_seed: 4` and no ranking: every configuration,
 one deliberately fixed replication, without claiming a best or median seed. This import has 206
 configurations, so the review performs 206 inference-only evaluations. Use explicit Trial indices
 or the commented parameter filters to reduce cost. Viewer byte limits can omit pictures, not
-numerical evaluation. Pareto and median policies remain commented examples for newer checkpoints
+numerical evaluation. Pareto and median policies require newer checkpoints
 with the required bound metrics; latest Run metrics cannot substitute for them because they may
 describe a different epoch. V5b reviews five V5a-informed learned scalars; fixed/curriculum LSE belongs to V5a.
 Inactive conditional parameters never match active null values. Current V1b and V1c are separate
 single-Work studies, so their RNG controls must not be invented as two Trials of one Study.
 
-For a quick look at three proteins, edit templates/explicit_proteins.yaml: choose a Trial, seed and
-the three exact identifiers. evaluation_scope: explicit filters **before** the model sees a batch.
-Only those proteins are forwarded; aggregate metrics explicitly describe that subset.
-The full default evaluates the entire requested split, then samples contrasting pictures.
-Automatic diagnostic cases include positive localization extremes, global false positives/negatives,
-negative peaks and global/local disagreement. These deliberately unusual cases do not estimate
-average biological accuracy.
+For a quick diagnostic panel, set `maximum_proteins: 3`; no manual protein IDs are needed.
+The full default evaluates the entire requested split, then selects contrasting pictures by
+round-robin across supported categories: best/worst positive localization, false positives/negatives,
+correct negatives with low surface activation, confident correct positives, negative surface peaks,
+and high global confidence with weak localization. Duplicate proteins appear once, with their
+selection reasons shown in the gallery and inspector. The requested count is filled where possible;
+categories without support are absent, not invented. Local rankings use normalized AUPRC only where
+GT makes it defined. These relative extremes do not estimate population-average biological accuracy.
+Different configurations may select different proteins; the gallery compares the configurations
+available for each protein, not an implicitly matched complete panel.
+
+Advanced explicit IDs remain supported through `protein_selection`; `evaluation_scope: explicit`
+forwards only those IDs and labels numerical coverage as partial. The legacy
+`templates/explicit_proteins.yaml` filename now also defaults to automatic selection.
 
 **Move only selected models.** Native product selection creates independent checkpoint copies:
 
@@ -4598,16 +4826,26 @@ Historical checkpoints without such metadata remain reviewable with all/explicit
 policies; latest Run metrics cannot honestly label them “best” or “median”.
 ModelValidation remains a compatibility-only direct portable reader.
 
-Defaults are validation only, test disabled, median seed by wisdom_score, full numerical scope,
-diagnostic pictures (two per category), prediction/logit/GT content, 2,000 display points,
+Work defaults are validation only, test disabled, median seed by wisdom_score when no explicit
+source seed is supplied, full numerical scope, diagnostic pictures without a separate category quota,
+prediction/logit/GT content, 2,000 display points,
 12 viewers per model/split, threshold 0.5, 14 MiB document budget, and no prediction NPZ copies.
-Authored study examples cap viewers at eight. Display caps never reduce metric precision or points;
+Authored study examples instead select saved seed 4 and eight viewers (V5a: twelve), with one protein
+per inference batch to suit smaller local GPUs. They explicitly request one GPU; set `resources.gpu`
+to zero on CPU-only hosts. Display caps never reduce metric precision or points;
 omitted viewers and missing GT are explicit. Test requires allow_test: true and remains descriptive,
 never a new hyperparameter-selection source. Missing checkpoints require native recovery, not
 hidden retraining. Dataset content identity must match even if its placement changes.
 
-**Build requirement.** These APIs are present in the inspected LF main, still numbered 0.17.0 but
-documented as Unreleased. The version string alone is insufficient: verify ProductInput,
+**Pending full-resolution integrated reports.** The YAMLs no longer repeat point/byte caps, but
+their Work defaults (2,000 points and 14 MiB) and LF's mandatory 16 MiB/document and 64 MiB/report
+limits still apply. Removing a YAML field does not remove those restrictions. Full-resolution,
+no-omission integrated galleries need a public LF managed-asset API for lazy loading. The researcher
+chose to request that support before adding an independent gallery; see the
+[LambdaForge implementation request](docs/LAMBDAFORGE_REPORT_ASSET_SUPPORT.md).
+
+**Build requirement.** These APIs were checked against local LF 0.19.0. The version string alone
+is insufficient: verify ProductInput,
 SelectionPolicy, ResultStore import/execution_directory and outputs.html_section.
 WISDOM does not invent a published dependency minimum. See the complete
 [review guide and configuration reference](experiments/reviews/README.md) for both workflows,
@@ -4686,9 +4924,13 @@ and limitations without inventing experimental results.
 ## 6. Bibliography
 
 Additional sources for the optional-field/Zn extension: [RCSB Search API](https://search.rcsb.org/),
+[RCSB Data API](https://data.rcsb.org/index.html),
+[QuickGO API](https://www.ebi.ac.uk/QuickGO/api/index.html),
+[UniProt API](https://www.uniprot.org/help/api),
 [Gene Ontology annotation qualifiers](https://geneontology.org/docs/go-annotations/),
-[MetalPDB](https://metalpdb.cerm.unifi.it/),
+[MetalPDB API](https://metalpdb.cerm.unifi.it/api_help),
 [ZincBind](https://pmc.ncbi.nlm.nih.gov/articles/PMC6361820/),
+[ZincBind 2](https://pmc.ncbi.nlm.nih.gov/articles/PMC9108989/),
 [structured optimal transport / FGW](https://proceedings.mlr.press/v97/titouan19a.html), and
 [Deep Sets](https://papers.nips.cc/paper/6931-deep-sets). Metal databases are useful positive-site
 curation resources, not automatically explicit negative inventories.

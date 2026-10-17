@@ -9,15 +9,15 @@ change HPO, select another epoch or publish a StudyDecision. Each report says
 | Source | Use when | Selection possibilities | What must be available locally |
 |---|---|---|---|
 | StudyReview | You want to examine the original replications and trade-offs | Explicit Trials, parameter filters, ranked Trials, Pareto G/S; median/worst/representative seeds | Registered Execution, its saved checkpoints, the exact training dataset |
-| ModelSetReview | You have deliberately selected a small set of checkpoints to move | Reviews every promoted model, without re-ranking | Imported ModelSet and the exact training dataset; original Study is unnecessary |
+| ModelSetReview | You have deliberately selected a small set of checkpoints to move | Promoted models, optionally filtered by exact saved seed/parameters; no re-ranking | Imported ModelSet and the exact training dataset; original Study is unnecessary |
 
 An **Execution** identifies one concrete LF execution, not merely a YAML name. A **Trial** is one
 hyperparameter configuration; a **seed** identifies a stochastic replication. A **ModelSet** is
 LF's immutable product containing selected weights, their snapshot metrics and scientific input
 identities. It owns independent copies, not links into the original Study.
 
-**Required LF capabilities.** The inspected LF main still identifies itself as 0.17.0, while
-products/import APIs are marked Unreleased. A version string alone does not guarantee these features.
+**Required LF capabilities.** These APIs were checked against local LF 0.19.0.
+A version string alone does not guarantee these features.
 Use a build with public ResultStore.select/execution_directory/import_export, ProductInput,
 SelectionPolicy, native product transport and outputs.html_section. Check before copying large data:
 
@@ -52,12 +52,11 @@ is read-only, not resumable training state. Also transfer/register the original 
 through LF's dataset facilities: Study export does not guarantee a complete dataset placement.
 
 Edit with.source_execution in visualization/wisdom_v1a.yaml. It must be the registered ID, not a
-remote path. Change the seed policy to median for a typical observed replication:
+remote path. Choose the saved seed and the number of diagnostic proteins:
 
 ~~~yaml
-seed_selection:                         # Replication policy inside the single baseline Trial.
-  mode: median                          # Observed central seed; not an averaged model.
-  metric: wisdom_score                  # Exact saved-checkpoint validation W.
+source_seed: 4  # Inspect these existing weights; no training or best-seed selection.
+maximum_proteins: 8  # Contrasting diagnostic cases per configuration and split.
 ~~~
 
 ~~~bash
@@ -75,7 +74,7 @@ review-audit.json and model-review/*/proteins.csv retain numerical results and d
 A failed source Study can contain successful reviewable Runs. Failed, pruned and reduced-fidelity
 Runs are excluded; the latest Attempt is authoritative, not an older successful Attempt.
 
-For best/median/worst together use mode: representative (the V1a template's deliberate choice);
+For advanced best/median/worst review, replace source_seed with seed_selection: {mode: representative};
 mode: all includes every eligible seed. Duplicates are removed when only one or two seeds exist.
 An optional results_root typed file directory selects another **local** ResultStore; it is not an
 instruction to chase remote paths.
@@ -90,8 +89,9 @@ predictions/logits, refined-minus-raw logit difference and GT. The chosen checkp
 refiner parameters are restored exactly. Numerical metrics use all requested proteins/points;
 viewer point/protein caps and report budgets affect presentation only.
 
-With multiple Trials, omitting trial_selection fails rather than silently declaring a winner.
-With one Trial, omission uses it. Ranked Trial policies aggregate snapshot metrics over eligible
+Omitting parameter_filter and trial_selection reviews all eligible Trials without ranking them.
+An explicit saved source_seed needs no checkpoint metric metadata. Ranked Trial policies aggregate
+snapshot metrics over eligible
 seeds by median by default; aggregation: mean is the explicit alternative.
 
 | Trial mode | Required/optional fields | Meaning |
@@ -108,18 +108,20 @@ W for G/S: a configuration dominates another only if it is no worse on every req
 strictly better on at least one. If the frontier exceeds maximum_trials, native-index order truncates
 it; that cap is not a second quality ranking.
 
-For V5a, replace its active trial_selection with:
+For V5a, uncomment its simple parameter_filter and keep one saved seed:
 
 ~~~yaml
-trial_selection:                         # Compare actual families; no automatic best-per-family rule.
-  mode: parameter_filter                 # Every condition must match.
-  where:                                 # Exact active parameters, not constructor defaults.
-    pooling_type: [max, log_sum_exp, attention] # All observed settings in these three families.
-seed_selection: {mode: median, metric: wisdom_score} # Typical seed per configuration.
+source_seed: 4  # Existing training seed, not a new RNG or a best-seed ranking.
+parameter_filter:  # Keep either branch; omitted means all eligible configurations.
+  - pooling_type: max  # Parameter-free reference.
+  - pooling_type: log_sum_exp  # Every field in this branch must match.
+    log_sum_exp_mode: fixed  # Exclude curriculum, whose fixed beta key is inactive.
+    log_sum_exp_beta: [10.0, 20.0, 40.0, 80.0]  # Exact saved values to inspect.
 ~~~
 
-For exact LSE settings add log_sum_exp_mode: fixed and log_sum_exp_beta: [10.0, 20.0, 40.0, 80.0]
-under where. A missing conditional key does not equal an active key with null.
+A mapping combines fields with AND; list values accept any listed choice. A list of mappings
+combines branches with OR. A missing conditional key does not equal an active key with null.
+Do not combine source_seed with seed_selection, or parameter_filter with trial_selection.
 Curriculum LSE in V5a uses pooling_curriculum_end_beta; learned LSE in V5b uses
 log_sum_exp_beta_init. A learned initialization is not its final learned value.
 
@@ -128,10 +130,12 @@ Ranked modes accept metric (wisdom_score default), direction (max default), and 
 For an even seed count, median chooses the lower central index of the best-to-worst observed order,
 never synthetic averaged weights. A favorable picture does not replace paired-seed statistics.
 
-## 4. Quick inspection of specific proteins
+## 4. Automatic diagnostic protein panels
 
-templates/explicit_proteins.yaml demonstrates three IDs. Replace its Execution, Trial, seed, dataset
-and IDs with real evidence. For one protein keep only one identifier. Then:
+Choose source_execution and the exact training dataset once. Then choose source_seed and
+maximum_proteins; the study-specific visualization YAMLs use automatic diagnostic selection.
+The legacy templates/explicit_proteins.yaml filename also now defaults to automatic selection.
+For a small panel use maximum_proteins: 3. No manual protein identifiers are required. Then:
 
 ~~~bash
 lf validate experiments/reviews/templates/explicit_proteins.yaml
@@ -139,13 +143,17 @@ lf run experiments/reviews/templates/explicit_proteins.yaml
 lf results report REVIEW_EXECUTION_ID --output explicit-review.html
 ~~~
 
-evaluation_scope: explicit filters before the DataLoader and neural forward. Only requested proteins
+Advanced evaluation_scope: explicit filters before the DataLoader and neural forward. Only requested proteins
 in requested splits are evaluated; metrics are marked **requested subset only**.
 evaluation_scope: full evaluates the entire split and can still show just those three IDs.
 Unknown IDs fail rather than silently falling back to random pictures.
 
-Automatic selection defaults to diagnostic, two cases per supported category. It contrasts best/worst
-positive localization, global false positives/negatives, negative peaks and global/local mismatch.
+Automatic selection defaults to diagnostic and fills the requested count where supported cases exist.
+It round-robins best/worst positive localization, global false positives/negatives, correctly rejected
+negatives with low surface mass, confident correct positives, negative peaks and global/local mismatch.
+Each protein appears once, with category badges and explanations in the gallery and inspector.
+Categories describe relative checkpoint/split ranks; they do not imply absolute scientific quality.
+Configurations can select different cases, so not every protein has a map from every configuration.
 Unavailable surface GT is not ranked as zero. Strategies best, worst and mixed consider positive
 localization; categories lacking support are simply absent. all requires a size warning and remains
 subject to the display cap; set maximum_proteins: 0 to remove it deliberately.
@@ -216,7 +224,10 @@ A ModelSet combining incompatible datasets needs separate products/reviews.
 | Option | Actual default | Effect |
 |---|---|---|
 | evaluation_scope | full | Full requested-split numerical coverage |
-| protein_selection | automatic/diagnostic/2 | Contrasting diagnostic pictures |
+| protein_selection | automatic/diagnostic | Contrasting cases fill the requested count; no extra category quota |
+| source_seed | null | Study: advanced median seed policy; ModelSet: all promoted seeds. YAML examples explicitly choose 4 |
+| parameter_filter | null | No extra narrowing; scalar/list conditions or alternative mappings filter saved parameters |
+| trial_selection (Study only) | null | All eligible configurations; advanced ranked policies remain optional |
 | seed_selection (Study only) | median by wisdom_score | Typical observed replication |
 | splits / allow_test | [val] / false | Held-out test remains sealed |
 | content | predictions | Only prediction, original logits and available soft/hard GT |
@@ -225,22 +236,39 @@ A ModelSet combining incompatible datasets needs separate products/reviews.
 | prediction_threshold | 0.5 | Initial hard prediction and binary error threshold |
 | report_maximum_mib | 14.0 | Document byte ceiling, at most 16 MiB |
 | save_predictions | false | No duplicate prediction NPZ by default |
-| batch_size / data_workers | 4 / 0 | Inference batching and decoding only |
+| batch_size / data_workers | 1 / 0 | Small-GPU inference batching and decoding only |
 | strict_checkpoints | true | StudyReview: missing selected model fails; false audits/skips. Native product integrity errors always fail, including missing promoted files |
 
 Scientific metrics use all original points and full precision. Display coordinates/scalars may be
-rounded and capped; unavailable metrics remain null with support counts. Report byte omissions are
-listed rather than hidden. Embedded HTML has no standalone PLY/NPZ copies unless numerical exports
-are explicitly enabled. Change content to full for atoms/mesh/structural channels.
+rounded and capped; unavailable metrics remain null with support counts. The byte ceiling reserves
+the actual serialized shell, context, library and complete omission list before fitting viewers,
+not a fixed 32 KiB allowance. Thousands of omitted identifiers cannot silently push a fitting
+gallery over its limit. This changes presentation only; per-protein CSVs and numerical coverage
+remain intact. Omitted viewers are listed rather than hidden. Embedded HTML has no standalone
+PLY/NPZ copies unless numerical exports
+are explicitly enabled. `content: features` adds the actual learned/explicit/evidence channels
+without atoms or meshes; `full` adds structural layers. Automatic diagnostic selection may require
+a second frozen forward over selected proteins to recover features not retained in the first pass.
+The gallery navigates protein → configuration → inspector and retains unavailable metrics as such.
+
+Removing point/byte fields from the authored YAML does not disable the Work defaults or LF's
+mandatory 16 MiB/document and 64 MiB/report limits. The researcher chose to request LF managed-asset
+support before implementing an independent unlimited gallery. Full-resolution/no-omission integration
+is pending that API; the concrete implementation request is
+[documented here](../../docs/LAMBDAFORGE_REPORT_ASSET_SUPPORT.md).
+For matched comparisons, use explicit protein IDs: automatic selection can differ between models.
+Historical prediction-only pages can receive the updated interface without inference using the
+refresh command in root README §5.9, but missing features/maps require a new frozen review.
 The LF total report limit is separate from WISDOM's document budget.
 
 Examples correspond to every current authoritative training Study:
 V1a baseline variance; V1b training RNG; V1c initialization RNG; V2 initialization profiles;
 V3 optimizer profiles; V4 core HPO; V5a fixed/curriculum family curves; V5b five learned-scalar adaptations;
-V6a negative loss; V6b existence; V6b2 regional existence; V6b3 regional ranking; V6c cardinality;
-V6c2 TV; V6c3 Dirichlet; V6d loss interaction HPO; V7 heads; V8 controlled spikes;
-V9 local retuning; V10 confirmation. Their files use contrasting actual factors or explicit bounded
-Pareto/top-k policies, not twenty hidden identical winner selectors.
+V6a negative prior; V6b existence; V6c regional existence; V6d regional ranking;
+V6e cardinality; V6f TV × Heat; V6g Dirichlet × Heat; V6h deferred combination;
+V7 heads; V8 controlled spikes;
+V9 local retuning; V10 confirmation. Every authored review defaults to saved seed 4 and all eligible
+configurations, with optional direct parameter filters; none silently promotes a winner.
 
 wisdom_v5.yaml was the historical pooling screen, now retired; V5a/V5b are authoritative.
 The current V1b is already a single Work, with initialization RNG isolated in V1c.

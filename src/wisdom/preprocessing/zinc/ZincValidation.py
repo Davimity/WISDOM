@@ -26,21 +26,31 @@ from wisdom.preprocessing.common.structure.PreprocessConfig import PreprocessCon
 class ZincValidation(lf.Work):
     """Keep byte integrity distinct from evidence, topology and reference-label validation."""
 
-    def run(self, dataset: Path, fail_on_error: bool = True) -> dict[str, Any]:
+    def run(self, dataset: Path | None = None, fail_on_error: bool = True,
+            skip: bool = False, output_directory: str | None = None) -> dict[str, Any]:
         """Publish a human verdict and detailed JSON before raising on hard failures.
 
         Args:
             dataset: Native typed managed dataset placement.
             fail_on_error: Raise after report registration when the audit fails, default true.
+            skip: Return without reading a dataset or declaring reports, default false.
+            output_directory: Optional native external report copy, default null.
 
         Returns:
             Counts, verdict and ordered per-protein failures.
 
         Raises:
+            ValueError: No dataset was supplied and validation is not skipped.
             RuntimeError: Scientific failures with fail_on_error enabled.
             OSError: Missing/unreadable member index or report destination.
         """
-        output = Path(self.outputs.directory("zinc-validation", role="report"))
+        if skip:
+            self.log("Zn validation skipped; no scientific verdict was generated")
+            return {"skipped": True}
+        if dataset is None:
+            raise ValueError("dataset is required unless Zn validation is skipped")
+        output = Path(self.outputs.directory("zinc-validation", role="report",
+            publish_to=output_directory, overwrite=output_directory is not None))
         result = self.audit(dataset, output)
         self.metrics.log("validation_failures", len(result["failures"]))
         if fail_on_error and result["verdict"] != "PASS":

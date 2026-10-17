@@ -27,7 +27,7 @@ class WeakSurfaceLoss(nn.Module):
         total_variation_weight   : float = 0.0,
         dirichlet_weight         : float = 0.0,
     ) -> None:
-        """Configure the sequential weak-loss families from the experimental plan.
+        """Configure independent label-derived priors; the campaign chooses active coefficients.
 
         Args:
             negative_weight: Weight of area-normalized negative-bag BCE.
@@ -118,7 +118,9 @@ class WeakSurfaceLoss(nn.Module):
         """Evaluate every configured prior and return named unweighted terms plus their total.
 
         Args:
-            logits: Local surface logits with shape ``[M]``.
+            logits: Operational surface logits with shape ``[M]``, identical to the field used
+                by pooling. The caller supplies any configured refiner's output; this loss does
+                not refine the field or read raw diagnostic logits or local ground truth.
             area_weights: Positive represented-area weights with shape ``[M]``.
             owners: Point-to-protein owner indices with shape ``[M]``.
             protein_targets: Global binary labels with shape ``[B]``.

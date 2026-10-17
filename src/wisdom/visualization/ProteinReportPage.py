@@ -4,14 +4,19 @@
 
 from __future__ import annotations
 
+import re
 import gzip
 import json
 import base64
+import argparse
+import webbrowser
 
 from typing import Any
+from pathlib import Path
 from collections import defaultdict
 from plotly.offline import get_plotlyjs
 from collections.abc import Mapping, Sequence
+from wisdom.preprocessing.common.structure.ProteinVisualizer import ProteinVisualizer
 
 
 class ProteinReportPage:
@@ -43,6 +48,21 @@ class ProteinReportPage:
         """
         return base64.b64encode(gzip.compress(text.encode("utf-8"), mtime=0)).decode("ascii")
 
+    @staticmethod
+    def _serialize(value: Any) -> str:
+        """Serialize presentation data exactly as embedded in the script-safe document.
+
+        Args:
+            value: JSON-compatible gallery payload, entry, or metadata.
+
+        Returns:
+            Compact ASCII JSON with less-than signs escaped to prevent closing the
+            enclosing script. The same representation measures and publishes bytes.
+        """
+        return json.dumps(value, ensure_ascii=True, separators=(",", ":")).replace(
+            "<", "\\u003c"
+        )
+
     def render(
         self,
         documents: Sequence[Mapping[str, Any]],
@@ -54,7 +74,11 @@ class ProteinReportPage:
         Documents contain ``identifier``, ``split``, ``label`` and ``html``. The HTML must come
         from ProteinVisualizer.render(plotly_script=False), so the library is packaged only once.
         A deterministic round-robin over model/seed/split/label strata bounds presentation without
-        preferring one class or checkpoint. Omitted viewers remain explicit; metrics are not filtered.
+        preferring one class or checkpoint. Recorded pooling families are interleaved in pairs so
+        a large early family cannot consume the budget before another family is offered a slot.
+        Omitted viewers remain explicit; metrics are not filtered.
+        The budget includes the complete HTML shell, escaped context, all omission identifiers,
+        shared library and accepted entries; metadata never relies on a fixed-size allowance.
 
         Args:
             documents: Generated, already point-aligned inspectors; no NPZ is read here.
@@ -71,6 +95,16 @@ class ProteinReportPage:
         # templates are decompressed lazily; no nested iframe or relative asset escapes LF's CSP.
 
         library = self._encode(get_plotlyjs()) if documents else ""
+        configurations = [document.get("configuration", {}) for document in documents]
+        varying_keys = [
+            key for key in sorted(set.intersection(*(set(row) for row in configurations)))
+            if len({self._serialize(row[key]) for row in configurations}) > 1
+            and key not in {"seed", "init_seed", "training_seed", "batch_size", "data_workers"}
+            and not key.startswith((
+                "pooling_", "topk_", "attention_", "log_sum_exp_", "autopool_", "gem_",
+                "max_mean_", "regional_", "multiscale_regional_", "surface_visualization",
+            ))
+        ] if configurations else []
         buckets : dict[tuple[str, str, str, int], list[Mapping[str, Any]]] = defaultdict(list)
         for document in documents:
             buckets[(str(document.get("variant", "")), str(document.get("seed", "")),
@@ -78,110 +112,251 @@ class ProteinReportPage:
         for bucket in buckets.values():
             bucket.sort(key=lambda item: str(item["identifier"]))
 
-        entries : list[dict[str, Any]] = []
-        omitted : list[str]           = []
-        used                          = len(library) + 32 * 1024
-        row                           = 0
+        ordered: list[Mapping[str, Any]] = []
+        row = 0
         while any(row < len(bucket) for bucket in buckets.values()):
             for key in sorted(buckets):
                 bucket = buckets[key]
                 if row >= len(bucket):
                     continue
-                document = bucket[row]
-                encoded  = self._encode(str(document["html"]))
-                entry    = {
-                    "identifier": str(document["identifier"]),
-                    "split":      str(document["split"]),
-                    "label":      int(document["label"]),
-                    "content":    encoded,
-                    "variant":    str(document.get("variant", "")),
-                    "seed":       document.get("seed"),
-                    "details":    document.get("details", {}),
-                }
-                size = len(json.dumps(entry).encode("utf-8"))
-                if used + size <= self.maximum_bytes:
-                    entries.append(entry)
-                    used += size
-                else:
-                    omitted.append(f"{entry['variant']} seed={entry['seed']} {entry['split']}/{entry['identifier']}")
+                ordered.append(bucket[row])
             row += 1
+
+        # Family coverage matters for comparisons, not numerical ranking. Preserve paired
+        # presentation order within each family; metadata-free legacy documents keep their order.
+
+        if ordered and all(document.get("configuration", {}).get("pooling_type") for document in ordered):
+            families: dict[str, list[Mapping[str, Any]]] = defaultdict(list)
+            for document in ordered:
+                families[str(document["configuration"]["pooling_type"])].append(document)
+            ordered = []
+            for offset in range(0, max(map(len, families.values())), 2):
+                for family in sorted(families):
+                    ordered.extend(families[family][offset:offset + 2])
+
+        # Reserve the actual shell, context and ALL omission identifiers, not a fixed
+        # allowance. Large reviews can have thousands of omissions. Keeping this full
+        # list in the reservation is conservative: accepted viewers remove their IDs
+        # from it at publication, so final metadata can only become smaller.
+
+        identifiers = [
+            f"{document.get('variant', '')} seed={document.get('seed')} "
+            f"{document['split']}/{document['identifier']}"
+            for document in ordered
+        ]
+        empty_reason = (
+            "The configured report byte budget cannot fit a protein viewer. Use "
+            "prediction-only content, reduce the display point count, "
+            "or increase the report byte budget."
+            if documents else reason
+        )
+        # Reserve the larger of both explanations because the final empty/nonempty
+        # state is unknown here. ASCII escaping also counts Unicode and script markers.
+
+        reserved_reason = max((reason, empty_reason), key=lambda value: len(self._serialize(value)))
+        reserved = {
+            "documents": [],
+            "plotly":    library,
+            "context":   dict(context),
+            "omitted":   identifiers,
+            "reason":    reserved_reason,
+        }
+        used = len(self._html(self._serialize(reserved)).encode("utf-8"))
+        entries: list[dict[str, Any]] = []
+        omitted: list[str] = []
+        for document, identifier in zip(ordered, identifiers, strict=True):
+            configuration = document.get("configuration", {})
+            caption = (
+                self.configuration_label(configuration) if configuration
+                else str(document.get("variant", "Source model"))
+            )
+            differences = ", ".join(f"{key}={configuration[key]}" for key in varying_keys)
+            if differences:
+                caption += f" · {differences}"
+            entry = {
+                "identifier": str(document["identifier"]),
+                "split":      str(document["split"]),
+                "label":      int(document["label"]),
+                "content":    self._encode(str(document["html"])),
+                "variant":    str(document.get("variant", "")),
+                "seed":       document.get("seed"),
+                "details":    document.get("details", {}),
+                "configuration": document.get("configuration", {}),
+                "configuration_label": caption,
+                "run_id": document.get("run_id"),
+            }
+            # One extra byte safely reserves the comma between accepted entries.
+
+            size = len(self._serialize(entry).encode("utf-8")) + 1
+            if used + size <= self.maximum_bytes:
+                entries.append(entry)
+                used += size
+            else:
+                omitted.append(identifier)
         if not entries:
             library = ""
-            if documents:
-                reason = "The configured report byte budget cannot fit a protein viewer. Use visualization.content=predictions, reduce visualization.maximum_points, or increase visualization.report_budget_mib."
+            reason = empty_reason
 
-        payload = json.dumps({
+        payload = self._serialize({
             "documents": entries,
             "plotly":    library,
             "context":   dict(context),
             "omitted":   omitted,
             "reason":    reason,
-        }, ensure_ascii=True, separators=(",", ":")).replace("<", "\\u003c")
+        })
         page = self._html(payload)
-        if len(page.encode("utf-8")) > self.maximum_bytes:
-            raise ValueError("protein report shell exceeds its configured byte budget")
+        page_size = len(page.encode("utf-8"))
+        if page_size > self.maximum_bytes:
+            raise ValueError(
+                f"protein report shell exceeds its configured byte budget: "
+                f"shell and metadata require {page_size} bytes, "
+                f"configured limit is {self.maximum_bytes} bytes"
+            )
         return page, {
             "included_proteins": len(entries),
             "omitted_proteins":  omitted,
-            "size_bytes":        len(page.encode("utf-8")),
+            "size_bytes":        page_size,
         }
 
     @staticmethod
-    def _html(payload: str) -> str:
-        """Compose local navigation around trusted shared-renderer documents.
+    def configuration_label(parameters: Mapping[str, Any]) -> str:
+        """Describe the pooling and its active controls without exposing arbitrary Trial numbers.
 
         Args:
-            payload: Script-safe JSON with compressed library/documents and escaped-as-text context.
+            parameters: Recorded scientific Run parameters, not inferred filenames.
 
         Returns:
-            Complete HTML; only the active protein owns a WebGL scene. Returning to the list waits
-            for pending updates, purges Plotly, and removes the inspector's resize listener.
+            A readable pooling caption including configured pooling-specific parameters.
         """
-        template = r'''<!doctype html><html lang="en"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1"><title>WISDOM proteins</title>
-<style id="wisdom-gallery-style">
-body.wisdom-gallery{margin:0;padding:28px;background:#080c16;color:#e7edf7;font:14px system-ui,sans-serif;display:block;height:auto;overflow:auto}
-.wisdom-gallery h1{margin:0 0 12px}.wisdom-gallery p{line-height:1.6;color:#a9b7ca}.wisdom-gallery input,.wisdom-gallery select,.wisdom-gallery button{padding:10px;margin:4px;background:#172236;color:#e7edf7;border:1px solid #3b4a61;border-radius:8px}
-.wisdom-gallery table{width:100%;border-collapse:collapse;margin-top:18px}.wisdom-gallery td,.wisdom-gallery th{text-align:left;padding:12px;border-bottom:1px solid #27364b}.wisdom-gallery pre{white-space:pre-wrap;color:#a9b7ca}.wisdom-gallery [hidden]{display:none}.wisdom-back{margin-right:8px}.wisdom-gallery .notice{border-left:3px solid #fdb022;padding:12px;background:#2d2415}
-</style></head><body class="wisdom-gallery"><p>Loading WISDOM gallery…</p>
-<script id="wisdom-gallery-data" type="application/json">@@PAYLOAD@@</script><script>
-(()=>{
-const data=JSON.parse(document.getElementById('wisdom-gallery-data').textContent);
-const filter={query:'',split:'',label:'',variant:'',seed:''};let busy=false,libraryReady;
-async function decode(encoded){if(!window.DecompressionStream)throw Error('This viewer requires a modern browser with DecompressionStream (Chrome, Firefox or Safari).');const bytes=Uint8Array.from(atob(encoded),c=>c.charCodeAt(0));return new Response(new Blob([bytes]).stream().pipeThrough(new DecompressionStream('gzip'))).text()}
-function element(tag,text){const node=document.createElement(tag);if(text!==undefined)node.textContent=text;return node}
-async function closeViewer(){if(window.wisdomDispose){await window.wisdomDispose();window.wisdomDispose=null}document.getElementById('wisdom-protein-style')?.remove();document.body.className='wisdom-gallery';document.body.replaceChildren()}
-async function catalogue(message=''){
-await closeViewer();document.body.append(element('h1','WISDOM proteins'));
-document.body.append(element('p','Choose a source Run in LambdaForge or filter reviewed models and seeds below, then open a protein. This gallery never selects a scientific winner.'));
-document.body.append(element('pre',JSON.stringify(data.context,null,2)));
-if(message)document.body.append(element('p',message));
-if(data.omitted.length){const notice=element('p',`${data.omitted.length} viewers omitted to respect the byte budget: ${data.omitted.join(', ')}. Evaluation metrics still cover the complete evaluated split.`);notice.className='notice';document.body.append(notice)}
-if(!data.documents.length){document.body.append(element('p',data.reason));return}
-const controls=element('div'),search=element('input');search.type='search';search.placeholder='Search protein ID';search.value=filter.query;search.setAttribute('aria-label','Search protein');
-const split=element('select'),label=element('select'),variant=element('select');split.setAttribute('aria-label','Split');label.setAttribute('aria-label','Protein label');variant.setAttribute('aria-label','Model or pooling');
-const seed=element('select');seed.setAttribute('aria-label','Source seed');for(const value of ['',...new Set(data.documents.map(d=>String(d.seed??'unseeded')))]){const option=element('option',value?`Seed ${value}`:'All source seeds');option.value=value;seed.append(option)}seed.value=filter.seed;
-for(const value of ['',...new Set(data.documents.map(d=>d.variant).filter(Boolean))]){const option=element('option',value||'All models / poolings');option.value=value;variant.append(option)}variant.value=filter.variant;
-for(const value of ['',...new Set(data.documents.map(d=>d.split))]){const option=element('option',value||'All splits');option.value=value;split.append(option)}
-for(const [value,title] of [['','Both labels'],['0','Negative'],['1','Positive']]){const option=element('option',title);option.value=value;label.append(option)}split.value=filter.split;label.value=filter.label;controls.append(search,variant,seed,split,label);document.body.append(controls);
-const table=element('table'),header=element('tr');for(const name of ['Model / pooling','Seed','Protein','Split','Label','Case diagnostics','Viewer'])header.append(element('th',name));table.append(header);document.body.append(table);
-const rows=data.documents.map((entry,index)=>{const row=element('tr');row.dataset.protein=entry.identifier;for(const text of [entry.variant||'Source model',entry.seed??'—',entry.identifier,entry.split,entry.label?'Positive':'Negative'])row.append(element('td',text));const details=element('td');details.append(element('pre',Object.keys(entry.details).length?JSON.stringify(entry.details,null,2):'—'));row.append(details);const cell=element('td'),button=element('button','Open protein');button.addEventListener('click',()=>open(index));cell.append(button);row.append(cell);table.append(row);return row});
-const update=()=>{filter.query=search.value;filter.split=split.value;filter.label=label.value;filter.variant=variant.value;filter.seed=seed.value;rows.forEach((row,index)=>{const d=data.documents[index];row.hidden=Boolean(!d.identifier.toLowerCase().includes(filter.query.trim().toLowerCase())||(filter.split&&d.split!==filter.split)||(filter.label&&String(d.label)!==filter.label)||(filter.variant&&d.variant!==filter.variant)||(filter.seed&&String(d.seed??'unseeded')!==filter.seed))})};search.addEventListener('input',update);split.addEventListener('change',update);label.addEventListener('change',update);variant.addEventListener('change',update);seed.addEventListener('change',update);update();
-}
-async function open(index){
-if(busy)return;busy=true;
-try{
-document.body.append(element('p','Loading protein and WebGL…'));
-if(!libraryReady)libraryReady=decode(data.plotly).then(source=>{new Function(source)()});await libraryReady;
-const source=await decode(data.documents[index].content),parsed=new DOMParser().parseFromString(source,'text/html');
-await closeViewer();const style=element('style');style.id='wisdom-protein-style';style.textContent=[...parsed.querySelectorAll('style')].map(node=>node.textContent).join('\n');document.head.append(style);
-const scripts=[...parsed.body.querySelectorAll('script')].map(node=>{if(node.src)throw Error('Protein documents must not load external scripts.');const source=node.textContent;node.remove();return source});
-document.body.className='';document.body.innerHTML=parsed.body.innerHTML;window.wisdomPlotReady=null;window.wisdomViewerReady=null;
-for(const script of scripts)new Function(script)();await window.wisdomViewerReady;
-const back=element('button','← Protein list');back.className='wisdom-back';back.addEventListener('click',async()=>{if(busy)return;busy=true;try{await catalogue()}catch(error){console.error(error)}finally{busy=false}});document.querySelector('.viewer-head').prepend(back);const identity=element('span',`${data.documents[index].variant||'Source model'} · seed ${data.documents[index].seed??'—'}`);document.querySelector('.viewer-head').append(identity);
-}catch(error){console.error(error);await catalogue(`Viewer unavailable: ${error.message}`)}finally{busy=false}
-}
-catalogue().catch(error=>{document.body.textContent=`Gallery unavailable: ${error.message}`});
-})();
-</script></body></html>'''
-        return template.replace("@@PAYLOAD@@", payload)
+        pooling = str(parameters.get("pooling_type", "source model"))
+        relevant = {
+            "topk": ("topk_",),
+            "log_sum_exp": ("log_sum_exp_", "pooling_curriculum_", "lse_curriculum_"),
+            "attention": ("attention_",),
+            "autopool": ("autopool_",),
+            "gem": ("gem_",),
+            "max_mean": ("max_mean_",),
+            "local_mean_max": ("regional_",),
+            "multiscale_regional_max": ("regional_", "multiscale_regional_"),
+        }
+        keys = relevant.get(pooling, ())
+        # Frozen checkpoints may record defaults for inactive families as well. Do not
+        # describe those as scientific controls of the currently active pooling family.
+        selected = {
+            key: value for key, value in parameters.items()
+            if key.startswith(keys) or (key == "pooling_area_mode" and pooling not in {
+                "max", "local_mean_max", "multiscale_regional_max",
+            })
+        }
+        if parameters.get("log_sum_exp_mode") == "fixed":
+            selected = {key: value for key, value in selected.items() if "curriculum" not in key}
+        elif parameters.get("log_sum_exp_mode") == "curriculum":
+            selected.pop("log_sum_exp_beta", None)
+        controls = ", ".join(f"{key.removeprefix('pooling_')}={value}" for key, value in selected.items())
+        return pooling.replace("_", " ").title() + (f" · {controls}" if controls else "")
+
+    @staticmethod
+    def upgrade(source: str, audits: Sequence[Mapping[str, Any]] = ()) -> list[dict[str, Any]]:
+        """Recover existing maps for a derived report without inference or artifact mutation.
+
+        Args:
+            source: An existing WISDOM gallery HTML document containing its embedded payload.
+            audits: Optional exact source review audit records with Run parameters and metrics.
+
+        Returns:
+            Decoded inspectors with refreshed shared UI and authoritative configuration metadata.
+
+        Raises:
+            ValueError: If the gallery or shared inspector cannot be read as a supported document.
+        """
+        match = re.search(
+            r'<script id="wisdom-gallery-data" type="application/json">(.*?)</script>',
+            source, re.DOTALL,
+        )
+        if match is None:
+            raise ValueError("source is not a WISDOM protein gallery")
+        payload = json.loads(match.group(1))
+        rows = []
+        for entry in payload["documents"]:
+            row = dict(entry)
+            row["html"] = ProteinVisualizer.refresh(
+                gzip.decompress(base64.b64decode(row.pop("content"))).decode("utf-8")
+            )
+            # Older captions carried a one-based Trial index; use it only as an audit join,
+            # never as the new scientific configuration caption.
+            trial = re.search(r"Trial (\d+)", row.get("variant", ""))
+            for audit in audits:
+                if (
+                    audit.get("seed") == row.get("seed")
+                    and audit.get("split") == row["split"]
+                    and (audit.get("run_id") == row.get("run_id") if row.get("run_id")
+                         else trial is not None and audit.get("trial") == int(trial.group(1)))
+                ):
+                    row["configuration"] = audit["parameters"]
+                    row["details"] = {
+                        **audit.get("proteins", {}).get(row["identifier"], {}),
+                        **row.get("details", {}),
+                    }
+                    row["run_id"] = audit["run_id"]
+                    break
+            rows.append(row)
+        return rows
+
+    @staticmethod
+    def _html(payload: str) -> str:
+        """Embed the shared offline catalogue assets and script-safe data.
+
+        Args:
+            payload: Compact escaped JSON containing compressed inspectors and metadata.
+
+        Returns:
+            A complete offline protein-first gallery; only the opened map owns WebGL.
+        """
+        assets = Path(__file__).parent
+        style = (assets / "protein_gallery.css").read_text(encoding="utf-8")
+        script = (assets / "protein_gallery.js").read_text(encoding="utf-8").replace(
+            "@@CASE_DESCRIPTIONS@@", ProteinReportPage._serialize(ProteinVisualizer.CASE_DESCRIPTIONS)
+        )
+        return (
+            '<!doctype html><html lang="en"><head><meta charset="utf-8">'
+            '<meta name="viewport" content="width=device-width,initial-scale=1">'
+            '<title>WISDOM proteins</title><style id="wisdom-gallery-style">'
+            + style + '</style></head><body class="wisdom-gallery">'
+            '<p>Loading WISDOM gallery…</p>'
+            '<script id="wisdom-gallery-data" type="application/json">'
+            + payload + '</script><script>' + script + '</script></body></html>'
+        )
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Refresh saved WISDOM maps without inference.")
+    parser.add_argument("--source", required=True, type=Path)
+    parser.add_argument("--audit", type=Path)
+    parser.add_argument("--output", required=True, type=Path)
+    parser.add_argument("--open", action="store_true")
+    arguments = parser.parse_args()
+    if arguments.output.resolve() == arguments.source.resolve():
+        parser.error("output must be a new derived document, not the immutable source artifact")
+    source = arguments.source.read_text(encoding="utf-8")
+    audits = json.loads(arguments.audit.read_text()) if arguments.audit else []
+    documents = ProteinReportPage.upgrade(source, audits)
+    payload_match = re.search(
+        r'<script id="wisdom-gallery-data" type="application/json">(.*?)</script>',
+        source, re.DOTALL,
+    )
+    original = json.loads(payload_match.group(1)) if payload_match else {}
+    page, summary = ProteinReportPage(maximum_mib=16).render(
+        documents, {
+            **original.get("context", {}),
+            "source": arguments.source.name, "derived_without_inference": True,
+            "source_omitted": [
+                *original.get("context", {}).get("source_omitted", []),
+                *original.get("omitted", []),
+            ],
+        },
+    )
+    arguments.output.parent.mkdir(parents=True, exist_ok=True)
+    arguments.output.write_text(page, encoding="utf-8")
+    print(f"Updated gallery: {arguments.output.resolve()} ({summary['included_proteins']} maps)")
+    if arguments.open:
+        webbrowser.open(arguments.output.resolve().as_uri())

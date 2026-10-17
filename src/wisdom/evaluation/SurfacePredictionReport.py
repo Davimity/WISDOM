@@ -17,6 +17,7 @@ from torch import Tensor
 from plotly.offline import get_plotlyjs
 from collections.abc import Mapping, Sequence
 from wisdom.data.WisdomDataset import WisdomDataset
+from wisdom.evaluation.BinaryMetricSuite import BinaryMetricSuite
 from wisdom.evaluation.PointCloudExporter import PointCloudExporter
 from wisdom.preprocessing.common.structure.ProteinArchive import ProteinArchive
 from wisdom.preprocessing.common.structure.ProteinVisualizer import ProteinVisualizer
@@ -74,8 +75,9 @@ class SurfacePredictionReport:
                 HTML, Plotly or PLY files. Numerical evaluation coverage stays unchanged.
             identifiers: Exact viewer IDs, overriding the automatic balanced sample and its cap.
                 IDs absent from this evaluated split are ignored, allowing a shared val/test list.
-            content: predictions embeds only prediction/logit/GT channels; full retains the
-                structural inspector. Numerical metrics and exported PLY points are not sampled.
+            content: predictions embeds prediction/logit/GT channels; features adds sampled
+                learned model channels; full also retains structural layers. Numerical metrics
+                and exported PLY points are not sampled.
             maximum_surface_points: Positive display-only point ceiling per protein.
 
         Raises:
@@ -179,7 +181,7 @@ class SurfacePredictionReport:
             self.logits[name]      = raw_logits[start:stop].copy()
             if original_logits is not None:
                 self.raw_evidence[name] = original_logits[start:stop].copy()
-            if self.content == "full" and name in self._selected_identifiers():
+            if self.content in {"full", "features"} and name in self._selected_identifiers():
                 # Keep real H/X/Z only for the bounded selected viewer sample. Lightweight
                 # prediction reports neither copy nor retain these potentially large matrices.
 
@@ -190,6 +192,58 @@ class SurfacePredictionReport:
                 }
             if global_scores is not None:
                 self.protein_probabilities[name] = float(global_scores[index])
+
+    def statistics(self, threshold: float = 0.5) -> dict[str, dict[str, Any]]:
+        """Describe protein decisions and point ranking using complete immutable surface arrays.
+
+        Args:
+            threshold: Protein decision cutoff in [0,1], independent of display point sampling.
+
+        Returns:
+            Per-protein probabilities, errors, AP, prevalence, normalized AP, area-weighted
+            probability mass and peak. nAP=(AP-pi)/(1-pi), where pi is positive GT prevalence.
+            Missing probabilities/GT or one-class ranking targets remain unavailable, not zero.
+
+        Raises:
+            KeyError: If predictions do not cover the expected proteins or required arrays.
+        """
+        rows: dict[str, dict[str, Any]] = {}
+        for identifier, (base, annotation, label) in self.records.items():
+            scores       = self.predictions[identifier]
+            global_score = self.protein_probabilities.get(identifier)
+            ap           : float | None = None
+            prevalence   : float | None = None
+            normalized   : float | None = None
+
+            # Positive-only localization needs an explicit valid-point mask. Negatives have
+            # no positive-class ranking target, so their activation is described by mass/peak.
+
+            if annotation is not None:
+                with np.load(annotation, allow_pickle=False) as data:
+                    valid = data["surface_valid_mask"].astype(bool)
+                    hard  = data["surface_target_hard"][valid]
+                if label == 1 and valid.any():
+                    ap = BinaryMetricSuite().compute(
+                        torch.from_numpy(scores[valid]), torch.from_numpy(hard.copy()), ("auprc",)
+                    )["auprc"]
+                    prevalence = float(hard.mean())
+                    if ap is not None and prevalence < 1:
+                        normalized = (ap - prevalence) / (1 - prevalence)
+            with np.load(base, allow_pickle=False) as data:
+                area = data["surface_area_weights"]
+                mass = float(np.dot(scores, area) / area.sum())
+            rows[identifier] = {
+                "label":               label,
+                "protein_probability": global_score,
+                "protein_threshold":   threshold,
+                "binary_error":        None if global_score is None else int(global_score >= threshold) != label,
+                "surface_auprc":            ap,
+                "interface_prevalence":     prevalence,
+                "normalized_surface_auprc": normalized,
+                "positive_mass": mass,
+                "positive_peak": float(scores.max()),
+            }
+        return rows
 
     def publish(
         self,
@@ -221,6 +275,7 @@ class SurfacePredictionReport:
         split_root   = self.output_root / self.split
         protein_root = split_root / "proteins"
         selected     = set(self._selected_identifiers())
+        statistics   = self.statistics(self.prediction_threshold)
         visualizer   = ProteinVisualizer(max_surface_points=self.maximum_surface_points)
         exporter     = PointCloudExporter()
         reports      : list[dict[str, Any]] = []
@@ -299,12 +354,16 @@ class SurfacePredictionReport:
                     additional_channels  = channels,
                     prediction_threshold = self.prediction_threshold,
                     content              = self.content,
+                    review_context       = {
+                        "label": int(label), "details": statistics[identifier],
+                    },
                 )
                 self.report_documents.append({
                     "identifier": identifier,
                     "split":      self.split,
                     "label":      int(label),
                     "html":       page,
+                    "details":    statistics[identifier],
                 })
 
                 # The LF report receives the same inspector in memory. Standalone mode adds
@@ -316,10 +375,13 @@ class SurfacePredictionReport:
                     )
                     ProteinArchive.write_text(html_path, standalone)
                     surface_channels = visualizer.surface_channels(base, annotation, channels)
-                    if self.content == "predictions":
+                    if self.content != "full":
                         surface_channels = {
                             name: values for name, values in surface_channels.items()
                             if name.startswith("model_prediction_")
+                            or (self.content == "features" and name.startswith((
+                                "surface_learned_", "surface_explicit_", "surface_evidence_"
+                            )))
                             or name in ("dna_target_hard", "dna_target_soft", "dna_target_valid")
                         }
                     exporter.export(ply_path, positions, surface_channels)

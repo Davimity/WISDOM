@@ -1,5 +1,5 @@
 # OBJECTIVE: compare global/local head relationships after choosing one weak-loss policy.
-# PREREQUISITES: V6a and any justified V6b/V6c/V6d follow-up must have reviewed winners.
+# PREREQUISITES: review isolated V6a-V6g and the final V6h interaction before freezing the ledger.
 # VARIES: head_type only.
 # FIXED: every selected initialization, optimizer, core, pooling, and weak-loss decision.
 # DECISION: select the simplest head whose utility and surface faithfulness improve credibly.
@@ -31,15 +31,15 @@ with:                                               # Explicit carry-forward led
   weight_decay: 0.0001                              # REPLACE with the V4 winner.
   gate_lambda: 0.001                                # REPLACE with the V4 winner.
   weak_loss_profile: custom                         # Preserve explicit selected weak-loss coefficients.
-  negative_surface_lambda: 0.3                      # REPLACE with the V6a or V6d winner.
-  positive_existence_lambda: 0.0                    # REPLACE only if V6b selected this term.
-  regional_positive_lambda: 0.0                     # REPLACE if V6b or V6d selected this term.
+  negative_surface_lambda: 0.3                      # REPLACE from the reviewed V6h interaction ledger.
+  positive_existence_lambda: 0.0                    # REPLACE from the reviewed V6h interaction ledger.
+  regional_positive_lambda: 0.0                     # Freeze this coefficient from the reviewed V6h interaction ledger.
   regional_loss_length: 2.5                         # REPLACE with the selected regional scale.
-  regional_ranking_lambda: 0.0                      # REPLACE only if V6b selected this term.
+  regional_ranking_lambda: 0.0                      # Freeze this coefficient from the reviewed V6h interaction ledger.
   regional_ranking_margin: 0.5                      # REPLACE with the selected ranking margin.
-  cardinality_lambda: 0.0                           # REPLACE only if V6c selected cardinality.
-  total_variation_lambda: 0.0                       # REPLACE only if V6c selected TV.
-  dirichlet_lambda: 0.0                             # REPLACE if V6c or V6d selected Dirichlet.
+  cardinality_lambda: 0.0                           # Freeze this coefficient from the reviewed V6h interaction ledger.
+  total_variation_lambda: 0.0                       # Freeze this coefficient from the reviewed V6h interaction ledger.
+  dirichlet_lambda: 0.0                             # Freeze this coefficient from the reviewed V6h interaction ledger.
   architecture_spike: baseline                      # Architecture remains one-pass and scalar.
   global_context_dim: 16                            # Context bottleneck for conditioned heads.
   detach_global_context: true                       # Prevent local loss gradients entering context.

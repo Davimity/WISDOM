@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import csv
+import copy
 import torch
 import lambdaforge as lf
 
@@ -56,8 +57,10 @@ class ReviewInference:
 
         Args:
             rows: Full-resolution per-protein diagnostic statistics from frozen inference.
-            policy: mode=automatic|explicit|all; automatic strategy=diagnostic|best|worst|mixed
-                and cases_per_category=2; explicit identifiers are exact member IDs.
+            policy: mode=automatic|explicit|all; automatic strategy=diagnostic|best|worst|mixed.
+                Default category depth fills the requested maximum where candidates exist;
+                cases_per_category optionally imposes a legacy per-category bound.
+                Explicit identifiers are exact member IDs.
             maximum: Positive display ceiling; zero permits all selected proteins.
             threshold: Protein decision probability cutoff in [0,1].
 
@@ -76,7 +79,7 @@ class ReviewInference:
             reasons = {identifier: [mode] for identifier in identifiers if identifier in rows}
         elif mode == "automatic":
             strategy = policy.get("strategy", "diagnostic")
-            quota = policy.get("cases_per_category", 2)
+            quota = policy.get("cases_per_category", len(rows))
             local = [key for key in rows if rows[key]["normalized_surface_auprc"] is not None]
             local.sort(key=lambda key: (rows[key]["normalized_surface_auprc"], key))
             categories = {"worst_localization": local, "best_localization": list(reversed(local))}
@@ -100,6 +103,17 @@ class ReviewInference:
                                 and rows[key]["protein_probability"] < threshold
                             ),
                             key=lambda key: (rows[key]["protein_probability"], key),
+                        ),
+                        "correct_negative": sorted(
+                            (key for key in rows if rows[key]["label"] == 0
+                             and rows[key]["protein_probability"] < threshold),
+                            key=lambda key: (rows[key]["positive_mass"],
+                                             rows[key]["protein_probability"], key),
+                        ),
+                        "correct_positive": sorted(
+                            (key for key in rows if rows[key]["label"] == 1
+                             and rows[key]["protein_probability"] >= threshold),
+                            key=lambda key: (-rows[key]["protein_probability"], key),
                         ),
                         "negative_peak": sorted(
                             (key for key in rows if rows[key]["label"] == 0),
@@ -128,7 +142,11 @@ class ReviewInference:
             for index in range(quota):
                 for category, candidates in categories.items():
                     if index < len(candidates):
-                        reasons.setdefault(candidates[index], []).append(category)
+                        identifier = candidates[index]
+                        if identifier in reasons or not maximum or len(reasons) < maximum:
+                            reasons.setdefault(identifier, []).append(category)
+                if maximum and len(reasons) >= maximum:
+                    break
         else:
             raise ValueError(f"unsupported protein policy: {mode}")
         chosen = list(reasons)[:maximum] if maximum else list(reasons)
@@ -167,7 +185,8 @@ class ReviewInference:
             evaluation_scope: full evaluates every requested-split member; explicit evaluates
                 only protein_selection.identifiers and labels metrics as partial coverage.
             protein_selection: automatic diagnostic, explicit identifiers, or all display policy.
-            content: predictions includes prediction/logit/GT; full adds structural channels.
+            content: predictions includes prediction/logit/GT; features adds learned model
+                channels without structural layers; full includes those layers as well.
             maximum_surface_points: Display-only point cap; scientific metrics retain all points.
             maximum_proteins: Viewer ceiling per model/split; zero removes this bound.
             prediction_threshold: Hard prediction and protein diagnostic cutoff in [0,1].
@@ -279,6 +298,8 @@ class ReviewInference:
                     prediction_threshold,
                     report_only=True,
                     save_predictions=save_predictions,
+                    identifiers=tuple(policy.get("identifiers", ()))
+                    if policy.get("mode") == "explicit" else (),
                     content=content,
                     maximum_surface_points=maximum_surface_points,
                 )
@@ -300,14 +321,44 @@ class ReviewInference:
                     statistics, policy, maximum_proteins, prediction_threshold
                 )
                 collector.identifiers = tuple(chosen) or ("__no_selected_protein__",)
+                # Diagnostic cases are selected after full inference. Collect learned channels
+                # only for missing selected maps, rather than retaining every protein's H/X/Z.
+
+                missing_features = [
+                    name for name in chosen if name not in collector.representations
+                ] if content in {"full", "features"} else []
+                if missing_features:
+                    display_data = copy.copy(data)
+                    display_data.records = tuple(
+                        record for record in data.records if record[3] in missing_features
+                    )
+                    feature_collector = SurfacePredictionReport(
+                        display_data, output, split, prediction_threshold,
+                        identifiers=missing_features, report_only=True, content=content,
+                    )
+                    feature_loader = DataLoader(
+                        display_data, batch_size=batch_size, shuffle=False,
+                        num_workers=data_workers,
+                        collate_fn=WisdomCollator(**state["data_parameters"]),
+                    )
+                    work.log(
+                        f"Collecting learned display channels for "
+                        f"{len(missing_features)} selected proteins"
+                    )
+                    with torch.inference_mode():
+                        _evaluate(model, feature_loader, device, autocast_dtype, feature_collector)
+                    collector.representations.update(feature_collector.representations)
                 collector.publish(surface, int(state["epoch"]))
                 for document in collector.report_documents:
                     document.update(
                         variant=descriptor["label"],
                         seed=descriptor.get("seed"),
+                        configuration={**state["model_parameters"], **parameters},
+                        run_id=descriptor["run_id"],
                         details={
                             **statistics[document["identifier"]],
                             "selection_reasons": reasons[document["identifier"]],
+                            "protein_threshold": prediction_threshold,
                         },
                     )
                 documents.extend(collector.report_documents)
@@ -332,6 +383,7 @@ class ReviewInference:
                         "proteins": statistics,
                         "selection_reasons": reasons,
                         "inference_precision": precision,
+                        "inference_batch_size": batch_size,
                         "gate_override": override,
                     }
                 )

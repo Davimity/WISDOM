@@ -36,27 +36,33 @@ class StudyReview(lf.Work):
         prediction_threshold  : float = 0.5,
         report_maximum_mib    : float = 14.0,
         save_predictions      : bool = False,
-        batch_size            : int = 4,
+        batch_size            : int = 1,
         data_workers          : int = 0,
         strict_checkpoints    : bool = True,
+        source_seed           : int | None = None,
+        parameter_filter      : Mapping[str, Any] | Sequence[Mapping[str, Any]] | None = None,
     ) -> dict[str, Any]:
         """Select existing Trials/seeds and evaluate their frozen best-model snapshots.
 
         Args:
-            source_execution: Exact registered Execution ID; import portable Studies with lf import.
+            source_execution: Registered Execution ID or unambiguous Work name accepted by native
+                ResultStore.select. Multiple matching names fail rather than select a historical
+                execution silently. Import portable Studies with lf import before reviewing them.
             dataset: Typed immutable dataset placement matching the original training identity.
             results_root: Optional typed local ResultStore root; None uses LF's project default.
             trial_selection: all, explicit trial_indices, best_by_metric, top_k_by_metric,
                 parameter_filter where, or pareto metrics. Rankings aggregate seed checkpoint
-                metrics by median (default) or mean; directions max/min. None requires one Trial.
+                metrics by median (default) or mean; directions max/min. None reviews all eligible
+                Trials unless parameter_filter provides explicit conditions.
             seed_selection: all, explicit seeds, best, worst, median, top_k, bottom_k, or
                 representative. Default median by wisdom_score, direction max; k defaults three.
             evaluation_scope: full evaluates complete splits; explicit forwards requested IDs only.
-            protein_selection: Default automatic/diagnostic/two cases per category; explicit
+            protein_selection: Default automatic diagnostic mixture up to maximum_proteins; explicit
                 identifiers or all. Automatic also supports best, worst and mixed strategies.
             splits: Explicit train/val/test partition names; validation only by default.
             allow_test: Permit descriptive test inspection, never test-driven model selection.
-            content: predictions for prediction/logit/GT channels; full for structural channels too.
+            content: predictions for prediction/logit/GT; features adds learned model channels
+                without structural traces; full includes structural layers too.
             maximum_surface_points: Positive display-only cap; numerical metrics use every point.
             maximum_proteins: Display cap per checkpoint/split; zero is explicitly unbounded.
             prediction_threshold: Hard prediction and protein error cutoff in [0,1].
@@ -65,6 +71,11 @@ class StudyReview(lf.Work):
             batch_size: Positive proteins per inference batch.
             data_workers: Nonnegative decoding processes.
             strict_checkpoints: Missing selected checkpoints fail instead of being audited/skipped.
+            source_seed: One exact recorded training seed; mutually exclusive with seed_selection.
+                None retains the advanced seed policy and its default median behavior.
+            parameter_filter: Exact scalar/list choices, or a list of alternative mappings.
+                Mutually exclusive with trial_selection. Empty mapping reviews every eligible
+                configuration; missing inactive fields never match a requested value.
 
         Returns:
             Native source identity, reviewed model count, missing evidence and HTML byte summary.
@@ -78,6 +89,16 @@ class StudyReview(lf.Work):
         """
         if "test" in splits and not allow_test:
             raise ValueError("test inspection requires allow_test=true")
+        if source_seed is not None:
+            if seed_selection is not None:
+                raise ValueError("choose source_seed or seed_selection, not both")
+            seed_selection = {"mode": "explicit", "seeds": [source_seed]}
+        if parameter_filter is not None:
+            if trial_selection is not None:
+                raise ValueError("choose parameter_filter or trial_selection, not both")
+            trial_selection = {"mode": "parameter_filter", "where": parameter_filter}
+        if trial_selection is None:
+            trial_selection = {"mode": "all"}
         if not callable(getattr(ResultStore, "execution_directory", None)):
             raise RuntimeError("StudyReview requires current LF ResultStore import/review APIs")
         store = ResultStore(results_root)
@@ -149,7 +170,7 @@ class StudyReview(lf.Work):
             {
                 "source_execution": execution["execution_id"],
                 "source_kind": "ResultStore",
-                "trial_selection": trial_selection or {"mode": "single Trial"},
+                "trial_selection": trial_selection,
                 "seed_selection": seed_selection or {"mode": "median", "metric": "wisdom_score"},
             },
             splits,

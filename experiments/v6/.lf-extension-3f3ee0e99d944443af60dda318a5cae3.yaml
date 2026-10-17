@@ -1,0 +1,158 @@
+execution:
+  max_time: 555226.054012886
+name: wisdom-v6a
+objective:
+  metric: val_wisdom_hpo_score
+  mode: max
+  practical_margin: 0.015
+  range:
+  - 0.0
+  - 1.0
+resources:
+  cpu: 36
+  gpu: 2
+  memory: 96GiB
+  time: 168h
+run: wisdom.Training.Training
+seeds:
+- 4
+- 7
+- 32
+- 54
+sweep:
+  candidates:
+  - log_sum_exp_beta: 0.25
+    log_sum_exp_mode: fixed
+    negative_surface_lambda: 1.5
+    pooling_area_mode: area
+    pooling_type: log_sum_exp
+  - log_sum_exp_beta: 0.25
+    log_sum_exp_mode: fixed
+    negative_surface_lambda: 2.0
+    pooling_area_mode: area
+    pooling_type: log_sum_exp
+  - log_sum_exp_beta: 0.25
+    log_sum_exp_mode: fixed
+    negative_surface_lambda: 3.0
+    pooling_area_mode: area
+    pooling_type: log_sum_exp
+  - log_sum_exp_beta: 0.25
+    log_sum_exp_mode: fixed
+    negative_surface_lambda: 5.0
+    pooling_area_mode: area
+    pooling_type: log_sum_exp
+  - log_sum_exp_beta: 0.25
+    log_sum_exp_mode: fixed
+    negative_surface_lambda: 10.0
+    pooling_area_mode: area
+    pooling_type: log_sum_exp
+  - attention_hidden_dim: 256
+    attention_variant: simple
+    negative_surface_lambda: 1.5
+    pooling_area_mode: area
+    pooling_type: attention
+  - attention_hidden_dim: 256
+    attention_variant: simple
+    negative_surface_lambda: 3.0
+    pooling_area_mode: area
+    pooling_type: attention
+  - attention_hidden_dim: 256
+    attention_variant: simple
+    negative_surface_lambda: 5.0
+    pooling_area_mode: area
+    pooling_type: attention
+  space:
+    attention_hidden_dim:
+      values:
+      - 256
+      when:
+        pooling_type: attention
+    attention_variant:
+      values:
+      - simple
+      when:
+        pooling_type: attention
+    log_sum_exp_beta:
+      values:
+      - 0.25
+      when:
+        pooling_type: log_sum_exp
+    log_sum_exp_mode:
+      values:
+      - fixed
+      when:
+        pooling_type: log_sum_exp
+    negative_surface_lambda:
+      values:
+      - 0.0
+      - 0.03
+      - 0.1
+      - 0.3
+      - 1.0
+      - 1.5
+      - 2.0
+      - 3.0
+      - 5.0
+      - 10.0
+    pooling_area_mode:
+      values:
+      - area
+      when:
+        pooling_type:
+          in:
+          - attention
+          - log_sum_exp
+    pooling_type:
+      values:
+      - max
+      - log_sum_exp
+      - attention
+with:
+  architecture_spike: baseline
+  atom_spatial_k: 8
+  atomic_layers: 2
+  batch_size: 16
+  cardinality_lambda: 0.0
+  data_workers: 4
+  dataset:
+    dataset: wisdom-dna-reduced@6
+  diffusion_spectral_modes: 32
+  dirichlet_lambda: 0.0
+  dropout: 0.2
+  embedding_dim: 32
+  epochs: 500
+  evaluate_test: false
+  faithfulness_audit: false
+  gate_lambda: 0.04
+  head_type: single
+  hidden_dim: 128
+  initialization_profile: baseline
+  learning_rate: 0.001
+  minimum_delta: 0.001
+  model_version: 2
+  optimization_profile: baseline
+  patience: 30
+  pooling_area_mode: point
+  positive_existence_lambda: 0.0
+  precision: auto
+  projection_depth: 3
+  regional_positive_lambda: 0.0
+  regional_ranking_lambda: 0.0
+  residue_embedding_dim: 64
+  subset: full
+  surface_atom_k: 16
+  surface_atom_radius: 4
+  surface_layers: 4
+  surface_metrics: true
+  surface_metrics_interval: 1
+  surface_refiner_heat_length: 6.0
+  surface_refiner_type: heat
+  total_variation_lambda: 0.0
+  visualization:
+    content: predictions
+    maximum_points: 2000
+    maximum_proteins: 4
+    mode: none
+    report_budget_mib: 4.0
+  weak_loss_profile: custom
+  weight_decay: 0.0005

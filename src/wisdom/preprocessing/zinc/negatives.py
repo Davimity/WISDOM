@@ -8,6 +8,9 @@ from typing import Any
 from pathlib import Path
 from functools import partial
 from collections import Counter
+from urllib.error import HTTPError
+from datetime import datetime, timezone
+from lambdaforge.work import ManagedFile
 from urllib.parse import urlencode, urlsplit
 from collections.abc import Mapping, Sequence
 from wisdom.utils.structure.ProteinStructure import ProteinStructure
@@ -31,18 +34,87 @@ def fetch_json(work: lf.Work, url: str, key: str, root: Path,
         Parsed JSON object; the original response remains available for independent review.
 
     Raises:
-        OSError: Native retries cannot acquire or store the response.
-        ValueError: The service returns malformed JSON.
+        RuntimeError: Native acquisition or JSON validation fails; includes the source key,
+            exact URL and, for HTTP failures, the server's explanation.
+        OSError: The acquired response or receipt cannot be stored in the output directory.
     """
     rate   = work.cache.rate_limit(urlsplit(url).netloc,
                                    requests_per_second=requests_per_second)
-    source = work.cache.fetch(url, key=key, retries=5, timeout=90, rate_limit=rate)
+    work.log(f"Fetching or restoring JSON source {key}: {url}", level="debug")
+
+    # LF retries transient network/HTTP failures and validates both restored and new files.
+    # A rejected query is not transient: retain the response body so the offending field is
+    # visible instead of encouraging repeated attempts at the same invalid request.
+
+    try:
+        source = work.cache.fetch(url, key=key, retries=5, retry_backoff=2.0,
+                                 timeout=90, rate_limit=rate, validate=valid_json_response)
+    except (RuntimeError, OSError, ValueError) as error:
+        detail = str(error)
+        cause  = error.__cause__
+        if isinstance(cause, HTTPError):
+            try:
+                body = cause.read(2048).decode("utf-8", errors="replace").strip()
+            except OSError:
+                body = ""
+            detail += f"; server response: {body}" if body else ""
+            if cause.code in {400, 422}:
+                detail += "; the service rejected the query: correct its fields, not its retries"
+        message = (f"JSON acquisition failed for {key} at {url}: {detail}. "
+                   "Discovery stopped without publishing a partial evidence inventory; "
+                   "native cached files and completed map checkpoints remain reusable.")
+        work.log(message, level="error")
+        raise RuntimeError(message) from error
     target = root / "sources" / key
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_bytes(Path(source).read_bytes())
+    digest = hashlib.sha256(target.read_bytes()).hexdigest()
+    receipt = work.checkpoints.file(f"source-receipts/{key}.json", build=partial(
+        write_source_receipt, url=url, key=key, digest=digest))
+    target.with_name(target.name + ".source.json").write_bytes(Path(receipt).read_bytes())
     if sources is not None:
         sources.append({"url": url, "key": key})
     return json.loads(target.read_text())
+
+
+def valid_json_response(path: Path | ManagedFile) -> bool:
+    """Keep HTML error pages and malformed JSON out of the native response cache.
+
+    Args:
+        path: LF-managed new or restored response; expected to contain a UTF-8 JSON object.
+
+    Returns:
+        True for a decodable JSON object; false for malformed or non-object content. LF owns
+        invalidation, rebuilding and atomic publication. Endpoint-specific coverage checks
+        remain in the scientific caller and are not replaced by this format check.
+
+    Raises:
+        OSError: The managed response cannot be read.
+    """
+    try:
+        return isinstance(json.loads(Path(path).read_bytes()), dict)
+    except ValueError:
+        return False
+
+
+def write_source_receipt(path: Path, url: str, key: str, digest: str) -> None:
+    """Record the first observation of a response within its native acquisition checkpoint.
+
+    Args:
+        path: Framework-owned durable JSON receipt destination.
+        url: Exact public request URL.
+        key: Logical response identity relative to the portable sources directory.
+        digest: SHA-256 of the original response bytes, not parsed or normalized JSON.
+
+    Returns:
+        None; writes an operational timestamp separately from scientific content identity.
+
+    Raises:
+        OSError: The checkpoint receipt cannot be written.
+    """
+    path.write_text(json.dumps({"url": url, "file": f"sources/{key}", "sha256": digest,
+        "first_observed_at": datetime.now(timezone.utc).isoformat(),
+        "timestamp_scope": "first_observed_by_this_discovery"}, indent=2))
 
 
 def annotations(work: lf.Work, parameters: Mapping[str, str], namespace: str,
@@ -74,7 +146,7 @@ def annotations(work: lf.Work, parameters: Mapping[str, str], namespace: str,
                              requests_per_second, sources)
         hits    = int(payload["numberOfHits"])
         if expected is not None and hits != expected:
-            raise RuntimeError("QuickGO changed during pagination; use a new release_id")
+            raise RuntimeError("QuickGO changed during pagination; start a new Discovery snapshot")
         expected = hits
         total    = int(payload["pageInfo"]["total"])
         rows.extend(payload["results"])
@@ -111,7 +183,7 @@ def discover_negatives(
         OSError: Public acquisition or output writing fails.
     """
     if not go_terms or not set(go_terms) <= set(ZINC_NEGATIVE_TERMS):
-        raise ValueError("negative_go_terms must contain only reviewed Zn-binding ancestors")
+        raise ValueError("negative_evidence_go_terms must contain reviewed Zn-binding ancestors")
 
     # Exact term queries are essential: denying a more specific child activity does not
     # deny all Zn binding. Verify the broader terms against the frozen is-a ontology graph.
@@ -175,16 +247,28 @@ def discover_negatives(
             elif previous["sequence"] != row["sequence"]:
                 raise ValueError("Conflicting exact-sequence mappings for one negative identity")
             else:
-                previous["label_evidence"]["support"].extend(row["label_evidence"]["support"])
+                # Preserve every assertion, while displaying the most directly Zn-specific
+                # experimental denial, not whichever canonical subject sorted first.
+
+                evidence = (previous["label_evidence"], row["label_evidence"])
+                primary = min(evidence, key=lambda item:
+                              ZINC_NEGATIVE_TERMS.index(item["term"]))
+                support = [assertion for item in evidence for assertion in item["support"]]
+                previous["label_evidence"] = {**primary, "support": support}
     output = root / "negative-evidence.jsonl"
     output.write_text("".join(json.dumps(row, sort_keys=True) + "\n"
                               for _, row in sorted(candidates.items())))
     audit = {
         "policy": "experimental NOT; exact canonical full-sequence mapping; no absence labels",
-        "release_id": release_id, "go_terms": list(go_terms),
+        "acquisition_session": release_id, "negative_evidence_go_terms": list(go_terms),
         "queried_annotations": queried, "experimental_subjects": len(subjects),
+        "accepted_annotations": sum(len(values) for values in subjects.values()),
         "mapped_candidates": len(candidates),
         "unique_negative_sequences": len({row["sequence"] for row in candidates.values()}),
+        "subject_funnel": {"canonical_experimental_subjects": len(subjects),
+            **{stage: sum(bool(result.get("stages", {}).get(stage)) for result in mapped)
+               for stage in ("contradiction_free", "PDB_cross_referenced",
+                             "exact_sequence_mapped")}},
         "exclusion_counts": dict(Counter(row["reason"] for row in exclusions)),
         "exclusions": exclusions,
         "source_sha256": {str(path.relative_to(root)): hashlib.sha256(path.read_bytes()).hexdigest()
@@ -221,28 +305,35 @@ def map_subject(subject: Mapping[str, Any], work: lf.Work, root: Path, namespace
     accession = subject["accession"]
     exclusions: list[dict[str, Any]] = []
     sources: list[dict[str, str]] = []
+    stages = {"contradiction_free": False, "PDB_cross_referenced": False,
+              "exact_sequence_mapped": False}
     positive = annotations(work, {"geneProductId": f"UniProtKB:{accession}",
                                   "goId": "GO:0008270", "goUsage": "descendants"},
                            f"{namespace}/{accession}/assertions", root,
                            requests_per_second, sources)
     if any("NOT" not in row["qualifier"].split("|")
            and row["goEvidence"] in EXPERIMENTAL_CODES for row in positive):
-        return {"rows": [], "sources": sources, "exclusions": [{"subject": accession,
+        return {"rows": [], "sources": sources, "stages": stages,
+                "exclusions": [{"subject": accession,
                  "reason": "contradictory_experimental_Zn_annotation"}]}
+    stages["contradiction_free"] = True
     entry = fetch_json(work, f"https://rest.uniprot.org/uniprotkb/{accession}.json",
                        f"{namespace}/{accession}/uniprot.json", root, requests_per_second, sources)
     sequence = entry["sequence"]["value"].upper()
     pdbs     = sorted({row["id"].lower() for row in entry.get("uniProtKBCrossReferences", [])
                        if row["database"] == "PDB"})
     rows = []
+    stages["PDB_cross_referenced"] = bool(pdbs)
     if not pdbs or "X" in sequence:
-        return {"rows": [], "sources": sources, "exclusions": [{"subject": accession,
+        return {"rows": [], "sources": sources, "stages": stages,
+                "exclusions": [{"subject": accession,
                  "reason": "no_PDB_cross_reference" if not pdbs else "ambiguous_subject_sequence"}]}
     for pdb in pdbs:
         rate   = work.cache.rate_limit("files.rcsb.org",
                                        requests_per_second=requests_per_second)
         source = work.cache.fetch(f"https://files.rcsb.org/download/{pdb.upper()}.cif.gz",
-                                  key=f"structures/{pdb}.cif", decompress="gzip",
+                                  key=f"zinc-coordinates/{namespace.rsplit('/', 1)[-1]}/{pdb}.cif",
+                                  decompress="gzip",
                                   retries=5, timeout=180, rate_limit=rate)
         structure = ProteinStructure(Path(source))
         matching  = []
@@ -265,7 +356,10 @@ def map_subject(subject: Mapping[str, Any], work: lf.Work, root: Path, namespace
             exclusions.append({"subject": accession, "pdb": pdb,
                                "reason": "no_exact_full_sequence_in_declared_assembly"})
         for chain_name, copy in sorted(copies.items()):
-            annotation = subject["annotations"][0]
+            annotation = min(subject["annotations"], key=lambda row:
+                             ZINC_NEGATIVE_TERMS.index(row["goId"]))
+            tier = {"GO:0008270": "direct_Zn_NOT", "GO:0046872": "broader_metal_NOT",
+                    "GO:0043169": "broader_cation_NOT", "GO:0043167": "broader_ion_NOT"}
             rows.append({
                 "identifier": f"{pdb.upper()}_{chain_name}", "sequence": sequence, "label": 0,
                 **copy, "origin": "quickgo_experimental_NOT",
@@ -277,8 +371,10 @@ def map_subject(subject: Mapping[str, Any], work: lf.Work, root: Path, namespace
                     "sequence_sha256": hashlib.sha256(sequence.encode()).hexdigest(),
                     "uniprot": accession, "mapping": "exact_full_entity_sequence",
                     "support": subject["annotations"],
+                    "negative_evidence_tier": tier[annotation["goId"]],
                 },
             })
         work.log(f"Zn negative {accession}/{pdb}: {len(copies)} exact chain mappings",
                  level="debug")
-    return {"rows": rows, "sources": sources, "exclusions": exclusions}
+    stages["exact_sequence_mapped"] = bool(rows)
+    return {"rows": rows, "sources": sources, "stages": stages, "exclusions": exclusions}

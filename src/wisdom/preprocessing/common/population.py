@@ -50,7 +50,10 @@ def select_population(
     if keep_all_positives:
         positive_target = len(positives)
 
-    selected_positives = _diverse(
+    # With no quota there is no ranking decision: avoid a quadratic greedy pass over a large
+    # positive universe. Final identifier ordering and scientific membership are unchanged.
+
+    selected_positives = positives if positive_target == len(positives) else _diverse(
         positives,
         positive_target,
         seed,
@@ -105,6 +108,7 @@ def _diverse(
         prefer_core: Prefer the supplied provenance prefix when true.
         preferred_origin_prefix: Task-owned provenance preference, empty for none.
         additional_strata: Extra descriptive fields used only after group/phenotype diversity.
+            List-valued annotations contribute each actual domain; missing is not a category.
 
     Returns:
         Selected rows in deterministic choice order.
@@ -116,6 +120,19 @@ def _diverse(
     local_counts: Counter[str] = Counter()
     origin_counts: Counter[str] = Counter()
     extra_counts = {field: Counter[str]() for field in additional_strata}
+
+    # Multidomain proteins describe several categories, not one artificial list-shaped family.
+    # Precompute real tokens once; missing metadata supplies no diversity claim.
+
+    extra_tokens = {}
+    for identifier, row in remaining.items():
+        tokens = {}
+        for field in additional_strata:
+            value = row.get(field)
+            values = value if isinstance(value, (list, tuple)) else [value]
+            tokens[field] = tuple(sorted({str(item) for item in values if item not in (None, "")}))
+        extra_tokens[identifier] = tokens
+
     while len(selected) < target:
         chosen = min(
             remaining.values(),
@@ -126,7 +143,8 @@ def _diverse(
                 global_counts[str(row["global_phenotype"])],
                 local_counts[str(row["local_phenotype"])],
                 origin_counts[str(row["origin"])],
-                tuple(extra_counts[field][str(row.get(field, "unknown"))]
+                tuple(min((extra_counts[field][token] for token in
+                           extra_tokens[str(row["identifier"])][field]), default=float("inf"))
                       for field in additional_strata),
                 _rank(seed, str(row["identifier"])),
             ),
@@ -138,7 +156,7 @@ def _diverse(
         local_counts[str(chosen["local_phenotype"])] += 1
         origin_counts[str(chosen["origin"])] += 1
         for field in additional_strata:
-            extra_counts[field][str(chosen.get(field, "unknown"))] += 1
+            extra_counts[field].update(extra_tokens[str(chosen["identifier"])][field])
     return selected
 
 

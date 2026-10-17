@@ -116,6 +116,15 @@ class ZincCoordination:
                           "accepted": len(local) >= self.minimum_donors
                           and len(residues) >= self.minimum_residues,
                           "definition": f"occupied protein N/O/S centers within {self.cutoff} Å"})
+            # This is a transparent descriptive tier, not a calibrated binding probability.
+            # Stronger structural support does not establish physiological metal specificity.
+
+            site = sites[-1]
+            strong = (site["accepted"] and len(local) >= 4 and len(residues) >= 3
+                      and min([metal["occupancy"], *[a["occupancy"] for a in local]]) >= 0.8
+                      and max(distances, default=float("inf")) <= 2.8)
+            site["confidence_tier"] = ("structural_strong" if strong else "structural_basic"
+                                        if site["accepted"] else "not_accepted")
         return sites
 
     @staticmethod
@@ -165,7 +174,9 @@ class ZincCoordination:
             if prior.get("coordination_schema") == "2.0":
                 coordination = {key: value for key, value in prior.items()
                                 if key not in {
-                                    "surface_support", "local_phenotype", "external_metadata"}}
+                                    "surface_support", "local_phenotype", "external_metadata",
+                                    "confidence_tier"}}
+                actual = {key: value for key, value in actual.items() if key != "confidence_tier"}
                 if actual != coordination:
                     return False
                 continue

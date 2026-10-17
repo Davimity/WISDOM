@@ -4,7 +4,8 @@ from enum import Enum
 
 
 class VisualizationContent(str, Enum):
-    """Select lightweight prediction maps or the complete structural inspector."""
+    """Select lightweight predictions, sampled learned features, or full structural layers."""
 
     PREDICTIONS = "predictions"
+    FEATURES    = "features"
     FULL        = "full"

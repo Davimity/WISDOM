@@ -8,50 +8,67 @@ import numpy as np
 
 from typing import Any
 from pathlib import Path
+from itertools import product
 from functools import partial
 from collections.abc import Mapping, Sequence
-from wisdom.preprocessing.common.descriptors import (
-    global_features, protein_coordinates, rigid_transform, sequence_features,
-)
 from wisdom.utils.structure.ProteinStructure import ProteinStructure
 from wisdom.preprocessing.zinc.ZincCoordination import ZincCoordination
 from wisdom.preprocessing.common.structure.ProteinReader import ProteinReader
 from wisdom.preprocessing.common.structure.SurfaceBuilder import SurfaceBuilder
-from wisdom.preprocessing.common.structure.StructureSource import StructureSource
 from wisdom.preprocessing.common.structure.PreprocessConfig import PreprocessConfig
+from wisdom.preprocessing.common.structure.StructureSource import StructureSource
+from wisdom.preprocessing.common.descriptors import (
+    global_features, protein_coordinates, rigid_transform, sequence_features,
+)
 
 
 def analyse_structures(
     work: Any, rows: Sequence[Mapping[str, Any]], workers: int, cutoff: float,
     minimum_occupancy: float, minimum_donors: int, minimum_residues: int,
-    maximum_resolution: float | None, requests_per_second: float,
+    maximum_resolution: float | None,
     surface_resolution: float = 1.0, probe_radius: float = 1.4, positive_gap: float = 1.4,
+    frozen_sources: Mapping[str, Path] | None = None,
+    sensitivity_cutoffs: Sequence[float] = (2.8, 3.0, 3.2),
+    sensitivity_minimum_donors: Sequence[int] = (2, 3, 4),
+    sensitivity_minimum_residues: Sequence[int] = (1, 2, 3),
 ) -> list[dict[str, Any]]:
-    """Download once per deposition, then verify every selected assembly/copy.
+    """Verify every selected assembly/copy using only frozen deposited coordinate bytes.
 
     Args:
         work: Native Work cache, checkpoints and resume_map services.
         rows: Complete frozen positive/explicit-negative evidence population.
-        workers: Concurrent I/O workers, not a scientific setting.
+        workers: Concurrent local structure workers, not a scientific setting.
         cutoff: Maximum Zn-protein N/O/S center distance in ångströms.
         minimum_occupancy: Minimum occupancy for metal and protein donor atoms.
         minimum_donors: Minimum selected-copy N/O/S donors per accepted site.
         minimum_residues: Minimum selected-copy coordinating residues per accepted site.
         maximum_resolution: Worst accepted deposited resolution in ångströms; None disables.
-        requests_per_second: Shared native public-service request ceiling.
         surface_resolution: Early surface sampling spacing in ångströms, default 1.
         probe_radius: Solvent expansion radius in ångströms, default 1.4.
         positive_gap: Maximum coordinating-atom gap supporting local GT, default 1.4 Å.
+        frozen_sources: Exact Discovery coordinate archives, required; no live-service fallback.
+        sensitivity_cutoffs: Audit-only cutoffs in Å, default 2.8/3/3.2.
+        sensitivity_minimum_donors: Audit-only donor minima, default 2/3/4.
+        sensitivity_minimum_residues: Audit-only residue minima, default 1/2/3.
 
     Returns:
         Analysed full RAW rows, including rejected contacts and contradictory evidence. All
         parseable candidates still enter homology grouping before canonical filtering.
+
+    Raises:
+        ValueError: The frozen coordinate mapping is absent or evidence disagrees with its bytes.
+        OSError: Frozen structures or checkpoint destinations cannot be read or written.
     """
+    if frozen_sources is None:
+        raise ValueError("Zn Selection requires frozen coordinates; rerun Discovery, not RCSB")
     return work.resume_map(rows, partial(
         _analyse, work=work, cutoff=cutoff, minimum_occupancy=minimum_occupancy,
         minimum_donors=minimum_donors, minimum_residues=minimum_residues,
-        maximum_resolution=maximum_resolution, requests_per_second=requests_per_second,
+        maximum_resolution=maximum_resolution,
         surface_resolution=surface_resolution, probe_radius=probe_radius, positive_gap=positive_gap,
+        frozen_sources=frozen_sources, sensitivity_cutoffs=sensitivity_cutoffs,
+        sensitivity_minimum_donors=sensitivity_minimum_donors,
+        sensitivity_minimum_residues=sensitivity_minimum_residues,
     ), key=lambda row: str(row["identifier"]), workers=workers, executor="thread",
         name="zinc-structures")
 
@@ -59,8 +76,9 @@ def analyse_structures(
 def _analyse(
     raw: Mapping[str, Any], work: Any, cutoff: float, minimum_occupancy: float,
     minimum_donors: int, minimum_residues: int, maximum_resolution: float | None,
-    requests_per_second: float,
     surface_resolution: float, probe_radius: float, positive_gap: float,
+    frozen_sources: Mapping[str, Path], sensitivity_cutoffs: Sequence[float],
+    sensitivity_minimum_donors: Sequence[int], sensitivity_minimum_residues: Sequence[int],
 ) -> dict[str, Any]:
     """Verify one deposited-chain identity and retain explicit exclusion reasons.
 
@@ -72,10 +90,13 @@ def _analyse(
         minimum_donors: Selected-copy donor atom minimum.
         minimum_residues: Selected-copy donor residue minimum.
         maximum_resolution: Maximum resolution in ångströms or None.
-        requests_per_second: Shared native download ceiling.
         surface_resolution: Early surface spacing in ångströms.
         probe_radius: Early solvent expansion radius in ångströms.
         positive_gap: Early positive surface threshold in ångströms.
+        frozen_sources: Deposited-byte archives indexed by lowercase PDB ID.
+        sensitivity_cutoffs: Audit-only Å cutoffs; do not alter accepted membership.
+        sensitivity_minimum_donors: Audit-only atom minima.
+        sensitivity_minimum_residues: Audit-only residue minima.
 
     Returns:
         JSON-compatible row with source digest, rigid transform, sites and physical descriptors.
@@ -84,10 +105,7 @@ def _analyse(
         ValueError: Missing chain/copy, sequence mismatch or invalid coordinates.
     """
     pdb = str(raw["pdb_id"])
-    rate = work.cache.rate_limit("files.rcsb.org", requests_per_second=requests_per_second)
-    source = work.cache.fetch(f"https://files.rcsb.org/download/{pdb.upper()}.cif.gz",
-                              key=f"structures/{pdb}.cif", decompress="gzip",
-                              retries=5, timeout=180, rate_limit=rate)
+    source = frozen_sources[pdb]
     structure = ProteinStructure(Path(source))
     if raw.get("structure_sha256") and raw["structure_sha256"] != structure.sha256():
         raise ValueError(f"{raw['identifier']}: deposition revision differs from frozen discovery")
@@ -104,6 +122,25 @@ def _analyse(
                              minimum_residues).analyse(assembly, str(raw["protein_chain"]),
                                                        int(raw["protein_copy"]))
     accepted = [site for site in sites if site["accepted"]]
+
+    # Evaluate nearby policies against the same assembly, not separately selected datasets.
+    # Occupancy and chain/copy remain fixed; wider candidate neighborhoods are measured once.
+
+    wide = ZincCoordination(max([cutoff, *sensitivity_cutoffs]), minimum_occupancy,
+                             minimum_donors, minimum_residues).analyse(
+        assembly, str(raw["protein_chain"]), int(raw["protein_copy"]))
+    sensitivity = []
+    for distance, donors, residues in product(sensitivity_cutoffs, sensitivity_minimum_donors,
+                                              sensitivity_minimum_residues):
+        surviving = []
+        for site in wide:
+            local = [atom for atom in site["partners"]
+                     if atom["chain_index"] == site["selected_chain_index"]
+                     and atom["distance_angstrom"] <= distance]
+            if len(local) >= donors and len({atom["residue"] for atom in local}) >= residues:
+                surviving.append(site["site_id"])
+        sensitivity.append({"cutoff": distance, "minimum_donors": donors,
+                            "minimum_residues": residues, "site_ids": surviving})
     local_donors = [(site, atom) for site in accepted for atom in site["partners"]
                     if atom["chain_index"] == site["selected_chain_index"]]
     lengths = [float(np.linalg.norm(np.asarray(atom["position"]) - site["position"]))
@@ -120,6 +157,7 @@ def _analyse(
         reasons.append("resolution_exceeds_maximum")
     protein = protein_coordinates(chain, len(sequence))
     rotation, translation = rigid_transform(deposited, chain)
+
     # Local evaluability is audited before balancing/splits, without fitting curvature or
     # spectral operators. Buried positive sites remain valid protein-level evidence.
 
@@ -171,6 +209,9 @@ def _analyse(
         "positive_confidence": (evidence.get("confidence", "structural_coordination_only")
                                 if int(raw["label"]) else "not_applicable"),
         "negative_confidence": evidence["kind"] if not int(raw["label"]) else "not_applicable",
+        "negative_evidence_tier": (evidence.get("negative_evidence_tier", "explicit_assay")
+                                   if not int(raw["label"]) else "not_applicable"),
+        "threshold_sensitivity": sensitivity,
         "coordination_parameters": {"cutoff": cutoff, "minimum_occupancy": minimum_occupancy,
                                     "minimum_donors": minimum_donors,
                                     "minimum_residues": minimum_residues},

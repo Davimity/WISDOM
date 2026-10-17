@@ -746,12 +746,12 @@ def test_experiment_campaign_uses_ordered_names_and_traceability_headers() -> No
         "v5/wisdom_v5c.yaml",
         "v6/wisdom_v6a.yaml",
         "v6/wisdom_v6b.yaml",
-        "v6/wisdom_v6b2.yaml",
-        "v6/wisdom_v6b3.yaml",
         "v6/wisdom_v6c.yaml",
-        "v6/wisdom_v6c2.yaml",
-        "v6/wisdom_v6c3.yaml",
         "v6/wisdom_v6d.yaml",
+        "v6/wisdom_v6e.yaml",
+        "v6/wisdom_v6f.yaml",
+        "v6/wisdom_v6g.yaml",
+        "v6/wisdom_v6h.yaml",
         "v7/wisdom_v7.yaml",
         "v8/wisdom_v8.yaml",
         "v9/wisdom_v9.yaml",
@@ -771,8 +771,8 @@ def test_experiment_campaign_uses_ordered_names_and_traceability_headers() -> No
     assert actual == sorted(stage_names)
 
 
-def test_one_factor_comparisons_use_automatic_fixed_sweeps() -> None:
-    """Finite screens must use LambdaForge's paired, non-pruned sweep contract."""
+def test_finite_comparisons_use_complete_fixed_sweeps() -> None:
+    """Finite screens/factorials use LF sweeps; V6 preserves four explicit paired seeds."""
     experiment_root = Path(__file__).parents[1] / "experiments"
     single_studies  = (
         "v2/wisdom_v2.yaml",
@@ -780,11 +780,8 @@ def test_one_factor_comparisons_use_automatic_fixed_sweeps() -> None:
         "v5/wisdom_v5a.yaml",
         "v6/wisdom_v6a.yaml",
         "v6/wisdom_v6b.yaml",
-        "v6/wisdom_v6b2.yaml",
-        "v6/wisdom_v6b3.yaml",
         "v6/wisdom_v6c.yaml",
-        "v6/wisdom_v6c2.yaml",
-        "v6/wisdom_v6c3.yaml",
+        "v6/wisdom_v6d.yaml",
         "v7/wisdom_v7.yaml",
         "v8/wisdom_v8.yaml",
     )
@@ -794,7 +791,8 @@ def test_one_factor_comparisons_use_automatic_fixed_sweeps() -> None:
         sweep = study["sweep"]
 
         assert "space" in sweep
-        assert "reference" in sweep
+        if not name.startswith("v6/"):
+            assert "reference" in sweep
         assert "search" not in study
         # Explicit paired seeds and native automatic replication are both valid sweeps.
         if "seeds" in study:
@@ -804,21 +802,19 @@ def test_one_factor_comparisons_use_automatic_fixed_sweeps() -> None:
         assert study["objective"]["range"] == [0.0, 1.0]
         assert study["objective"]["practical_margin"] == pytest.approx(0.015)
 
-def test_loss_combination_keeps_adaptive_interaction_search() -> None:
-    """The three-loss mixture should use automatic optimize-mode HPO, not a fixed sweep."""
+def test_regional_ranking_has_one_isolated_coefficient_screen() -> None:
+    """V6d isolates regional ranking instead of prematurely combining other families."""
     experiment = Path(__file__).parents[1] / "experiments" / "v6/wisdom_v6d.yaml"
     study      = safe_load(experiment.read_text(encoding="utf-8"))
-    search     = study["search"]
+    space      = study["sweep"]["space"]
 
-    assert search["goal"] == "optimize"
-    assert "budget" not in search
-    assert "replication" not in search
-    assert "pruning" not in search
-    assert {
-        "negative_surface_lambda",
-        "regional_positive_lambda",
-        "dirichlet_lambda",
-    }.issubset(search["space"])
+    assert "search" not in study
+    assert study["seeds"] == [4, 7, 32, 54]
+    assert space["regional_ranking_lambda"]["values"] == [0.0, 0.03, 0.1, 0.3]
+    assert "negative_surface_lambda" not in space
+    assert "positive_existence_lambda" not in space
+    assert study["with"]["negative_surface_lambda"] == 0.0
+    assert study["with"]["positive_existence_lambda"] == 0.0
 
 
 @pytest.mark.parametrize(

@@ -157,6 +157,73 @@ def test_trial_policies_and_aggregation(ranked, policy, trials):
     assert len(ReviewSelection.trials(ranked[:3], None)) == 3
 
 
+def test_simple_parameter_filters_do_not_mix_inactive_family_fields(ranked):
+    """OR branches preserve controls without requiring another family's inactive parameter."""
+    parameters = {"pooling_type": "attention", "attention_hidden_dim": 32}
+    alternatives = [{"pooling_type": "max"},
+                    {"pooling_type": "attention", "attention_hidden_dim": [16, 32]}]
+    assert ReviewSelection.matches(parameters, alternatives)
+    assert ReviewSelection.matches({"pooling_type": "max"}, alternatives)
+    assert not ReviewSelection.matches({**parameters, "attention_hidden_dim": 64}, alternatives)
+    assert not ReviewSelection.matches({}, {"attention_hidden_dim": None})
+    assert ReviewSelection.matches({}, {})
+    assert not ReviewSelection.matches(parameters, [])
+    assert len(ReviewSelection.trials(
+        ranked, {"mode": "parameter_filter", "where": alternatives}
+    )) == 3
+
+
+def test_automatic_case_panel_fills_count_without_manual_identifiers():
+    """Fill requested counts, include binary successes/errors, and keep undefined AP unranked."""
+    rows = {
+        f"protein-{index:02}": {
+            "label": index % 2,
+            "protein_probability": 0.9 if index % 4 < 2 else 0.1,
+            "normalized_surface_auprc": index / 32 if index % 2 else None,
+            "positive_mass": index / 32,
+            "positive_peak": index / 32,
+        }
+        for index in range(32)
+    }
+    chosen, reasons = ReviewInference.proteins(rows, {}, 24, 0.5)
+    assert len(chosen) == len(set(chosen)) == 24
+    categories = {category for values in reasons.values() for category in values}
+    assert {"best_localization", "worst_localization", "false_positive", "false_negative",
+            "correct_negative", "correct_positive", "negative_peak"} <= categories
+    assert all(rows[key]["normalized_surface_auprc"] is not None for key in reasons
+               if set(reasons[key]) & {"best_localization", "worst_localization"})
+    assert ReviewInference.proteins(rows, {}, 24, 0.5) == (chosen, reasons)
+    bounded, _ = ReviewInference.proteins(rows, {"cases_per_category": 1}, 24, 0.5)
+    assert len(bounded) <= 8
+    complete, _ = ReviewInference.proteins(rows, {}, 0, 0.5)
+    assert len(complete) == len(rows)
+
+
+def test_simple_review_options_reject_conflicting_advanced_policies():
+    """Fail contradictory selectors before any ResultStore access or inference."""
+    with pytest.raises(ValueError, match="source_seed or seed_selection"):
+        StudyReview().run("unused", Path("unused"), source_seed=4, seed_selection={"mode": "all"})
+    with pytest.raises(ValueError, match="parameter_filter or trial_selection"):
+        StudyReview().run("unused", Path("unused"), parameter_filter={},
+                          trial_selection={"mode": "all"})
+
+
+def test_authored_visualization_defaults_use_saved_seed_and_automatic_cases():
+    """Every study gallery exposes simple controls without manual IDs or repeated payload caps."""
+    experiments = Path(__file__).resolve().parents[1] / "experiments"
+    paths = sorted(experiments.glob("v*/visualization/*.yaml"))
+    assert len(paths) == 21
+    for path in paths:
+        authored = yaml.safe_load(path.read_text())
+        settings = authored["with"]
+        assert settings["source_seed"] == 4
+        assert settings["maximum_proteins"] > 0
+        assert not {"protein_selection", "seed_selection", "trial_selection",
+                    "maximum_surface_points", "report_maximum_mib"} & settings.keys()
+        assert authored["resources"]["gpu"] == 1
+        assert "PENDING LF ASSET SUPPORT" in path.read_text()
+
+
 def test_pareto_dominance_mean_and_conditional_null(ranked):
     ranked.append(row(2, 4, 0.05))
     ranked[-1]["artifacts"][0]["metadata"]["metrics"]["surface_score"] = 0.05
@@ -336,6 +403,22 @@ def test_native_and_imported_review_forward_coverage(
     assert not list(review.execution_dir.rglob("*.npz"))
 
 
+def test_saved_seed_and_parameter_filter_shortcuts(native_source, tmp_path, monkeypatch):
+    """The concise YAML interface forwards the requested saved model without fitting."""
+    _, execution, labels = native_source
+    forbid_training(monkeypatch)
+    review = WorkRunner().run(review_config(
+        tmp_path, execution, labels, source_seed=4, parameter_filter={"epoch": [7]},
+        maximum_proteins=2,
+    ))
+    assert review.status == "succeeded", review.to_dict()
+    audit = json.loads(output(review, "review-audit").read_text())
+    assert len(audit) == 1 and audit[0]["seed"] == 4
+    assert audit[0]["evaluated_proteins"] == 2 and audit[0]["inference_batch_size"] == 1
+    assert set(audit[0]["selection_reasons"]) == {"val-0", "val-1"}
+    assert not list(review.execution_dir.rglob("*.pt"))
+
+
 def test_native_products_select_snapshot_ranking_and_durable_modelset(
     native_source, tmp_path, monkeypatch
 ):
@@ -367,6 +450,8 @@ def test_native_products_select_snapshot_ranking_and_durable_modelset(
                 },
                 "dataset": {"file": str(labels)},
                 "maximum_surface_points": 20,
+                "source_seed": 32,
+                "parameter_filter": {},
             },
             "resources": {"cpu": 1},
         },

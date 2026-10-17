@@ -6,7 +6,6 @@ import csv
 import json
 import torch
 import hashlib
-import numpy as np
 import lambdaforge as lf
 
 from typing import Any
@@ -16,7 +15,6 @@ from collections.abc import Mapping, Sequence
 from wisdom.data.WisdomDataset import WisdomDataset
 from wisdom.data.WisdomCollator import WisdomCollator
 from wisdom.Training import Training, _create_model, _evaluate
-from wisdom.evaluation.BinaryMetricSuite import BinaryMetricSuite
 from wisdom.visualization.ProteinReportPage import ProteinReportPage
 from wisdom.visualization.ValidationSelection import ValidationSelection
 from wisdom.evaluation.SurfacePredictionReport import SurfacePredictionReport
@@ -60,7 +58,8 @@ class ModelValidation(lf.Work):
             selected_trials: Reviewed display labels (e.g. pooling names) mapped to native Trial
                 indices. All completed, unpruned seeds of each selected Trial remain available.
             source_seeds: Optional exact seed filter; empty retains all recorded seeds.
-            content: predictions displays logits/probabilities and GT only; full includes atoms,
+            content: predictions displays logits/probabilities and GT; features adds model
+                channels without structural traces; full includes atoms,
                 structural channels and mesh. Neither changes inference or numerical metrics.
             maximum_surface_points: Positive deterministic display-only point ceiling; metrics
                 still use all points. Four-decimal display rounding never changes saved NPZ arrays.
@@ -266,6 +265,8 @@ class ModelValidation(lf.Work):
                         document.update(
                             variant=label,
                             seed=run.get("seed"),
+                            configuration=run["parameters"],
+                            run_id=run.get("run_id"),
                             details={
                                 **statistics[document["identifier"]],
                                 "selection_reasons": reasons[document["identifier"]],
@@ -408,40 +409,7 @@ class ModelValidation(lf.Work):
             nAP=(AP-pi)/(1-pi), where pi is the valid-point interface prevalence; unavailable local
             targets or one-class masks produce None, never a fabricated perfect/zero AP.
         """
-        rows: dict[str, dict[str, Any]] = {}
-        for identifier, (base, annotation, label) in report.records.items():
-            scores = report.predictions[identifier]
-            global_score = report.protein_probabilities[identifier]
-            ap: float | None = None
-            prevalence: float | None = None
-            normalized: float | None = None
-            if annotation is not None:
-                with np.load(annotation, allow_pickle=False) as data:
-                    valid = data["surface_valid_mask"].astype(bool)
-                    hard = data["surface_target_hard"][valid]
-                if label == 1 and valid.any():
-                    ap = BinaryMetricSuite().compute(
-                        torch.from_numpy(scores[valid]), torch.from_numpy(hard.copy()), ("auprc",)
-                    )["auprc"]
-                    prevalence = float(hard.mean())
-                    if ap is not None and prevalence < 1:
-                        normalized = (ap - prevalence) / (1 - prevalence)
-            with np.load(base, allow_pickle=False) as data:
-                area = data["surface_area_weights"]
-                mass = float(np.dot(scores, area) / area.sum())
-            rows[identifier] = {
-                "label":               label,
-                "protein_probability": global_score,
-                "binary_error": int(global_score >= threshold) != label,
-
-                "surface_auprc":            ap,
-                "interface_prevalence":     prevalence,
-                "normalized_surface_auprc": normalized,
-
-                "positive_mass": mass,
-                "positive_peak": float(scores.max()),
-            }
-        return rows
+        return report.statistics(threshold)
 
     @staticmethod
     def _select(

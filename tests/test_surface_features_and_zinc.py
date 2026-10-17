@@ -10,6 +10,8 @@ import pytest
 import torch
 from lambdaforge.data import DatasetAsset, DatasetIndex, DatasetMember
 from lambdaforge.work import WorkConfig, WorkRunner
+from lambdaforge.work.cache import WorkCache
+from lambdaforge.work.tools import ToolService
 from test_wisdom_v1 import _sample, _write_npz
 
 from wisdom.data.TaskSpecification import TaskSpecification
@@ -138,8 +140,12 @@ def test_normalization_depends_only_on_the_declared_training_population(tmp_path
     stats = SurfaceFeatureSidecar.fit_statistics([("TRAIN", base, sidecar)], names)
     training = SurfaceFeatureSidecar.read(sidecar, base, names)
     assert stats["sources"] == [
-        {"id": "TRAIN", "base_npz_sha256": hashlib.sha256(base.read_bytes()).hexdigest(),
-         "feature_sha256": hashlib.sha256(sidecar.read_bytes()).hexdigest(), "point_count": 3}
+        {
+            "id": "TRAIN",
+            "base_npz_sha256": hashlib.sha256(base.read_bytes()).hexdigest(),
+            "feature_sha256": hashlib.sha256(sidecar.read_bytes()).hexdigest(),
+            "point_count": 3,
+        }
     ]
     assert np.allclose(
         SurfaceFeatureSidecar.normalize(training, names, stats).mean(0), 0, atol=1e-6
@@ -310,13 +316,16 @@ def test_optional_fields_publish_through_native_LF_and_support_inference(tmp_pat
                 member_id=identifier,
                 partitions={"split": split},
                 targets={"dna_binding": label},
-                metadata={"dilutions": ["replicate-00/train-25"] if identifier == "FIXTURE_A"
-                          else []},
+                metadata={
+                    "dilutions": ["replicate-00/train-25"] if identifier == "FIXTURE_A" else []
+                },
                 assets={"universal_npz": DatasetAsset(path="base.npz")},
             )
-            for identifier, split, label in (("FIXTURE_A", "train", 1),
-                                              ("FIXTURE_B", "train", 0),
-                                              ("FIXTURE_C", "validation", 1))
+            for identifier, split, label in (
+                ("FIXTURE_A", "train", 1),
+                ("FIXTURE_B", "train", 0),
+                ("FIXTURE_C", "validation", 1),
+            )
         ],
     )
     monkeypatch.setenv("LAMBDAFORGE_DATASET_REGISTRY", str(tmp_path / "registry"))
@@ -340,9 +349,16 @@ def test_optional_fields_publish_through_native_LF_and_support_inference(tmp_pat
     )
     assert data[0]["surface_explicit_features"].shape == (3, 2)
     assert {source["id"] for source in data.feature_statistics["sources"]} == {
-        "FIXTURE_A", "FIXTURE_B"}
-    reduced = WisdomDataset(indexes[0].parent, "val", subset="replicate-00/train-25",
-        include_surface_targets=False, surface_features=("formal_charge_density",))
+        "FIXTURE_A",
+        "FIXTURE_B",
+    }
+    reduced = WisdomDataset(
+        indexes[0].parent,
+        "val",
+        subset="replicate-00/train-25",
+        include_surface_targets=False,
+        surface_features=("formal_charge_density",),
+    )
     assert len(reduced) == 1  # Validation is not filtered by a training dilution.
     assert [source["id"] for source in reduced.feature_statistics["sources"]] == ["FIXTURE_A"]
     # Learned mode does not consult or decode optional field files.
@@ -427,8 +443,14 @@ def test_zinc_diversity_report_preserves_rare_chemistry_and_unavailable_SMD(tmp_
             "split": "train",
             "origin": "fixture",
             "sequence_length": 10,
-            "sites": [{"accepted": True, "selected_residue_names": ["HIS", "ASP"],
-                       "selected_residue_counts": {"HIS": 2, "ASP": 1}, "interchain": False}],
+            "sites": [
+                {
+                    "accepted": True,
+                    "selected_residue_names": ["HIS", "ASP"],
+                    "selected_residue_counts": {"HIS": 2, "ASP": 1},
+                    "interchain": False,
+                }
+            ],
         }
         for i in range(4)
     ]
@@ -440,7 +462,12 @@ def test_zinc_diversity_report_preserves_rare_chemistry_and_unavailable_SMD(tmp_
     assert "not a significance test" in (tmp_path / "diversity.md").read_text()
 
 
-def test_native_zinc_preprocessing_publication_and_tiny_backward(tmp_path, monkeypatch):
+@pytest.mark.parametrize("complete_workflow", [False, True])
+def test_native_zinc_preprocessing_publication_and_tiny_backward(
+    tmp_path,
+    monkeypatch,
+    complete_workflow,
+):
     """Synthetic sources exercise real geometry, Zn references, native publication and ingestion.
 
     Artificial evidence and deliberately assigned toy groups test software only; they are never
@@ -458,6 +485,9 @@ def test_native_zinc_preprocessing_publication_and_tiny_backward(tmp_path, monke
             first_name = ("ALA", "GLU", "CYS")[split_index]
             source[0][0][0].name = first_name
             source[0][0][1].name = "HIS" if label else "ASP"
+            atom = gemmi.Atom()
+            atom.name, atom.element, atom.pos = ("CA", gemmi.Element("C"), gemmi.Position(1, 1, 0))
+            source[0][0][0].add_atom(atom)
             if not label:
                 del source[0]["Z"]
             source.setup_entities()
@@ -524,15 +554,101 @@ def test_native_zinc_preprocessing_publication_and_tiny_backward(tmp_path, monke
         f"with:\n  design: {{file: {design}}}\n  dataset_name: toy-zinc\n"
         "  workers: 1\n  surface_resolution: 2.0\n  diffusion_spectral_modes_max: 8\n"
     )
+    if complete_workflow:
+
+        def acquire(work, *args):
+            """Mock only public acquisition; retain native outputs and portable RAW coordinates."""
+            root = Path(work.outputs.directory("zinc-raw"))
+            raw = [
+                {
+                    key: value
+                    for key, value in row.items()
+                    if key not in ("split", "leakage_group", "global_phenotype", "local_phenotype")
+                }
+                for row in rows
+            ]
+            snapshot_structures(root / "structures", raw)
+            (root / "raw.jsonl").write_text("".join(json.dumps(row) + "\n" for row in raw))
+            digest = hashlib.sha256((root / "raw.jsonl").read_bytes()).hexdigest()
+            (root / "provenance.json").write_text(
+                json.dumps(
+                    {"raw_sha256": digest, "snapshot_id": "synthetic-unit-test", "pilot": True}
+                )
+            )
+            work.outputs.artifact("raw", root / "raw.jsonl")
+            return {
+                "raw_path": root / "raw.jsonl",
+                "positive_candidates": 3,
+                "explicit_negatives": 3,
+            }
+
+        def similarity(work, population, *args):
+            """Mock specialist pair computation, not full-RAW grouping or fixed group splitting."""
+            assert len(population) == 6
+            path = Path(work.outputs.file("toy-pairs.tsv"))
+            path.write_text("")
+            return {
+                "sequence_edges": [],
+                "structure_edges": [],
+                "sequence_path": path,
+                "structure_path": path,
+            }
+
+        monkeypatch.setattr("wisdom.preprocessing.zinc.ZincDiscovery.discover_candidates", acquire)
+        monkeypatch.setattr(
+            "wisdom.preprocessing.zinc.ZincSelection.compute_similarity", similarity
+        )
+        monkeypatch.setattr(ToolService, "require", lambda *args, **kwargs: "mock-versioned-tool")
+
+        def no_live_download(*args, **kwargs):
+            """Selection and all downstream Works must use snapshots, not consult live RCSB."""
+            pytest.fail("A frozen Zn workflow attempted a live download")
+
+        monkeypatch.setattr(WorkCache, "fetch", no_live_download)
+        config.write_text(
+            "name: synthetic-zinc-workflow\nsteps:\n"
+            "  - name: discover\n"
+            "    run: wisdom.preprocessing.zinc.ZincDiscovery.ZincDiscovery\n"
+            "    with: {output_directory: null}\n"
+            "  - name: select\n"
+            "    run: wisdom.preprocessing.zinc.ZincSelection.ZincSelection\n"
+            "    with:\n      raw_path: {from: discover.raw}\n      workers: 1\n"
+            "      output_directory: null\n      dilution_fractions: [1.0]\n"
+            "      surface_resolution: 2.0\n"
+            "      train_fraction: 0.34\n      validation_fraction: 0.33\n"
+            "      test_fraction: 0.33\n"
+            "  - name: preprocess\n"
+            "    run: wisdom.preprocessing.zinc.ZincPreprocessing.ZincPreprocessing\n"
+            "    with:\n      design: {from: select.zinc-design}\n"
+            "      dataset_name: toy-zinc\n      workers: 1\n"
+            "      surface_resolution: 2.0\n      diffusion_spectral_modes_max: 8\n"
+            "  - name: validate\n"
+            "    run: wisdom.preprocessing.zinc.ZincValidation.ZincValidation\n"
+            "    with: {dataset: {from: preprocess.dataset}, fail_on_error: true}\n"
+            "  - name: visualize\n"
+            "    run: wisdom.visualization.Visualization.Visualization\n"
+            "    with:\n      skip: false\n      dataset: {from: preprocess.dataset}\n"
+            f"      output_directory: {tmp_path / 'viewers'}\n"
+            "      maximum_proteins: 1\n      report_section: false\n"
+        )
     result = WorkRunner(execution_root=tmp_path / "runs").run(WorkConfig.from_yaml(config))
     assert result.status == "succeeded", result.to_dict()
     indexes = list((tmp_path / "published").rglob("index.jsonl"))
     assert len(indexes) == 1
     published = indexes[0].parent
     assert ZincValidation().audit(published, tmp_path / "audit")["verdict"] == "PASS"
+    if complete_workflow:
+        assert list((tmp_path / "viewers").rglob("*.html"))
+        reports = list((tmp_path / "runs").rglob("benchmark.json"))
+        # Native downstream inputs retain an exact design copy; both report copies agree.
+        assert reports
+        assert len({path.read_bytes() for path in reports}) == 1
+        report = json.loads(reports[0].read_text())
+        assert report["physiological_specificity_claimed"] is False
+        assert report["exclusions"]["positive"]["quota_omitted"] == 0
     dataset = WisdomDataset(published, "train")
     batch = WisdomCollator(atom_spatial_k=8, surface_atom_k=8)([dataset[0], dataset[1]])
-    assert batch["target"].tolist() == [0, 1]
+    assert sorted(batch["target"].tolist()) == [0, 1]
     assert not torch.any(batch["atomic_numbers"] == 30)
     model = WisdomV2(
         hidden_dim=8,

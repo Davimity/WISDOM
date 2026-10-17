@@ -13,12 +13,15 @@ from sklearn.preprocessing import OneHotEncoder, StandardScaler
 from sklearn.metrics import roc_auc_score, average_precision_score, balanced_accuracy_score
 
 
-def shortcut_baseline(rows: Sequence[Mapping[str, Any]], seed: int) -> dict[str, Any]:
+def shortcut_baseline(rows: Sequence[Mapping[str, Any]], seed: int,
+                      structural_only: bool = False) -> dict[str, Any]:
     """Measure whether simple acquisition/morphology covariates predict validation labels.
 
     Args:
         rows: Fixed split records, already checked for indivisible leakage groups.
         seed: Deterministic logistic-regression seed, not a model-selection sweep.
+        structural_only: Exclude origin/method/resolution acquisition fields when true;
+            default false preserves the existing DNA control.
 
     Returns:
         Validation AUROC/AUPRC/balanced accuracy and support, or an explicit unsupported
@@ -32,9 +35,11 @@ def shortcut_baseline(rows: Sequence[Mapping[str, Any]], seed: int) -> dict[str,
     if any(counts.get(label, 0) < 2 for counts in support.values() for label in (0, 1)):
         return {"support": support, "available": False,
                 "reason": "fewer_than_two_proteins_per_class_and_split"}
-    numeric = ("sequence_length", "resolution", "radius_of_gyration_normalized",
-               "aspect_ratio", "packing_density")
-    categorical = ("origin", "method")
+    numeric = (("sequence_length", "radius_of_gyration_normalized", "aspect_ratio",
+                "packing_density") if structural_only else
+               ("sequence_length", "resolution", "radius_of_gyration_normalized",
+                "aspect_ratio", "packing_density"))
+    categorical = () if structural_only else ("origin", "method")
     matrices = [np.asarray([
         [row.get(name, np.nan) if row.get(name) is not None else np.nan for name in numeric]
         + [str(row.get(name, "unknown")) for name in categorical]
