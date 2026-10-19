@@ -10,6 +10,7 @@ class ArchitectureSpike(str, Enum):
     BASELINE       = "baseline"
     POINT_GEOMETRY = "point_geometry"
     DEPTH_CONTROL  = "depth_control"
+    DEPTH_CONTROL_PARAMETER_MATCHED = "depth_control_parameter_matched"
     BIDIRECTIONAL  = "bidirectional"
     VECTOR_8       = "vector_8"
     VECTOR_16      = "vector_16"
@@ -33,6 +34,9 @@ class ArchitectureSpike(str, Enum):
             self.BASELINE:       {},
             self.POINT_GEOMETRY: {"surface_geometry_transfer": True},
             self.DEPTH_CONTROL:  {"interaction_round": "depth_control"},
+            self.DEPTH_CONTROL_PARAMETER_MATCHED: {
+                "interaction_round": "depth_control_parameter_matched",
+            },
             self.BIDIRECTIONAL:  {"interaction_round": "bidirectional"},
             self.VECTOR_8:       {"vector_atomic_channels": 8},
             self.VECTOR_16:      {"vector_atomic_channels": 16},

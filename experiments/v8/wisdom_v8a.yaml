@@ -1,0 +1,141 @@
+# OBJECTIVE: test candidate-specific existing point geometry in atom-to-surface scoring.
+# PREREQUISITES: finish V7 and freeze the SAME reviewed pipeline/head ledger in V8a/V8b/V8c.
+# VARIES: architecture_spike only; no combinations of geometry, feedback and vector channels.
+# FIXED: dataset, backbone, pooling, priors, refiner, head, optimizer and paired seeds.
+# DECISION: compare S at G-selected checkpoints against the appropriate same-seed control.
+name: wisdom-v8a  # Explicit scientific Study identifier, independent of filename spelling.
+run: wisdom.Training.Training  # Single native Work, never steps or a nested runner.
+
+with:  # PENDING V7 winner: copy one exact pipeline/head ledger identically into V8a/V8b/V8c.
+  dataset: {dataset: wisdom-dna-reduced@6}  # Same immutable reduced benchmark as V7.
+  # Required content: sha256:ac1745504422cf60b84e57b90efc99206dea039dc36d0c1359782062cb10e202.
+  # Verify native Registry identity on the execution target; never substitute another release.
+  model_version: 2  # Capability generation, not the scientific campaign number.
+  subset: full  # Same reduced training population; validation is fixed.
+  initialization_profile: baseline  # Frozen in V7; preserve its exact selected value.
+  optimization_profile: baseline  # Frozen in V7; preserve its exact selected value.
+  hidden_dim: 128  # V7 shared width.
+  embedding_dim: 32  # V7 element embedding width.
+  residue_embedding_dim: 64  # V7 residue embedding width.
+  atomic_layers: 2  # V7 atomic depth.
+  projection_depth: 3  # V7 atom-to-surface projection depth.
+  surface_layers: 4  # V7 DiffusionNet depth per surface stage.
+  atom_spatial_k: 8  # V7 active spatial neighborhood budget.
+  surface_atom_k: 16  # V7 transfer neighborhood budget.
+  diffusion_spectral_modes: 32  # V7 spectral budget.
+  surface_atom_radius: 4.0  # V7 transfer radius in angstroms.
+  dropout: 0.2  # V7 backbone/pooling dropout.
+  learning_rate: 0.001  # V7 AdamW rate.
+  weight_decay: 0.0005  # V7 AdamW decay.
+  gate_lambda: 0.04  # Same coefficient; baseline_count below fixes its per-shared-gate meaning.
+  pooling_type: max  # REPLACE with the reviewed V7 pipeline, not an assumed MAX winner.
+  pooling_area_mode: point  # REPLACE with that pipeline's point/area measure.
+  # If P3 wins, add log_sum_exp_mode: fixed and log_sum_exp_beta: 0.25.
+  # If P4 wins, add attention_variant: simple and attention_hidden_dim: 256.
+  # Do not retain active-looking settings for pooling families not selected in V7.
+  surface_refiner_type: heat  # Explicit V7 refiner; never silently fall back to none.
+  surface_refiner_heat_length: 6.0  # Preserve Heat6 unless the reviewed upstream ledger differs.
+  weak_loss_profile: PENDING_V7  # Execution guard: replace with custom only after the ledger is reviewed.
+  negative_surface_lambda: 0.0  # REPLACE with the selected V7 pipeline's exact coefficient.
+  positive_existence_lambda: 0.0  # REPLACE with its point-existence coefficient.
+  regional_positive_lambda: 0.0  # REPLACE with its regional-existence coefficient.
+  regional_ranking_lambda: 0.0  # REPLACE with its between-class ranking coefficient.
+  cardinality_lambda: 0.0  # V7 freezes this prior off.
+  total_variation_lambda: 0.0  # V7 freezes this prior off.
+  dirichlet_lambda: 0.0  # V7 freezes this prior off.
+  regional_loss_length: 2.5  # Frozen auxiliary regional length in angstroms.
+  regional_ranking_margin: 0.5  # Frozen positive-minus-negative logit margin.
+  minimum_positive_area: 0.0  # V7 disables cardinality.
+  maximum_positive_area: null  # No upper cardinality bound.
+  head_type: single  # REPLACE with the selected V7 head; do not compare heads again.
+  head_implementation: controlled  # Preserve the corrected V7 active-head/RNG contract.
+  head_loss_balance: normalized  # Multi-head: .5 direct BCE + .5 pooled-surface BCE, applied once.
+  surface_loss_fraction: 0.5  # Single still retains its exact original BCE.
+  # For a multi-head winner add head_dropout: 0.0 and global_reduction: area_mean.
+  # For global_context/film also add global_context_dim: 16, detach_global_context: true,
+  # and local_head_initialization: copy. For film additionally add film_modulation_scale: 1.0.
+  # Copy the SAME applicable head parameters into all three campaigns; no head search here.
+  architecture_implementation: controlled  # Paired shared initialization; audited coverage/vector semantics.
+  feedback_weighting: area  # Freeze area-times-distance integration; inactive without a feedback update.
+  gate_cost_normalization: baseline_count  # Same shared-gate coefficient in every architecture.
+  batch_size: 16  # Preserve V7 optimizer-step size.
+  epochs: 500  # Preserve V7 epoch ceiling.
+  patience: 30  # Ordinary G-based within-Run stopping, not competitive pruning.
+  minimum_delta: 0.001  # Required G checkpoint improvement.
+  precision: auto  # Hardware-safe AMP, FP32 sparse operators and controlled feedback accumulation.
+  surface_metrics: true  # Full validation-local diagnostics; no local targets in backward.
+  surface_metrics_interval: 1  # Preserve raw/operational S, temporal coupling and regret curves.
+  visualization:  # Separate inference-only reviewers inspect saved checkpoints after the campaign.
+    mode: none  # No per-seed viewers or empty tabs during training.
+  faithfulness_audit: false  # Vertex deletion is invalid with the fixed spectral Heat6 refiner.
+  evaluate_test: false  # Never open held-out test during architecture development.
+  optimization_diagnostics: true  # Record gradient, activation and gate-saturation diagnostics.
+  data_workers: 4  # Per-Run NPZ decoding workers; native LF owns concurrency.
+
+# Constructor defaults, distinct from the selected overrides:
+# dataset is required; model_version=1, subset=full; initialization/optimization/weak profiles=custom.
+# Widths/depths: hidden=128, element=32, residue=null, atomic=2, projection=1, surface=2 (>0).
+# Topology: atom_spatial_k=16, surface_atom_k=16, spectral_modes=128, transfer_radius=6 Å (>0).
+# dropout=.2 in [0,1), learning_rate=3e-4 (>0), weight_decay=1e-4 (>=0), gate_lambda=.001 (>=0).
+# architecture_spike=custom; named profiles reset geometry=false/interaction=single/vector_channels=0
+# before their one override. CUSTOM exposes surface_geometry_transfer=false, interaction_round=single
+# (single/depth_control/depth_control_parameter_matched/bidirectional), vector_atomic_channels=0 (>=0).
+# architecture_implementation=legacy preserves historical module/RNG/numerical behavior.
+# controlled builds optional modules after paired common initialization in private seeded streams.
+# feedback_weighting=point (point/area); area needs represented Å², no new preprocessing.
+# Matched control and area feedback require controlled; matched passes a zero message, NEVER detached S1.
+# gate_cost_normalization=historical_mean (historical_mean/baseline_count); baseline_count divides
+# the expected path-cost sum by the unchanged baseline gate count, not the expanded count.
+# This fixes common-gate coefficients but charges the added point gate; cost may exceed one.
+# Pooling defaults: max, area_mode=legacy (point/area/legacy), LSE fixed/beta=5 (>0),
+# attention simple/width=32 (>0). The reviewed V7 winner must replace these provisional controls.
+# Weak defaults: all seven lambdas=0 (>=0), regional length=2.5 Å, ranking margin=.5,
+# minimum_positive_area=0, maximum_positive_area=null. PENDING_V7 intentionally fails before data I/O.
+# Head defaults: single, implementation=legacy; loss_balance=legacy_sum; historical weights=1/1.
+# normalized uses rho=surface_loss_fraction=.5 in [0,1), forbids overriding historical weights;
+# single BCE is unchanged. Direct-head dropout=null inherits backbone dropout; valid in [0,1).
+# Global reduction=area_mean (area_mean/mean/max), context_dim=16 (>0), detach_context=true.
+# Conditioned local initialization=independent (independent/copy); FiLM modulation scale=1 (>0).
+# Runtime defaults: batch=2, epochs=100, patience=30 (>0), delta=.001 (>=0), precision=auto
+# (auto/bfloat16/float16/float32), surface_metrics=true, interval=0 (best only; positive N adds epochs).
+# visualization mode=none; content=predictions, maximum_points=2000, maximum_proteins=12,
+# report_budget_mib=4, threshold=.5, identifiers=(), embed_report=true. none suppresses all viewers.
+# evaluate_test=true, diagnostics=false, faithfulness_audit=false, data_workers=4 (>=0).
+# Unchanged public constructor defaults remain authoritative: inspect lf explain before launch.
+
+seeds: [151, 157, 163, 167]  # Four complete paired replications, fresh relative to V7's 101/103/107/109.
+
+# Explicit seeds disable automatic shared-block growth; no racing, HPO or competitive pruning.
+# Replications across campaigns are descriptive pairs, not interchangeable historical controls.
+
+sweep:  # 2 candidates x four seeds = 8 mandatory Runs.
+  space:  # One architectural factor; all other scientific settings stay frozen.
+    architecture_spike:  # Native closed profile overrides, never a Cartesian product of booleans.
+      values:  # Each candidate is required under each of the four seeds.
+        - baseline  # Original scalar single-pass control.
+        - point_geometry  # Only the point-dependent transfer interaction is enabled.
+  reference: {architecture_spike: baseline}  # One unique contemporary baseline control.
+
+# sweep.space is required; reference is optional and must identify exactly one candidate.
+# No search/include/candidates or extra head/pooling domain is authored.
+
+objective:  # Native descriptive W indexing; prioritize S and paired G-S trade-offs scientifically.
+  metric: val_wisdom_hpo_score  # Existing joint global/surface/coupling utility, no new selector.
+  mode: max  # Native orientation only.
+  range: [0.0, 1.0]  # Known W bounds.
+  practical_margin: 0.015  # Existing practical-equivalence margin.
+
+# Objective requires metric; mode=max by default; bounds/margin are optional.
+# Checkpoint epochs remain selected only by G=.70*protein_AP+.30*protein_AUROC.
+# Local S, raw S, negative mass/peak, top-k enrichment/recall and regret/coupling are diagnostics.
+# Keep direct/surface-derived protein metrics for a multi-head V7 winner; never train on local GT.
+
+resources:  # Operational allocation only; no architectural factor or per-GPU packing override.
+  gpu: 2  # Preserve the two-GPU capacity used for the V7 campaign.
+  cpu: 36  # Shared decoding and orchestration budget.
+  memory: 96GiB  # Shared host-memory ceiling.
+  time: 168h  # Scheduler ceiling may leave the mandatory design incomplete; resume missing cells.
+
+# Resource defaults: cpu=1, gpu=0, processes=1; memory/gpu_memory/storage=0, time=null.
+# CPU/processes>=1, GPU>=0, processes<=CPU. execution defaults have no logical time/run/packing cap;
+# failure_retries=1. Do not aggregate an incomplete mandatory design as if all seeds had finished.

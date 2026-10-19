@@ -1,99 +1,288 @@
-# OBJECTIVE: compare global/local head relationships after choosing one weak-loss policy.
-# PREREQUISITES: review isolated V6a-V6g and the final V6h interaction before freezing the ledger.
-# VARIES: head_type only.
-# FIXED: every selected initialization, optimizer, core, pooling, and weak-loss decision.
-# DECISION: select the simplest head whose utility and surface faithfulness improve credibly.
-run: wisdom.Training.Training                       # Shared Work; the filename supplies its study name.
+# OBJECTIVE: compare four global/local heads within four frozen V6h pipelines.
+# DESIGN: 16 explicit candidates x four fresh paired seeds = 64 mandatory Runs.
+# PRIMARY: operational positive-protein macro surface AUPRC S at the G-selected checkpoint.
+# CONTRASTS: compute delta S and delta G against SAME-pipeline single within each seed first.
+# SOURCES: V6h execution-5562e5d3e12a8fc4; submitted configuration and 216 exported evaluations
+# agree with experiments/v6/wisdom_v6h.yaml (reviewed 2026-10-18).
+# P1: MAX regional existence .3 (exploratory S~.294/G~.711).
+# P2: MAX negatives .3 + point existence .03 + regional ranking .1 (S~.280/G~.719).
+# P3: area LSE negatives 1 + regional existence .1 + ranking .03 (S~.235/G~.825).
+# P4: area Attention negatives .03 + regional existence .03 + ranking .03 (S~.230/G~.811).
+# These are exploratory V6h observations, NOT confirmed V7 results or isolated pooling effects.
+# No Python, earlier campaigns, checkpoints, datasets or held-out test are changed.
+run: wisdom.Training.Training  # One executable Work; filename supplies the Study name.
 
-with:                                               # Explicit carry-forward ledger.
-  dataset: {dataset: wisdom-dna-reduced@6}          # Immutable reduced benchmark.
-  model_version: 2                                  # Internal generation exposing head alternatives.
-  subset: full                                      # Complete reduced training population.
-  pooling_type: max                                 # REPLACE with the V5 winner.
-  topk_fraction: 0.05                               # REPLACE if V5 selects top-k.
-  attention_hidden_dim: 32                          # REPLACE if V5 selects attention.
-  regional_diffusion_scale: 2.5                     # REPLACE if V5 selects local-mean-max.
-  log_sum_exp_beta: 5.0                             # REPLACE if V5 selects LogSumExp.
-  initialization_profile: baseline                  # REPLACE with the V2 winner.
-  optimization_profile: baseline                    # REPLACE with the V3 winner.
-  hidden_dim: 128                                   # REPLACE with the V4 winner.
-  embedding_dim: 32                                 # REPLACE with the V4 winner.
-  residue_embedding_dim: 32                         # REPLACE with the V4 winner.
-  atomic_layers: 2                                  # REPLACE with the V4 winner.
-  projection_depth: 1                               # REPLACE with the V4 winner.
-  surface_layers: 2                                 # REPLACE with the V4 winner.
-  atom_spatial_k: 16                                # REPLACE with the V4 winner.
-  surface_atom_k: 16                                # REPLACE with the V4 winner.
-  diffusion_spectral_modes: 128                     # REPLACE with the V4 winner.
-  surface_atom_radius: 6.0                          # REPLACE with the V4 winner.
-  dropout: 0.2                                      # REPLACE with the V4 winner.
-  learning_rate: 0.0003                             # REPLACE with the V4 winner.
-  weight_decay: 0.0001                              # REPLACE with the V4 winner.
-  gate_lambda: 0.001                                # REPLACE with the V4 winner.
-  weak_loss_profile: custom                         # Preserve explicit selected weak-loss coefficients.
-  negative_surface_lambda: 0.3                      # REPLACE from the reviewed V6h interaction ledger.
-  positive_existence_lambda: 0.0                    # REPLACE from the reviewed V6h interaction ledger.
-  regional_positive_lambda: 0.0                     # Freeze this coefficient from the reviewed V6h interaction ledger.
-  regional_loss_length: 2.5                         # REPLACE with the selected regional scale.
-  regional_ranking_lambda: 0.0                      # Freeze this coefficient from the reviewed V6h interaction ledger.
-  regional_ranking_margin: 0.5                      # REPLACE with the selected ranking margin.
-  cardinality_lambda: 0.0                           # Freeze this coefficient from the reviewed V6h interaction ledger.
-  total_variation_lambda: 0.0                       # Freeze this coefficient from the reviewed V6h interaction ledger.
-  dirichlet_lambda: 0.0                             # Freeze this coefficient from the reviewed V6h interaction ledger.
-  architecture_spike: baseline                      # Architecture remains one-pass and scalar.
-  global_context_dim: 16                            # Context bottleneck for conditioned heads.
-  detach_global_context: true                       # Prevent local loss gradients entering context.
-  direct_head_weight: 1.0                          # Direct protein BCE coefficient.
-  surface_head_weight: 1.0                         # Surface-derived protein BCE coefficient.
-  batch_size: 16                                    # Proteins per optimizer update.
-  epochs: 500                                       # Safety ceiling.
-  patience: 30                                      # Global validation patience.
-  minimum_delta: 0.001                              # Required score improvement.
-  precision: auto                                   # Hardware-safe mixed precision.
-  surface_metrics: true                             # Evaluation-only local metrics.
-  surface_metrics_interval: 1                       # Required G/S/regret curves.
-  visualization:                                    # Presentation only; generated once at this Run's best checkpoint.
-    mode: none                                      # none disables all viewers; report embeds HTML without duplicate files.
-    content: predictions                            # Probability, original logits and soft/hard GT only; full adds structural layers.
-    maximum_points: 2000                            # Deterministic display-only sample; metrics retain every point.
-    maximum_proteins: 4                             # Balanced proteins per evaluated split; zero displays all.
-    report_budget_mib: 4.0                          # Maximum embedded document size, not evaluation coverage.
-    # identifiers: [1ABC_A]                         # Optional exact evaluated IDs instead of automatic balanced sampling.
+with:  # Common backbone, training protocol and geometry inherited from the effective V6h execution.
+  dataset: {dataset: wisdom-dna-reduced@6}  # Immutable Registry selector; no unsupported content_id field.
+  # Expected content: sha256:ac1745504422cf60b84e57b90efc99206dea039dc36d0c1359782062cb10e202.
+  # Verify on the execution target before dispatch: lf datasets show wisdom-dna-reduced@6 --on TARGET.
+  # lf datasets preflight wisdom-dna-reduced@6 --intent reuse --on TARGET checks native readiness.
+  # Registry resolution pins content in native resolved inputs/Run identities; do not adopt another ID.
+  model_version: 2  # Existing capability generation supporting the four head hypotheses.
+  subset: full  # All 317 reduced training members; the 272 validation members are never diluted.
+  initialization_profile: baseline  # Exact V6h policy, not an invented V2 winner.
+  optimization_profile: baseline  # Exact V6h AdamW policy, not an invented V3 winner.
+  architecture_spike: baseline  # Shared scalar one-pass backbone; no architectural side factors.
 
-  # Visualization defaults: mode=none (none/report/viewer/full), content=predictions
-  # (predictions/full), maximum_points=2000 (>0), maximum_proteins=12 (>=0),
-  # report_budget_mib=4.0 in (0,16], identifiers=(), threshold=0.5 in [0,1],
-  # embed_report=true. report writes embedded pages only; viewer adds HTML/PLY;
-  # full additionally saves prediction NPZ. none overrides embed_report completely.
-  # This is per completed Run, not per epoch or a post-Study best-seed callback.
-  # LF has a 64 MiB combined report limit: keep mode=none for large sweeps/HPO.
-  faithfulness_audit: true                          # Audit hotspot dependence.
-  evaluate_test: false                              # Keep test sealed.
-  data_workers: 4                                   # Persistent NPZ workers.
+  hidden_dim: 128  # Shared atomic/surface latent width.
+  embedding_dim: 32  # Element embedding width.
+  residue_embedding_dim: 64  # Actual V6h residue embedding width, not the old V7 placeholder.
+  atomic_layers: 2  # Atomic message-passing depth.
+  projection_depth: 3  # Actual V6h atom-to-surface projection depth.
+  surface_layers: 4  # Actual V6h DiffusionNet depth.
+  atom_spatial_k: 8  # Active nearest spatial atom neighbors.
+  surface_atom_k: 16  # Candidate transfer atoms per point.
+  diffusion_spectral_modes: 32  # Actual retained spectral budget.
+  surface_atom_radius: 4.0  # Active transfer radius in angstroms.
+  dropout: 0.2  # Frozen backbone/pooling dropout, separate from the direct-head setting.
+  learning_rate: 0.001  # Exact historical AdamW learning rate.
+  weight_decay: 0.0005  # Exact historical decoupled weight decay.
+  gate_lambda: 0.04  # Preserve expected-L0 semantic regularization relative to normalized task loss.
 
-sweep:                                              # Complete head comparison with paired evidence.
-  space:                                            # Every head is a required sweep cell.
-    head_type:                                      # Relationship between global and local predictions.
-      values:                                       # Closed HeadType vocabulary.
-        - single                                    # Protein score is pooled directly from local logits.
-        - dual                                      # Independent direct and surface-derived protein heads.
-        - global_context                            # Detached global context enters localization.
-        - film                                      # Zero-start FiLM uses global context.
-  reference: {head_type: single}                    # Compare alternatives with the faithful single head.
+  surface_refiner_type: heat  # Every candidate uses the same differentiable spectral refiner.
+  surface_refiner_heat_length: 6.0  # Frozen operational Heat length in angstroms.
+  weak_loss_profile: custom  # Preserve every explicit pipeline coefficient without profile overrides.
+  regional_loss_length: 2.5  # Existing regional existence/ranking length in angstroms.
+  regional_ranking_margin: 0.5  # Required positive-minus-negative regional logit gap.
+  minimum_positive_area: 0.0  # No cardinality hinge; its coefficient is zero in all candidates.
+  maximum_positive_area: null  # No upper mass bound.
+  head_implementation: controlled  # Existing corrected implementation; isolated RNG and active heads only.
 
-objective:                                          # Rank by joint validation evidence.
-  metric: val_wisdom_hpo_score                      # Global/surface/coupling utility.
-  mode: max                                         # Maximize the composite validation utility.
-  range: [0.0, 1.0]                                 # Mathematical bounds of the composite utility.
-  practical_margin: 0.015                           # Smaller paired differences are negligible.
+  batch_size: 16  # Proteins per optimizer update.
+  epochs: 500  # Per-Run safety ceiling, unchanged from V6h.
+  patience: 30  # Within-Run early stopping on global validation G, not competitive pruning.
+  minimum_delta: 0.001  # Required global checkpoint-score improvement.
+  precision: auto  # Existing hardware-safe mixed precision.
+  surface_metrics: true  # Validation local GT is evaluation-only, never a training target.
+  surface_metrics_interval: 1  # Preserve raw/operational S, temporal G-S coupling and regret curves.
+  visualization:  # No viewers, duplicated prediction files or empty report tabs in this sweep.
+    mode: none  # Overrides viewer generation and embedded report creation completely.
+  faithfulness_audit: false  # Vertex deletion invalidates Heat6's stored operator; unavailable is not zero.
+  evaluate_test: false  # Do not read test for selection, thresholds, metrics or exploratory maps.
+  data_workers: 4  # Persistent decoding workers per Run; native LF controls actual concurrent Runs.
 
-resources:                                          # Shared allocation for the complete study.
-  gpu: 3                                            # Three available accelerators.
-  cpu: 36                                           # Shared host decoding capacity.
-  memory: 96GiB                                     # Shared host-memory ceiling.
-  time: 168h                                        # Seven-day ceiling.
+# Training defaults (selected overrides above are NOT defaults):
+# dataset is required; model_version=1, subset=full; all three *_profile/architecture_spike=custom.
+# hidden_dim=128, embedding_dim=32, residue_embedding_dim=null (inherits embedding width),
+# atomic_layers=2, projection_depth=1, surface_layers=2; widths/depths must be positive.
+# atom_spatial_k=16, surface_atom_k=16, diffusion_spectral_modes=128, surface_atom_radius=6 Å;
+# active geometry budgets must be positive and fit stored support. dropout=.2 in [0,1),
+# learning_rate=3e-4 (>0), weight_decay=1e-4 (>=0), gate_lambda=.001 (>=0).
+# surface_refiner_type=none (none/heat/learned_heat/geometric_anisotropic/embedding_anisotropic/
+# learned_anisotropic/graph_tv/crf); heat_length=3 Å (>=0; zero is identity).
+# Seven weak *_lambda defaults=0 (>=0); regional_loss_length=2.5 Å, ranking_margin=.5,
+# minimum_positive_area=0, maximum_positive_area=null. Bounds are inactive with cardinality=0.
+# head_type=single; head_implementation=legacy preserves historical checkpoint keys/RNG.
+# head_loss_balance=legacy_sum (legacy_sum/normalized), direct_head_weight=surface_head_weight=1.
+# normalized uses surface_loss_fraction=.5 in [0,1), rejects overridden legacy coefficients,
+# and computes (1-rho)*BCE_direct+rho*BCE_surface ONCE. Single always uses its original BCE.
+# V7 uses normalized only on multi-head candidates: effective BCE coefficients are .5/.5.
+# head_dropout=null inherits backbone dropout; explicit values lie in [0,1).
+# global_reduction=area_mean (area_mean/mean/max) reduces embeddings, NOT local logits.
+# global_context_dim=16 (>0), detach_global_context=true; only context/FiLM consume them.
+# local_head_initialization=independent (independent/copy); controlled context/FiLM use copy here.
+# film_modulation_scale=1 (>0); zero-start gamma/beta plus copied local classifier retain identity.
+# batch_size=2, epochs=100, patience=30 (>0), minimum_delta=.001 (>=0), precision=auto
+# (auto/bfloat16/float16/float32), data_workers=4 (>=0); evaluate_test=true by default.
+# surface_metrics=true; interval=0 means restored best only, positive N adds every N epochs.
+# faithfulness_audit=false; the direct-dependency audit is not implemented.
+# visualization defaults: mode=none (none/report/viewer/full), content=predictions (predictions/full),
+# maximum_points=2000 (>0), maximum_proteins=12 (>=0, zero=all), report_budget_mib=4 in (0,16],
+# identifiers=(), threshold=.5 in [0,1], embed_report=true. none suppresses presentation regardless.
+# Other unchanged constructor defaults are authoritative; inspect them with lf explain.
 
-# head_type defaults to single. The direct and surface head weights are non-negative and cannot
-# both be zero for a multi-head candidate. Surface ground truth remains outside optimization.
-# LambdaForge 0.15 evaluates every head and grows complete shared-replicate blocks without HPO
-# pruning or seed racing. Omitted execution limits let ARI derive safe parallel packing.
+seeds: [101, 103, 107, 109]  # Exactly four fresh paired seeds, disjoint from V6h's [4,7,32,54].
+
+# Explicit seeds make every candidate/seed cell mandatory; no adaptive seed growth, racing or pruning.
+# Seeds default to automatic shared blocks for a sweep when omitted; omission is NOT this design.
+# Initialization/training seeds retain the Run seed; no reuse of historical V6h Runs as V7 evidence.
+
+sweep:  # Exact sparse finite design, not HPO and not the Cartesian product of coefficient domains.
+  space:  # Domains validate the 16 complete candidates; they do not enumerate additional points.
+    pooling_type:  # Three pooling families encode four scientifically distinct weak-loss pipelines.
+      values: [max, log_sum_exp, attention]  # P1/P2, P3 and P4 respectively.
+    pooling_area_mode:  # Frozen pipeline measure, always an explicit candidate coordinate.
+      values: [point, area]  # P1/P2 use point; P3/P4 use area.
+    log_sum_exp_mode:  # Only the LSE branch has a temperature policy.
+      values: [fixed]  # No learned temperature or curriculum.
+      when: {pooling_type: log_sum_exp}  # Absent from MAX and Attention candidates.
+    log_sum_exp_beta:  # Frozen LSE concentration from V6h.
+      values: [0.25]  # Not a new pooling search.
+      when: {pooling_type: log_sum_exp}  # Only P3 consumes this coordinate.
+    attention_variant:  # Frozen attention scoring rule.
+      values: [simple]  # Original embedding-based scorer.
+      when: {pooling_type: attention}  # Only P4 consumes this coordinate.
+    attention_hidden_dim:  # Frozen attention scorer capacity.
+      values: [256]  # Not the backbone width.
+      when: {pooling_type: attention}  # Absent from P1/P2/P3.
+
+    negative_surface_lambda:  # Explicit negative suppression, never absence-based negative labels.
+      values: [0.0, 0.03, 0.3, 1.0]  # Only P1/P4/P2/P3 anchors below are measured.
+    positive_existence_lambda:  # Point existence, E in the supplied experimental plan.
+      values: [0.0, 0.03]  # Enabled only by P2.
+    regional_positive_lambda:  # Regional existence, R in the plan and P in old V6h comments.
+      values: [0.0, 0.03, 0.1, 0.3]  # Distinct from regional ranking.
+    regional_ranking_lambda:  # Regional positive-negative ranking, K in the plan.
+      values: [0.0, 0.03, 0.1]  # Called R in some historical V6h comments.
+    cardinality_lambda:  # No cardinality regularization in V7.
+      values: [0.0]  # Always disabled.
+    total_variation_lambda:  # No TV regularization in V7.
+      values: [0.0]  # Always disabled.
+    dirichlet_lambda:  # No Dirichlet regularization in V7.
+      values: [0.0]  # Always disabled.
+
+    head_type:  # Cross each fixed pipeline with the same four existing hypotheses.
+      values: [single, dual, global_context, film]  # No other head or fusion architecture.
+    head_loss_balance:  # Normalize the two protein-only BCEs, leaving weak priors intact.
+      values: [normalized]  # Do not also override historical direct/surface_head_weight.
+      when: {head_type: {in: [dual, global_context, film]}}  # Single keeps its original BCE.
+    surface_loss_fraction:  # Fixed convex share, not a head-loss search.
+      values: [0.5]  # Exactly .5*BCE_direct + .5*BCE_surface.
+      when: {head_type: {in: [dual, global_context, film]}}  # No redundant single-head factor.
+    head_dropout:  # Freeze the same independent direct classifier across multi-head variants.
+      values: [0.0]  # Retain the corrected V7 setting; no dropout search.
+      when: {head_type: {in: [dual, global_context, film]}}  # Single has no direct classifier.
+    global_reduction:  # Frozen reduction of embeddings inside each individual protein.
+      values: [area_mean]  # Independent of point/area weighting in local-logit pooling.
+      when: {head_type: {in: [dual, global_context, film]}}  # Only direct-head variants.
+    global_context_dim:  # Frozen context bottleneck.
+      values: [16]  # No dimension search.
+      when: {head_type: {in: [global_context, film]}}  # Dual has no context projection.
+    detach_global_context:  # Stop the context-to-backbone local-loss path, not pointwise learning.
+      values: [true]  # No detach ablation.
+      when: {head_type: {in: [global_context, film]}}  # Context projection still learns.
+    local_head_initialization:  # Start from the original local classifier under the controlled contract.
+      values: [copy]  # Context columns/FiLM modulation start at zero.
+      when: {head_type: {in: [global_context, film]}}  # Never execute a discarded original local head.
+    film_modulation_scale:  # Frozen correction multiplier.
+      values: [1.0]  # Identity-start FiLM; no modulation-scale search.
+      when: {head_type: film}  # Absent from the other three hypotheses.
+
+  candidates:  # All active coordinates, no inactive children, exactly 16 distinct complete points.
+    - &p1  # P1 + single: surface-oriented MAX with regional existence only.
+      pooling_type: max  # Frozen P1 aggregation.
+      pooling_area_mode: point  # Exact V6h MAX control measure.
+      negative_surface_lambda: 0.0  # P1 has no negative suppression term.
+      positive_existence_lambda: 0.0  # P1 has no point-existence term.
+      regional_positive_lambda: 0.3  # P1 regional existence; NOT regional ranking.
+      regional_ranking_lambda: 0.0  # P1 has no between-class ranking.
+      cardinality_lambda: 0.0  # Disabled in every pipeline.
+      total_variation_lambda: 0.0  # Disabled in every pipeline.
+      dirichlet_lambda: 0.0  # Disabled in every pipeline.
+      head_type: single  # Matched primary control for P1.
+
+    - <<: [*p1, &multi_head {head_loss_balance: normalized, surface_loss_fraction: 0.5, head_dropout: 0.0, global_reduction: area_mean}]  # Shared multi-head settings, not an extra candidate.
+      head_type: dual  # P1 + dual: only the relationship between global/local heads changes.
+    - <<: [*p1, *multi_head, &conditioned {global_context_dim: 16, detach_global_context: true, local_head_initialization: copy}]  # Shared context policy, not a sweep axis.
+      head_type: global_context  # P1 + global_context.
+    - <<: [*p1, *multi_head, *conditioned]  # Identical P1 priors and context policy.
+      head_type: film  # P1 + FiLM.
+      film_modulation_scale: 1.0  # Only FiLM has this active coordinate.
+
+    - &p2  # P2 + single: MAX compromise with negative suppression, point existence and ranking.
+      pooling_type: max  # Same aggregation as P1, different frozen weak-loss policy.
+      pooling_area_mode: point  # Exact V6h MAX control measure.
+      negative_surface_lambda: 0.3  # P2 negative suppression.
+      positive_existence_lambda: 0.03  # P2 point existence.
+      regional_positive_lambda: 0.0  # No regional existence in P2.
+      regional_ranking_lambda: 0.1  # P2 regional ranking; NOT existence.
+      cardinality_lambda: 0.0  # Disabled.
+      total_variation_lambda: 0.0  # Disabled.
+      dirichlet_lambda: 0.0  # Disabled.
+      head_type: single  # Matched primary control for P2.
+    - <<: [*p2, *multi_head]  # Exact P2 loss policy plus direct/surface heads.
+      head_type: dual  # P2 + dual.
+    - <<: [*p2, *multi_head, *conditioned]  # Exact P2 loss policy plus detached context.
+      head_type: global_context  # P2 + global_context.
+    - <<: [*p2, *multi_head, *conditioned]  # Exact P2 loss policy plus identity-start FiLM.
+      head_type: film  # P2 + FiLM.
+      film_modulation_scale: 1.0  # Only FiLM has this active coordinate.
+
+    - &p3  # P3 + single: high-global-performance area LSE pipeline retained from V6h.
+      pooling_type: log_sum_exp  # Fixed LSE aggregation.
+      pooling_area_mode: area  # Represented-area weighting.
+      log_sum_exp_mode: fixed  # No learned scalar or schedule.
+      log_sum_exp_beta: 0.25  # Exact retained LSE concentration.
+      negative_surface_lambda: 1.0  # P3 negative suppression.
+      positive_existence_lambda: 0.0  # No point existence in P3.
+      regional_positive_lambda: 0.1  # P3 regional existence.
+      regional_ranking_lambda: 0.03  # P3 regional ranking.
+      cardinality_lambda: 0.0  # Disabled.
+      total_variation_lambda: 0.0  # Disabled.
+      dirichlet_lambda: 0.0  # Disabled.
+      head_type: single  # Matched primary control for P3.
+    - <<: [*p3, *multi_head]  # Exact P3 pooling and priors.
+      head_type: dual  # P3 + dual.
+    - <<: [*p3, *multi_head, *conditioned]  # Exact P3 pooling and priors.
+      head_type: global_context  # P3 + global_context.
+    - <<: [*p3, *multi_head, *conditioned]  # Exact P3 pooling and priors.
+      head_type: film  # P3 + FiLM.
+      film_modulation_scale: 1.0  # Only FiLM has this active coordinate.
+
+    - &p4  # P4 + single: learned embedding-attention representative retained from V6h.
+      pooling_type: attention  # Existing attention over original surface embeddings.
+      pooling_area_mode: area  # Represented-area weighting.
+      attention_variant: simple  # Exact retained scorer.
+      attention_hidden_dim: 256  # Exact retained attention capacity.
+      negative_surface_lambda: 0.03  # P4 negative suppression.
+      positive_existence_lambda: 0.0  # No point existence in P4.
+      regional_positive_lambda: 0.03  # P4 regional existence.
+      regional_ranking_lambda: 0.03  # P4 regional ranking.
+      cardinality_lambda: 0.0  # Disabled.
+      total_variation_lambda: 0.0  # Disabled.
+      dirichlet_lambda: 0.0  # Disabled.
+      head_type: single  # Matched primary control for P4.
+    - <<: [*p4, *multi_head]  # Exact P4 pooling and priors.
+      head_type: dual  # P4 + dual.
+    - <<: [*p4, *multi_head, *conditioned]  # Exact P4 pooling and priors.
+      head_type: global_context  # P4 + global_context.
+    - <<: [*p4, *multi_head, *conditioned]  # Exact P4 pooling and priors.
+      head_type: film  # P4 + FiLM.
+      film_modulation_scale: 1.0  # Only FiLM has this active coordinate.
+
+  reference:  # One unique native LF reference: P1 + single, not every single across pipelines.
+    pooling_type: max  # Exclude P3/P4.
+    pooling_area_mode: point  # Exact P1 measure.
+    negative_surface_lambda: 0.0  # Exclude P2.
+    positive_existence_lambda: 0.0  # P1 point existence remains disabled.
+    regional_positive_lambda: 0.3  # Exact P1 regional existence.
+    regional_ranking_lambda: 0.0  # P1 ranking remains disabled.
+    head_type: single  # Unique P1 control after native expansion.
+
+# sweep.space is required; candidates has no default and selects ONLY the listed complete points.
+# when supports exact equality or {in: [...]}; inactive dimensions must be absent from candidates.
+# include and candidates are mutually exclusive. No search/pruning/sequential_alpha is authored.
+# reference is optional in LF but, when supplied, must resolve to exactly one candidate.
+# LF reference contrasts are descriptive global comparisons; they DO NOT replace the 12 scientific
+# SAME-pipeline paired head contrasts. For each seed s, delta S(P,H,s)=S(P,H,s)-S(P,single,s)
+# and delta G(P,H,s)=G(P,H,s)-G(P,single,s); aggregate those paired differences afterwards.
+# Summarize a pipeline x head matrix of S, G, delta S/G and counts of favorable paired seeds.
+# Native analysis retains per-Run metrics/parameters; no custom ranking or new objective is added.
+# Cross-pipeline differences combine pooling AND prior policies: never call them a pooling-only effect.
+
+objective:  # Retain native W indexing; scientific review prioritizes S and the G-S trade-off.
+  metric: val_wisdom_hpo_score  # Existing descriptive joint global/surface/coupling utility W.
+  mode: max  # Native orientation; not permission to select a scientific winner automatically.
+  range: [0.0, 1.0]  # Known bounds of W.
+  practical_margin: 0.015  # Existing practical-equivalence margin; no seed racing.
+
+# Objective requires metric; mode=max by default; range/practical_margin are optional.
+# Checkpoint epoch selection remains protein-only G=.70*AUPRC+.30*AUROC, NOT W or local S.
+# S is val_surface_positive_macro_auprc of the operational Heat6 map at that checkpoint.
+# Also retain raw S, direct/global and surface-derived AUROC/AUPRC, head disagreement,
+# top-k enrichment/recall, negative mass/peak, temporal G-S coupling, selection regret, costs
+# and paired-seed dispersion. Local GT is validation evidence only, never a training loss.
+# No faithfulness score exists here; Heat invalidates the current vertex-deletion intervention.
+
+resources:  # Preserve CPU/RAM/time; adapt only the original GPU count to verified target capacity.
+  gpu: 2  # Native ctgpgpu12 dry-run exposes two GPUs; the previous request for three is rejected.
+  cpu: 36  # Shared decoding and orchestration capacity.
+  memory: 96GiB  # Shared host-memory ceiling.
+  time: 168h  # Scheduler ceiling, NOT a guarantee that all 64 required Runs finish.
+
+# Resource defaults: cpu=1, gpu=0, processes=1; memory/gpu_memory/storage=0, time=null.
+# cpu/processes>=1, gpu>=0, processes<=cpu; native size/duration units apply.
+# execution defaults: max_time/max_runs/max_parallel/runs_per_gpu=null, failure_retries=1.
+# No logical max_time/max_runs cap or competitive elimination is imposed. Native LF plans packing.
+# A scheduler interruption may leave the design incomplete: require 64 succeeded/0 missing/0 failed
+# before scientific aggregation, and resume required cells if needed; never silently drop seeds.

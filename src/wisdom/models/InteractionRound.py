@@ -8,4 +8,5 @@ class InteractionRound(str, Enum):
 
     SINGLE        = "single"
     DEPTH_CONTROL = "depth_control"
+    DEPTH_CONTROL_PARAMETER_MATCHED = "depth_control_parameter_matched"
     BIDIRECTIONAL = "bidirectional"

@@ -70,6 +70,33 @@ class SurfaceAtomTransfer(nn.Module):
         # low-rank Hadamard product lets surface geometry change the relative candidate scores
         # without materializing a wider [M,J,H+G] tensor.
 
+        self.point_feature_dim = 0
+        self.enable_point_geometry(point_feature_dim)
+
+        self.hidden_dim        = hidden_dim
+        self.radius            = float(radius)
+        self.chunk_size        = chunk_size
+
+    def enable_point_geometry(self, point_feature_dim: int) -> None:
+        """Attach candidate-dependent geometry layers without rebuilding existing scorers.
+
+        Args:
+            point_feature_dim: Geometry width G; zero leaves the historical three scorers alone.
+                Nonzero G is configured once, during controlled model construction under an
+                isolated RNG stream, after shared layers have received their paired initialization.
+
+        Raises:
+            ValueError: If an already configured geometry branch would be overwritten.
+        """
+        if self.point_feature_dim:
+            raise ValueError("point geometry is already configured")
+        # Existing scorers expose the intended widths before constructor metadata is assigned.
+
+        distance_input = self.distance_scorer[0]
+        content_input  = self.content_scorer[0]
+        assert isinstance(distance_input, nn.Linear) and isinstance(content_input, nn.Linear)
+        score_width = distance_input.out_features
+        hidden_dim  = content_input.in_features - 1
         if point_feature_dim:
             self.point_geometry_projection: nn.Linear | None = nn.Linear(
                 point_feature_dim,
@@ -97,9 +124,6 @@ class SurfaceAtomTransfer(nn.Module):
             self.point_pair_projection     = None
             self.point_geometry_scorer     = None
 
-        self.hidden_dim        = hidden_dim
-        self.radius            = float(radius)
-        self.chunk_size        = chunk_size
         self.point_feature_dim = point_feature_dim
 
     def initialize_neutral_residuals(self) -> None:

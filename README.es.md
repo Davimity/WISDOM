@@ -53,6 +53,8 @@ desarrollo, pero nunca entran en el gradiente ni en la selección del checkpoint
     - [5.3.1. V5c: refinamiento espacial de la evidencia superficial](#531-v5c-refinamiento-espacial-de-la-evidencia-superficial)
   - [5.4. Comparación aplazada de encoders superficiales](#54-comparación-aplazada-de-encoders-superficiales)
   - [5.5. Entrenamiento, evaluación y artefactos](#55-entrenamiento-evaluación-y-artefactos)
+    - [5.5.1. V7: comparar justamente las cabezas global y local](#551-v7-comparar-justamente-las-cabezas-global-y-local)
+    - [5.5.2. V8a–V8c: controles arquitectónicos independientes](#552-v8av8c-controles-arquitectónicos-independientes)
   - [5.6. Descubrimiento de conceptos sparse posterior al HPO](#56-descubrimiento-de-conceptos-sparse-posterior-al-hpo)
   - [5.7. Roadmap formal y barreras de decisión](#57-roadmap-formal-y-barreras-de-decisión)
   - [5.8. Análisis de investigación: encontrar evidencia útil](#58-análisis-de-investigación-encontrar-evidencia-útil)
@@ -4237,7 +4239,9 @@ lf run experiments/v6/wisdom_v6g.yaml       # Dirichlet x Heat activado/desactiv
 lf validate experiments/v6/wisdom_v6h.yaml  # 54 exploratory configurations, not a confirmed winner
 lf run experiments/v6/wisdom_v6h.yaml --dry-run
 lf run experiments/v7/wisdom_v7.yaml
-lf run experiments/v8/wisdom_v8.yaml
+lf run experiments/v8/wisdom_v8a.yaml  # solo tras congelar el registro revisado de V7
+lf run experiments/v8/wisdom_v8b.yaml
+lf run experiments/v8/wisdom_v8c.yaml
 lf run experiments/v9/wisdom_v9.yaml
 lf run experiments/v10/wisdom_v10.yaml
 lf results analyze EXECUTION_ID
@@ -4285,6 +4289,262 @@ los cinco encoders controlados de 5.4; las generaciones posteriores siguen solo 
 [`docs/model_roadmap.md`](docs/model_roadmap.md). V2 y v3 son ejecutables, pero no deben describirse
 como mejores hasta comparar las hipótesis declaradas con etiquetas reales, semillas pareadas y
 confirmación independiente.
+
+#### 5.5.1. V7: comparar justamente las cabezas global y local
+
+V7 pregunta si conviene separar las cabezas que clasifican la proteína y generan el mapa
+superficial. Una **cabeza** es la función entrenable pequeña que convierte la representación
+compartida en logits: puntuaciones reales cuya sigmoide da una probabilidad. V7 cambia esa
+relación, no el encoder atómico, DiffusionNet, preprocesado, refinador o pooling elegido antes.
+La comparación principal cruza estas cuatro alternativas con cuatro pipelines fijos de V6h en
+[`experiments/v7/wisdom_v7.yaml`](experiments/v7/wisdom_v7.yaml).
+
+Los 16 candidatos de V7 usan las semillas 101/103/107/109: 64 Runs obligatorios. Los cuatro
+pipelines mantienen sus políticas débiles exactas y Heat6. Compara cada cabeza con single del
+mismo pipeline y semilla antes de agregar diferencias. V7 no selecciona automáticamente un ganador
+para V8. El bloqueo por decisiones previas pendientes pertenece ahora a V8a–V8c, explicado debajo;
+validar sintaxis o hacer un dry-run nunca demuestra preparación científica.
+
+| Hipótesis | Predicción principal de la proteína | Logits superficiales antes del refinador fijo |
+|---|---|---|
+| `single` | Pooling existente de logits locales | Clasificador local original sobre cada embedding puntual |
+| `dual` | Clasificador directo del embedding superficial reducido | Clasificador local original, compartiendo backbone |
+| `global_context` | El mismo clasificador directo | Clasificador del embedding puntual concatenado con contexto global proyectado |
+| `film` | El mismo clasificador directo | Clasificador local tras escalar/desplazar las features con contexto global |
+
+Sea `Z_ip` el embedding de D componentes del punto p de la proteína i, y `a_ip` su área
+representada en Å². El embedding global predeterminado es la media normalizada por área:
+
+$$
+g_i=\frac{\sum_{p\in i} a_{ip} Z_{ip}}{\sum_{p\in i}a_{ip}}.
+$$
+
+Así, una región representada más grande influye proporcionalmente más, sin favorecer proteínas
+con más puntos muestreados. `global_reduction: mean` da el mismo peso a cada punto; `max` toma
+el máximo por componente del embedding. Ninguna cambia el pooling de logits locales. La reducción
+acumula en FP32 con precisión mixta y nunca mezcla proteínas. El clasificador directo es
+LayerNorm → lineal → SiLU → dropout → lineal. LayerNorm normaliza el vector de cada proteína;
+SiLU es una activación no lineal suave. Esta cabeza consume g, no logits locales ni GT local.
+Si el pooling congelado usa atención, sigue puntuando los embeddings Z originales, no el contexto
+concatenado ni la entrada modulada por FiLM al clasificador local.
+
+En las cabezas condicionadas, una capa lineal seguida de SiLU proyecta g a un contexto más pequeño.
+`detach_global_context: true` corta únicamente la ruta de gradiente de la pérdida local a través
+de g. La proyección sigue aprendiendo; la ruta puntual hacia Z y la BCE directa siguen actualizando
+el backbone. Con `false`, la ruta contextual también puede actualizarlo. FiLM predice una corrección
+de escala gamma y un desplazamiento beta, compartidos solo entre puntos de la misma proteína.
+Transforma el embedding como `(1 + s*gamma_i)*Z_ip + s*beta_i`, con s=`film_modulation_scale`.
+
+**Escala de pérdida comparable.** Ambas BCE comparan predicciones de proteína con la misma etiqueta
+global; ninguna consume GT superficial. En variantes con dos cabezas, L_d es la BCE directa,
+L_s la BCE del pooling superficial y rho la contribución superficial. La política normalizada es:
+
+$$
+L_{task}=(1-\rho)L_d+\rho L_s,\qquad 0\leq\rho<1.
+$$
+
+V7 fija rho=0.5. Si las dos ramas predicen lo mismo, esto coincide exactamente con la BCE original
+de single, en lugar de duplicarla. Los priors de V6 y la penalización de gates añadidos por separado
+no pasan silenciosamente a pesar la mitad respecto a la tarea. Esto controla la escala de los
+coeficientes, no iguala las normas de gradiente ni garantiza mejoras científicas. Single conserva
+siempre su BCE original. rho=0 desactiva la BCE superficial, aunque pueden quedar priors activos;
+rho=1 se rechaza porque eliminaría el objetivo supervisado del clasificador directo que elige época.
+
+**Configuración y checkpoints históricos.** Los valores predeterminados públicos conservan el contrato:
+
+| Parámetro | Valor predeterminado real | Significado en la comparación controlada |
+|---|---|---|
+| `head_type` | `single` | Una de las cuatro hipótesis anteriores |
+| `head_implementation` | `legacy` | `controlled` construye solo módulos participantes y aísla su RNG de inicialización |
+| `head_loss_balance` | `legacy_sum` | `normalized` selecciona la combinación convexa anterior |
+| `surface_loss_fraction` | `0.5` | rho; activo para pérdidas normalizadas de dos cabezas |
+| `direct_head_weight`, `surface_head_weight` | `1.0`, `1.0` | Coeficientes de la suma histórica; no se sobreescriben junto a normalized |
+| `global_context_dim` | `16` | Anchura positiva del cuello contextual; solo contexto/FiLM |
+| `detach_global_context` | `true` | Corta solo la ruta de gradiente del contexto al backbone |
+| `head_dropout` | `null` | Dropout directo; null hereda el del backbone; valores explícitos en [0,1) |
+| `global_reduction` | `area_mean` | Media por área, `mean` por puntos o `max` por componente; solo dos cabezas |
+| `film_modulation_scale` | `1.0` | Multiplicador positivo finito; solo FiLM |
+| `local_head_initialization` | `independent` | `copy` copia el clasificador local original al condicionado controlado |
+
+Si faltan las opciones nuevas, se restaura estrictamente la estructura histórica de V2, incluidos
+los módulos antes inactivos y su orden de inicialización. No se migran claves ni se cambia una
+suma por una media silenciosamente. Los checkpoints nuevos guardan opciones del constructor,
+política de pérdida, rho y coeficientes efectivos. No cargues un estado legacy en una arquitectura
+controlled ignorando claves ausentes.
+
+La construcción controlled conserva el estado del generador de números aleatorios (RNG) usado
+para inicializar backbone, pooling y refinador compartidos. Con la misma semilla, esos parámetros
+empiezan idénticos entre cabezas. Las cabezas nuevas usan otra secuencia determinista, sin reutilizar
+los sorteos del refinador; el clasificador directo también empieza idéntico entre variantes, incluso
+con inicialización lineal personalizada. Las políticas lineales elegidas se aplican a las cabezas
+nuevas. Después se pone a cero la capa gamma/beta de FiLM: la modulación empieza como identidad.
+Eso solo no copia el clasificador: V7 selecciona explícitamente `local_head_initialization: copy`
+para contexto y FiLM. Las columnas adicionales de contexto empiezan a cero; FiLM copia el
+clasificador original. Ambas reproducen inicialmente los logits locales de single. La proyección
+contextual puede tener gradiente cero en el primer paso hasta que se abra ese acoplamiento;
+es esperable. El clasificador heredado se congela y no se ejecuta en esas dos variantes controlled.
+La calibración opcional del sesgo usa la cabeza local efectiva y la salida de proteína **derivada
+de superficie**; se rechaza calibrar dos cabezas legacy en lugar de repetir el emparejamiento erróneo.
+
+**Lectura de métricas.** `val_auprc`, `val_auroc` y `val_loss` describen la salida principal:
+pooling local en single y clasificación directa en las otras. Las variantes con dos cabezas
+publican también alias idénticos `val_direct_*`, `val_surface_derived_*` para la clasificación
+mediante pooling local y `val_head_disagreement`, diferencia absoluta media de probabilidades.
+El desacuerdo no demuestra que una rama falle. El checkpoint sigue maximizando exclusivamente
+`G=0.70*AUPRC+0.30*AUROC` de proteína; el objetivo conjunto de desarrollo W es independiente y
+no elige la época. El GT local solo entra en evaluación/ranking de desarrollo después del forward,
+nunca en gradientes. La inferencia restaura ambas ramas y la configuración exacta de cabeza/refinador.
+
+Las métricas `val_surface_branch_faithfulness_*` de eliminación/inserción intervienen únicamente
+logits/embeddings fijos en la entrada al pooling superficial. Las claves históricas
+`val_faithfulness_*` permanecen como alias idénticos descritos explícitamente como superficiales;
+los duplicados se ocultan del descubrimiento automático. No demuestra que el clasificador directo
+dependa de un hotspot: nunca consume esos logits locales. `evaluation.json` y los metadatos del
+artefacto checkpoint incluyen estados y motivos en `faithfulness.surface_branch` y
+`faithfulness.direct_branch`. La dependencia directa queda no disponible hasta disponer de una
+intervención válida en embeddings. Cualquier refinador activo, incluido Heat6, y el pooling regional
+invalidan eliminar vértices con el operador guardado: sus métricas de calidad quedan ausentes,
+no se rellenan con cero. Una auditoría disponible necesita además proteínas positivas.
+
+**Experimentos posteriores, fuera de este barrido.** Las condiciones nativas `when` restringen
+el contexto a contexto/FiLM y los parámetros directos a las variantes con dos cabezas. Tras esta
+comparación, otro `search.space` condicional puede probar rho `[0.25,0.5,0.75]`, contexto `[8,16,32]`,
+detach `[true,false]` y dropout directo `[0.0,0.1,0.2]` sin modificar Python. No multipliques esas
+parrillas dentro de la comparación primaria.
+Dos ideas quedan sin implementar: fusionar convexamente los logits finales haría que ambas ramas
+afecten a la decisión, pero exige validar coeficiente/calibración y redefinir selección/auditoría;
+la atención sobre embeddings podría aprender una reducción global mejor con coste O(MD), pero
+añade capacidad y puede concentrarse en factores espurios. Ninguna debe introducirse silenciosamente
+en las cuatro hipótesis. Las pruebas sintéticas de forward/backward, serialización y configuración
+establecen corrección técnica, no mejora científica; eso exige cerrar el registro y ejecutar pares.
+
+#### 5.5.2. V8a–V8c: controles arquitectónicos independientes
+
+Son tres estudios de construcción, **no tres nuevas generaciones científicas del modelo**.
+Ejecútalos solo después de revisar V7 y copiar el mismo pipeline, cabeza, parámetros aplicables
+y balance de pérdidas en los tres YAML. Sus bloques `with` idénticos mantienen explícitamente
+el backbone de V7 y Heat6, pero pooling/cabeza/coeficientes débiles siguen pendientes. El valor
+`weak_loss_profile: PENDING_V7` detiene la ejecución antes de cargar datos o construir el modelo.
+Sustituye los campos marcados y, al terminar la revisión, selecciona `custom`; no interpretes los
+valores provisionales MAX/single como una decisión científica.
+
+| Estudio | Único factor | Controles contemporáneos | Runs obligatorios |
+|---|---|---|---:|
+| `wisdom-v8a` | Geometría puntual existente condiciona scores átomo–superficie | baseline frente a point_geometry | 8 |
+| `wisdom-v8b` | Ruta de retorno superficie–átomo | baseline, depth_control, depth_control_parameter_matched, bidirectional | 16 |
+| `wisdom-v8c` | Enriquecimiento atómico escalar mediado por vectores | baseline, vector_8, vector_16 | 12 |
+
+Cada candidato usa **151, 157, 163, 167**. Los 36 Runs son obligatorios, sin HPO, pruning
+competitivo ni selección de semillas. Se conserva la paciencia normal de cada entrenamiento.
+Un baseline de otra campaña no es otra repetición. La antigua campaña conjunta y su visor se
+conservan como instantáneas `.yaml.example`, fuera del catálogo ejecutable; no son valores por
+defecto. Los revisores de `experiments/v8/visualization/` inspeccionan checkpoints guardados de
+validación, con `source_seed: 151` y `allow_test: false`; si faltan pesos, nunca reentrenan.
+
+**V8a: una interacción, evidencia existente.** El residuo geométrico implementado multiplica
+una proyección de las curvaturas ya controladas por gates por atributos específicos de cada pareja
+punto–átomo. Puede cambiar los pesos relativos; una constante por punto se cancelaría en el softmax.
+Curvaturas, distancias y componentes normal/tangencial son invariantes a rotación y traslación
+rígidas. No se añaden coordenadas ni etiquetas locales al preprocesado. Las máscaras conservan
+solo vecinos válidos. Desactivar el gate adicional en point_geometry reproduce el campo local
+del baseline controlado con inicialización emparejada.
+
+El denominador del coste de gates necesita un control. Con N gates y probabilidades esperadas
+de ruta activa q_j, el coste histórico es `sum(q_j)/N`. Añadir un gate reduciría el coeficiente
+de cada gate común de `gate_lambda/N` a `gate_lambda/(N+1)`: una caída de `1/(N+1)`.
+Para las entradas de V7, N=41 y la caída es **2.38%**. V8 fija
+`gate_cost_normalization: baseline_count`: divide por 41 en ambos candidatos. El gate nuevo paga
+su coste de ruta, incluido su ancestro de contexto atómico; no recibe una ruta extra gratuita.
+Esto fija la presión sobre gates comunes, no iguala la pérdida total ni las normas de gradiente.
+La media histórica sigue siendo el valor por defecto. El coste corregido puede alcanzar 42/41:
+no es una fracción de gates activos; esa métrica sigue usando la media real del registro.
+
+**V8b: profundidad, capacidad e información de retorno.** A representa los estados atómicos
+escalares codificados y S1/S2 los estados superficiales de primera/segunda etapa. Baseline es
+A → S1. Depth control repite la transferencia desde A sin actualizar y la combina con S1 antes
+del segundo encoder superficial. Bidirectional usa S1 para actualizar A a A-prime y ejecuta la
+**misma** segunda transferencia, proyección y encoder. Ambas variantes reciben también S1 por
+esa proyección directa. No se añade otra propagación entre átomos ni un bucle recurrente.
+
+El mensaje de retorno es una media ponderada normalizada. Para el átomo a, C(a) es el conjunto
+de vecinos superficiales válidos, d_pa su distancia en Å, R el radio existente en Å y A_p el
+área representada del punto en Å². Si H_p es el embedding S1, la ponderación por área calcula:
+
+$$
+m_a=\frac{\sum_{p\in C(a)} A_p\exp(-d_{pa}/R)H_p}
+{\sum_{p\in C(a)} A_p\exp(-d_{pa}/R)}.
+$$
+
+La máscara corta distancias en R; distancia cero tiene peso unitario finito. Aproxima una integral
+superficial en vez de contar muestras. Dividir una región en muestras con el mismo estado y áreas
+que suman la original no cambia el mensaje. No garantiza invariancia al regenerar otra superficie
+y otro operador. `feedback_weighting: point` omite A_p y conserva la medida histórica; V8 fija
+`area`. La acumulación y normalización usan FP32 y un suelo positivo diminuto en el denominador,
+no el epsilon de precisión mixta. Un átomo sin peso válido positivo conserva **exactamente** su
+estado original y su gradiente identidad.
+
+Los átomos cubiertos reciben `LayerNorm(A_a + MLP([A_a,m_a]))`. La ruta es diferenciable:
+pérdida S2 → segunda transferencia → A-prime → feedback → S1, sin detach. El control matched
+ejecuta la misma actualización y cobertura, pero entrega m_a=0 **sin leer S1**. Iguala el número
+de parámetros entrenables y el trabajo matricial de actualización, no todo el coste: la agregación
+es más barata y las columnas de entrada del mensaje nulo reciben gradiente de datos cero. Iguala
+capacidad nominal, no todos los grados de libertad efectivos ni el tiempo medido. La comparación
+primaria es bidirectional frente a depth_control; compararlo con matched pregunta además si ayuda
+la información real de retorno. Superar solo baseline no demuestra utilidad del feedback.
+
+**V8c: qué hacen realmente los vectores.** Cada arista atómica no dirigida genera coeficientes
+escalares aprendidos multiplicados por el desplazamiento unitario orientado. Se acumulan con
+signos opuestos en los extremos y se dividen por el grado. Los tensores intermedios
+`[N_atoms,C_vectors,3]` rotan con la molécula; solo las normas por canal entran en una actualización
+residual escalar. Es una etapa ligera escalar→vector→escalar, **no** un encoder profundo que
+mantenga estados vectoriales entre capas. El modo controlled promedia el scorer en los dos
+órdenes de extremos: renumerar átomos o invertir una arista no cambia su coeficiente. La traslación
+se cancela al restar posiciones y las normas eliminan la orientación. Posiciones coincidentes
+dan dirección cero; los átomos aislados no cambian y la acumulación usa FP32 con AMP. Máscaras y
+pertenencia a proteínas siguen las relaciones dispersas existentes; no se crea una matriz densa.
+
+**Reproducibilidad y compatibilidad.** `architecture_implementation: legacy` es el valor público
+por defecto: conserva claves de módulos, orden RNG y reglas numéricas históricos. Los checkpoints
+sin opciones nuevas restauran ese contrato estrictamente. `controlled`, seleccionado explícitamente
+en estas campañas, corrige cobertura y simetría y construye módulos adicionales con secuencias RNG
+privadas deterministas **después** de inicializar la parte común. Backbone, pooling, cabezas V7 y
+refinador compartidos empiezan idénticos entre variantes, incluso con inicialización ortogonal o
+activation-aware. Las tres variantes de dos etapas comparten también los mismos parámetros
+iniciales de segunda etapa. No mezcles resultados legacy y controlled como semillas intercambiables.
+
+`architecture_spike` conserva los perfiles con nombre; `custom` permite
+`surface_geometry_transfer=false`, `interaction_round=single` y `vector_atomic_channels=0`.
+Las rondas adicionales son `depth_control`, `depth_control_parameter_matched`, `bidirectional`;
+matched requiere controlled. Los defaults nuevos son `feedback_weighting=point` y
+`gate_cost_normalization=historical_mean`. No se abre otra parrilla de intensidades, anchuras ni
+rondas. `lf explain` muestra los valores efectivos.
+
+La auditoría técnica informa los recuentos del backbone provisional de anchura V7, MAX/single y
+15 columnas de curvatura, no una arquitectura ganadora. Cada Run registra
+`trainable_parameter_count` aparte de `parameter_count` almacenado, además de los tiempos por
+época/forward y el pico CUDA existentes. Solo los vectores intermedios necesitan aproximadamente
+`4*3*N_atoms*C_vectors` bytes en FP32; autograd y mensajes por arista añaden memoria. Las pruebas
+sintéticas comprueban formas, gradientes, invariancias y serialización, no rendimiento real.
+
+| Candidato | Parámetros entrenables, registro provisional MAX/single |
+|---|---:|
+| baseline | 469.875 |
+| point_geometry | 472.308 |
+| depth_control | 850.724 |
+| depth_control_parameter_matched | 900.388 |
+| bidirectional | 900.388 |
+| vector_8 | 506.243 |
+| vector_16 | 509.331 |
+
+Son recuentos del constructor, no modelos entrenados; otra cabeza/pooling de V7 cambiará el total
+común. El módulo de retorno añade 49.664 parámetros nominales sobre depth control.
+
+La prioridad científica sigue siendo S, AUPRC macro en superficies de proteínas positivas, en el
+checkpoint elegido por G global. Se conservan S original, métricas globales/directas/derivadas,
+masa/pico negativo, top-k, coupling/regret temporal, variación emparejada, gates y costes. El GT
+local nunca entra en backward ni elige época; la auditoría de eliminación con Heat6 sigue no
+disponible, no cero. Quedan pendientes el ganador V7, los resultados emparejados reales y el
+coste GPU representativo; validar o planificar no demuestra que una arquitectura mejore.
 
 ### 5.6. Descubrimiento de conceptos sparse posterior al HPO
 

@@ -1,0 +1,56 @@
+# Review V8A checkpoints independently; never retrain or choose a V7 winner.
+# Post-hoc inspection does not fit models or replace paired-study decisions.
+name: wisdom-v8a-review  # Inference-only reviewer, not a training campaign.
+run: wisdom.visualization.StudyReview.StudyReview  # Native inference-only Work.
+
+with:  # Select saved evidence, then configure the automatic diagnostic panel.
+  source_execution: REPLACE_WITH_V8A_EXECUTION_ID  # Native registered Execution ID or unambiguous Work name.
+  dataset: {dataset: wisdom-dna-reduced@6}  # Exact training dataset content, locally placed.
+  source_seed: 151  # Saved training seed to inspect; this does not train or choose the best seed.
+  splits: [val]  # Review validation only, never held-out test.
+  allow_test: false  # Refuse accidental test selection.
+  maximum_proteins: 8  # Diagnostic proteins per configuration/split; not a point cap.
+
+  # Optional model filter: uncomment only the desired mapping or alternative list.
+  # parameter_filter:  # All authored fields must match; list values accept any listed choice.
+  #   architecture_spike: ["baseline","point_geometry"]  # Narrow the recorded configurations to these choices.
+  # OR alternative: keep MAX plus only the chosen attention widths.
+  # parameter_filter:  # Do not activate two parameter_filter definitions.
+  #   - pooling_type: max  # Keep parameter-free MAX without requiring an attention width.
+  #   - pooling_type: attention  # Every field in this branch must match.
+  #     attention_hidden_dim: [16, 32]  # Include these widths in the attention branch only.
+  # content: features  # Optional learned-channel display; predictions are the lightweight default.
+
+# Review defaults (actual public run() values, not the overrides above):
+# source_execution/dataset: required; results_root=null uses the native project ResultStore.
+# source_seed=null: advanced seed_selection=null chooses the median by checkpoint wisdom_score.
+# source_seed=<integer> selects that saved seed, never a new RNG seed; missing seeds fail explicitly.
+# parameter_filter=null and trial_selection=null review all eligible configurations.
+# parameter_filter: scalar equality, list choices, AND within a mapping, OR between mapping items.
+# Missing/inactive parameters never match null. Filter and trial_selection are mutually exclusive.
+# trial_selection advanced modes: all, explicit/trial_indices=[], parameter_filter/where={},
+# best_by_metric, top_k_by_metric (metric=wisdom_score,direction=max,k=3), pareto
+# (metrics={metric:max|min},maximum_trials=8); aggregation=median or mean.
+# seed_selection advanced modes: all, explicit/seeds=[], best/worst/median/top_k/bottom_k,
+# representative; metric=wisdom_score,direction=max,k=3. Do not combine with source_seed.
+# Rankings use best-model artifact metrics, not latest epoch metrics; no StudyDecision changes.
+# evaluation_scope=full; explicit requires protein_selection explicit identifiers.
+# protein_selection=null: automatic diagnostic mixture fills maximum_proteins where possible.
+# Alternatives: automatic strategies diagnostic/best/worst/mixed, explicit identifiers, all.
+# Optional cases_per_category bounds each category; absent means no separate category quota.
+# splits=[val], allow_test=false: test stays sealed. maximum_proteins=12 (>=0); zero requests all.
+# content=predictions: logits/probability/GT; features adds learned channels; full adds structure.
+# prediction_threshold=0.5 in [0,1]; save_predictions=false avoids duplicate prediction NPZ.
+# maximum_surface_points=2000 (>0), report_maximum_mib=14.0 in (0,16] remain defaults.
+# PENDING LF ASSET SUPPORT: no unlimited integrated mode yet; LF enforces 16/64 MiB.
+# Omissions are audited, not scientific exclusions; metrics retain full split/point coverage.
+# batch_size=1 (>0), data_workers=0 (>=0), strict_checkpoints=true: no hidden fallback training.
+
+resources:  # Frozen inference; no optimizer or new training lifecycle.
+  gpu: 1  # Use the local visible accelerator; set zero on CPU-only machines.
+  cpu: 4  # Decoding and HTML assembly on the host.
+  memory: 16GiB  # Host memory, distinct from accelerator VRAM.
+
+# Resource defaults: cpu=1, gpu=0, processes=1; memory/gpu_memory/storage=0, time=null.
+# cpu/processes>=1, gpu>=0, processes<=cpu; sizes accept units and time accepts durations.
+# Name defaults to the YAML stem. No seeds/search/sweep is used: source_seed is saved evidence.

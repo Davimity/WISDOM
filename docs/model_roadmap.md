@@ -26,6 +26,27 @@ V1 is frozen only after `wisdom_v10.yaml` completes without unacceptable collaps
 surface failure, faithfulness failure, or seed variance. Code that exposes a candidate is not by
 itself evidence that the candidate belongs to V1.
 
+### 1.1. Construction campaigns V8a, V8b and V8c
+
+These labels are construction experiments, not formal model generations. After reviewing V7,
+copy its identical selected pipeline/head ledger into all three pending YAMLs. V8a tests only
+existing point-geometry conditioning (8 Runs). V8b compares one-pass baseline, added surface
+depth, parameter-matched null-message update and real surface-to-atom feedback (16 Runs).
+V8c tests one scalar→equivariant-vector→invariant-norm atomic augmentation with 8/16 channels
+(12 Runs). Each uses paired seeds 151/157/163/167 and contemporary controls, without HPO/pruning.
+
+The primary feedback contrast is bidirectional vs depth_control, not vs baseline. All two-stage
+variants share the second transfer/projection/encoder. The matched update never reads S1 and
+matches nominal parameters, not effective input-dependent capacity or complete aggregation cost.
+There is no new atomic message-passing round, recurrent TTC, preprocessing or persistent deep
+vector encoder. The combined former YAML/reviewer survive as non-executable .yaml.example
+snapshots; use the three separate validation-only checkpoint reviewers instead.
+
+PENDING_V7 prevents actual computation until review. The controlled behavior policy isolates new
+module RNG, fixes uncovered feedback atoms and undirected-vector symmetry, and keeps the
+baseline gate-cost denominator fixed. Historical checkpoints default to legacy behavior.
+See README section 5.5.2 for equations, defaults, limitations and the scientific comparisons.
+
 ## 2. WISDOM V2 — multi-view signal audit
 
 V2 asks whether physically equivalent surface samplings contain complementary information or only

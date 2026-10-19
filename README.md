@@ -53,6 +53,8 @@ gradient or checkpoint choice.
     - [5.3.1. V5c: spatial refinement of surface evidence](#531-v5c-spatial-refinement-of-surface-evidence)
   - [5.4. Deferred surface-encoder screen](#54-deferred-surface-encoder-screen)
   - [5.5. Training, evaluation, and artifacts](#55-training-evaluation-and-artifacts)
+    - [5.5.1. V7: comparing global and local heads fairly](#551-v7-comparing-global-and-local-heads-fairly)
+    - [5.5.2. V8a–V8c: independent architectural controls](#552-v8av8c-independent-architectural-controls)
   - [5.6. Post-HPO sparse concept discovery](#56-post-hpo-sparse-concept-discovery)
   - [5.7. Formal roadmap and decision gates](#57-formal-roadmap-and-decision-gates)
   - [5.8. Research analysis: finding useful evidence](#58-research-analysis-finding-useful-evidence)
@@ -4234,7 +4236,9 @@ lf run experiments/v6/wisdom_v6g.yaml       # Dirichlet x Heat on/off
 lf validate experiments/v6/wisdom_v6h.yaml  # 54 exploratory configurations, not a confirmed winner
 lf run experiments/v6/wisdom_v6h.yaml --dry-run
 lf run experiments/v7/wisdom_v7.yaml
-lf run experiments/v8/wisdom_v8.yaml
+lf run experiments/v8/wisdom_v8a.yaml  # only after freezing the reviewed V7 ledger
+lf run experiments/v8/wisdom_v8b.yaml
+lf run experiments/v8/wisdom_v8c.yaml
 lf run experiments/v9/wisdom_v9.yaml
 lf run experiments/v10/wisdom_v10.yaml
 lf results analyze EXECUTION_ID
@@ -4281,6 +4285,262 @@ five controlled surface encoders in Section 5.4; later roadmap generations remai
 in [`docs/model_roadmap.md`](docs/model_roadmap.md). V2 and v3 are technically executable but must not be
 described as better until the declared poolings are compared on real labels with paired seeds and
 disjoint confirmation.
+
+#### 5.5.1. V7: comparing global and local heads fairly
+
+V7 asks whether a protein classifier and a surface map benefit from separate prediction heads.
+A **head** is the small trainable function that converts the shared surface representation into
+logits: real-valued scores whose sigmoid gives a probability. V7 changes that relationship, not
+the atomic encoder, DiffusionNet, preprocessing, surface refiner or pooling selected earlier.
+The primary study crosses these four alternatives with four fixed V6h pipelines in
+[`experiments/v7/wisdom_v7.yaml`](experiments/v7/wisdom_v7.yaml).
+
+V7's 16 candidates use seeds 101/103/107/109: 64 required Runs. The four pipelines preserve
+their exact weak-prior policies and Heat6. Compare each head with single of the same pipeline
+and seed before aggregating differences. V7 selects no winner automatically for V8. The pending
+upstream-ledger execution guard now belongs to V8a–V8c, described below; syntax validation and
+dry runs never establish scientific readiness.
+
+| Hypothesis | Primary protein prediction | Surface logits before the fixed refiner |
+|---|---|---|
+| `single` | Existing pooling of local logits | Original local classifier on each point embedding |
+| `dual` | Direct classifier of a reduced surface embedding | Original local classifier, sharing the backbone |
+| `global_context` | Same direct classifier | Classifier of point embedding concatenated with projected global context |
+| `film` | Same direct classifier | Local classifier after global context scales/shifts point features |
+
+Let `Z_ip` be the D-component embedding of surface point p belonging to protein i, and `a_ip`
+its represented area in Å². The default global embedding is the normalized area mean:
+
+$$
+g_i=\frac{\sum_{p\in i} a_{ip} Z_{ip}}{\sum_{p\in i}a_{ip}}.
+$$
+
+This gives larger represented patches proportionally more influence without favoring proteins
+with more sampled points. `global_reduction: mean` instead gives every point equal weight; `max`
+takes the maximum separately in each embedding component. Neither is a change to local-logit
+pooling. Reductions accumulate in FP32 under mixed precision and never combine different proteins.
+The direct classifier is LayerNorm → linear → SiLU → dropout → linear. LayerNorm normalizes each
+protein's feature vector; SiLU is a smooth nonlinear activation. This classifier consumes g, not
+the local scores or local ground truth.
+If the frozen pooling uses attention, it still scores the original Z embeddings, not the
+concatenated context or FiLM-modulated classifier input.
+
+For conditioned heads, a linear layer followed by SiLU projects g into a smaller context vector.
+`detach_global_context: true` stops the local loss from propagating through g along that context
+route only. The projection still learns, and the pointwise path into Z and the direct BCE still
+update the backbone. With `false`, the context route can update it too. FiLM predicts a scale
+correction gamma and an offset beta, broadcast only to points of the same protein. Its transformed
+embedding is `(1 + s*gamma_i)*Z_ip + s*beta_i`, where s is `film_modulation_scale`.
+
+**Comparable loss scale.** Both BCE terms compare protein predictions with the same protein
+label; neither consumes surface GT. For multi-head models, let L_d be direct BCE, L_s be BCE of
+the pooled surface logits and rho the surface share. The explicit normalized policy is:
+
+$$
+L_{task}=(1-\rho)L_d+\rho L_s,\qquad 0\leq\rho<1.
+$$
+
+V7 fixes rho=0.5. If the two branches make identical predictions, this is exactly the original
+single BCE, not twice that BCE. Therefore the separately added V6 priors and gate penalty do not
+silently become half as strong relative to the task loss. This controls the coefficient scale,
+not equality of gradient norms or scientific performance. Single always retains its original
+BCE. rho=0 disables surface BCE but may leave weak priors active; rho=1 is rejected because the
+direct classifier used for checkpoint selection would lose its supervised objective.
+
+**Configuration and historical checkpoints.** Public Training defaults retain the old contract:
+
+| Parameter | Actual default | Meaning in the controlled comparison |
+|---|---|---|
+| `head_type` | `single` | One of the four hypotheses above |
+| `head_implementation` | `legacy` | `controlled` allocates only participating head modules and isolates their construction RNG |
+| `head_loss_balance` | `legacy_sum` | `normalized` selects the convex combination above |
+| `surface_loss_fraction` | `0.5` | rho; active for normalized multi-head models |
+| `direct_head_weight`, `surface_head_weight` | `1.0`, `1.0` | Historical sum coefficients; cannot be overridden together with normalized policy |
+| `global_context_dim` | `16` | Positive context bottleneck width; context/FiLM only |
+| `detach_global_context` | `true` | Cuts the context-to-backbone gradient route only |
+| `head_dropout` | `null` | Direct classifier dropout; null inherits backbone dropout; explicit values are in [0,1) |
+| `global_reduction` | `area_mean` | Area mean, point `mean`, or componentwise `max`; multi-head only |
+| `film_modulation_scale` | `1.0` | Finite positive correction multiplier; FiLM only |
+| `local_head_initialization` | `independent` | `copy` initializes the controlled conditioned classifier from the original local head |
+
+Missing new constructor options restore the historical V2 layout strictly, including historically
+unused modules and their initialization order. There is no silent checkpoint-key migration or
+change from a sum to an average. New checkpoints store constructor options, loss policy, rho and
+resolved weights. Do not load a legacy state into a controlled architecture by ignoring missing keys.
+
+Controlled construction preserves the random-number generator (RNG) state used by shared
+backbone/pooling/refiner initialization. Thus the same seed starts those shared parameters
+identically across heads. New heads use a separate deterministic stream rather than reusing
+the refiner's random draws; the direct classifier also starts identically across multi-head
+variants, including under custom linear initialization. Selected linear policies apply to new heads.
+FiLM's gamma/beta layer is then zeroed, so modulation starts as identity. Identity alone does not
+copy the classifier: V7 explicitly selects `local_head_initialization: copy` for context and FiLM.
+Context's additional classifier columns start at zero; FiLM copies the original classifier.
+At initialization both therefore reproduce single's local scores. Their context projections can
+have zero gradient on the first step until the zero-initialized coupling opens; that is expected.
+The inherited classifier is frozen and not executed in these two controlled modes. Optional
+local-bias calibration targets the effective local head and **surface-derived** protein output;
+legacy multi-head calibration is rejected rather than repeating the old mismatched pairing.
+
+**Reading metrics.** `val_auprc`, `val_auroc` and `val_loss` describe the primary protein output:
+pooled local scores for single, direct classification otherwise. Multi-head runs additionally
+publish `val_direct_*` identity aliases, `val_surface_derived_*` for pooled local classification,
+and `val_head_disagreement`, the mean absolute probability gap. A gap is not proof that either
+branch is wrong. The checkpoint still maximizes protein-only `G=0.70*AUPRC+0.30*AUROC`;
+the existing joint W development objective is separate and does not select the epoch.
+Local GT is used only after forward for evaluation/development ranking, never for gradients.
+Inference restores both branches and the exact saved head/refiner configuration.
+
+Deletion/insertion metrics named `val_surface_branch_faithfulness_*` intervene only on fixed
+surface logits/embeddings at the pooling boundary. Historical `val_faithfulness_*` keys remain
+identical aliases with an explicit surface-only description; duplicate aliases are hidden from
+default discovery. This is not evidence that the direct classifier depends on a hotspot: that
+classifier never consumes those local logits. `evaluation.json` and checkpoint artifact metadata
+record `faithfulness.surface_branch` and `faithfulness.direct_branch` statuses and reasons.
+Direct dependency is unavailable pending a valid embedding intervention. All active refiners,
+including Heat6, and regional pooling invalidate vertex deletion under the saved operator;
+their quality metrics remain absent, not zero. An available audit also needs positive proteins.
+
+**Later experiments, not part of this sweep.** Native LambdaForge `when` conditions already
+restrict context parameters to context/FiLM and direct-head parameters to multi-head variants.
+After the four-way comparison, a separate conditional `search.space` can try rho `[0.25,0.5,0.75]`,
+context width `[8,16,32]`, detach `[true,false]` and head dropout `[0.0,0.1,0.2]` without Python edits.
+Do not multiply these grids into the primary comparison.
+Two further ideas remain unimplemented: a convex final-logit fusion would make both branches
+affect the operational decision but requires validating its coefficient/calibration and redefining
+selection/audit semantics; embedding attention could learn a better global reduction at O(MD)
+cost, but adds capacity and may concentrate on confounders. Neither belongs silently in the first
+four hypotheses. Small synthetic forward/backward, serialization and configuration tests establish
+technical correctness, not scientific improvement; that needs the frozen ledger and paired runs.
+
+#### 5.5.2. V8a–V8c: independent architectural controls
+
+These are three construction-stage studies, **not three new scientific model generations**.
+Run them only after reviewing V7 and copying the same selected pipeline, head, applicable head
+parameters and loss balance into all three YAMLs. Their identical `with` ledgers explicitly retain
+the V7 backbone and Heat6, but pooling/head/weak coefficients are still pending. The value
+`weak_loss_profile: PENDING_V7` stops actual execution before loading any dataset or allocating
+a model. Replace the marked fields and finally set `custom` only after that review; do not let
+the provisional MAX/single values stand in for a scientific decision.
+
+| Study | Sole factor | Contemporary controls | Required Runs |
+|---|---|---|---:|
+| `wisdom-v8a` | Existing point geometry conditions atom-to-surface scores | baseline vs point_geometry | 8 |
+| `wisdom-v8b` | A surface-to-atom return path | baseline, depth_control, depth_control_parameter_matched, bidirectional | 16 |
+| `wisdom-v8c` | Vector-mediated invariant atomic enrichment | baseline, vector_8, vector_16 | 12 |
+
+Each candidate runs seeds **151, 157, 163, 167**. These 36 required Runs have no HPO, competitive
+pruning or seed racing. Ordinary training patience still applies. A baseline measured in another
+campaign is not an extra replication. The old combined campaign and reviewer are retained as
+`.yaml.example` authoring snapshots, excluded from the executable catalog; they are not defaults.
+Individual reviewers in `experiments/v8/visualization/` inspect only saved validation checkpoints,
+with `source_seed: 151` and `allow_test: false`; missing checkpoints never trigger training.
+
+**V8a: one interaction, existing evidence.** The implemented point-geometry residual multiplies
+a projection of the point's already gated curvature descriptors by atom/pair-dependent features.
+It can change relative candidate scores; a point-only constant would cancel under softmax.
+Curvatures, distances and normal/tangential offsets are invariant to rigid rotation/translation.
+No coordinates or local targets are added to preprocessing. Masks retain only valid neighbors.
+With the new branch disabled, the controlled baseline and point_geometry with its extra gate
+forced off reproduce the same local field under paired initialization.
+
+The gate-cost denominator needs its own control. With N existing gates and expected active path
+probabilities q_j, historical cost is `sum(q_j)/N`. Adding one gate would reduce every common
+gate's coefficient from `gate_lambda/N` to `gate_lambda/(N+1)`: a reduction of `1/(N+1)`.
+For the V7 input width this is N=41, hence **2.38%**. V8 fixes
+`gate_cost_normalization: baseline_count`: it divides by 41 in both candidates. The new geometry
+gate still pays its own path cost, including its atom-context ancestor; no free extra path is
+invented. This keeps common-gate pressure fixed, not total loss or gradient norms identical.
+The historical mean remains the default. The corrected cost can reach 42/41, so it must not be
+misread as an active-gate fraction; the latter metric still uses the registry's true mean.
+
+**V8b: depth, capacity and returned information.** Let A be the encoded scalar atom states and
+S1/S2 the first/second surface states. Baseline is A → S1. Depth control computes a second
+transfer from unchanged A and combines it with S1 before a second surface encoder. Bidirectional
+uses S1 to update A into A-prime, then executes the **same** second transfer, projection and
+surface encoder. Both receive S1 directly through that projection. There is no additional
+atom-to-atom message-passing round and no recurrent unrolling.
+
+The atomic return message is a normalized weighted mean. For atom a, C(a) is its set of valid
+surface neighbors, d_pa their distance in Å, R the existing transfer cutoff in Å, and A_p the
+represented point area in Å². If H_p is the S1 embedding, area weighting computes:
+
+$$
+m_a=\frac{\sum_{p\in C(a)} A_p\exp(-d_{pa}/R)H_p}
+{\sum_{p\in C(a)} A_p\exp(-d_{pa}/R)}.
+$$
+
+Distances are masked at R; zero distance has finite unit distance weight. This approximates a
+surface integral rather than counting samples. Splitting one patch into identical-state samples
+whose areas sum to its old area leaves the message unchanged. It does not guarantee invariance
+after regenerating a different surface/operator. `feedback_weighting: point` omits A_p and
+retains the old sampling measure; V8 freezes `area`. Accumulation and normalization use FP32,
+with a tiny positive denominator floor rather than a mixed-precision epsilon. An atom with no
+positive valid weight keeps **exactly** its original state and identity gradient.
+
+Covered atoms receive `LayerNorm(A_a + MLP([A_a,m_a]))`. The return path is differentiable:
+S2 loss → second transfer → A-prime → feedback → S1, with no detach. The matched control runs
+the identical update and coverage but supplies m_a=0 **without reading S1**. Its trainable
+parameter count and update-matrix work match bidirectional; its aggregation is cheaper and
+its zero-message weight columns get zero data gradient. It therefore matches nominal parameter
+capacity, not every effective degree of freedom or measured runtime. The primary contrast is
+bidirectional vs depth_control; bidirectional vs matched further tests whether real returned
+information matters. Beating baseline alone is insufficient evidence for feedback.
+
+**V8c: what the vectors actually do.** Each undirected atomic edge produces learned scalar
+coefficients multiplied by its oriented unit displacement. Opposite signs are accumulated at
+the endpoints, then divided by degree. Those intermediate `[N_atoms,C_vectors,3]` arrays rotate
+with the molecule; only their channel norms enter a scalar residual update. This is one lightweight
+scalar→vector→scalar augmentation, **not** a deep persistent vector-state encoder.
+Controlled scoring averages the same coefficient layer over both endpoint orders, so renumbering
+atoms or reversing an undirected edge cannot change its coefficient. Translation cancels in
+displacements; norms remove rotation dependence. Coincident positions give zero direction,
+isolated atoms remain unchanged, and accumulation uses FP32 under AMP. Masks/ownership remain
+the existing sparse disjoint-batch relations. No dense atom-pair matrix is created.
+
+**Reproducibility and compatibility.** `architecture_implementation: legacy` is the public default
+and preserves old module keys, RNG order and numerical rules. Missing new options in archived
+checkpoints restore that contract strictly. `controlled`, explicitly selected only for the new
+campaigns, fixes uncovered feedback and symmetric vector scoring and constructs additional
+modules in private deterministic RNG streams **after** common initialization. Shared backbone,
+pooling, V7 heads and refiner parameters start identically across spikes, including orthogonal
+and activation-aware initialization. The three two-stage variants also share identical second-stage
+parameters. Do not mix legacy and controlled results as interchangeable repeated seeds.
+
+`architecture_spike` remains the named profile selector; `custom` exposes
+`surface_geometry_transfer=false`, `interaction_round=single` and `vector_atomic_channels=0`.
+Additional rounds are `depth_control`, `depth_control_parameter_matched`, `bidirectional`;
+the matched control requires controlled behavior. New defaults are
+`feedback_weighting=point` and `gate_cost_normalization=historical_mean`. No new grid of feedback
+strengths, widths or rounds is opened. Inspect actual values with `lf explain`.
+
+For the provisional V7-width backbone, MAX/single and 15 stored curvature columns, trainable
+counts are reported by the technical audit, not as a selected V7 architecture. Every Run logs
+`trainable_parameter_count` separately from all stored `parameter_count`, along with existing
+epoch/forward times and peak CUDA memory. Intermediate vectors alone require approximately
+`4*3*N_atoms*C_vectors` bytes in controlled FP32; autograd and edge messages add memory beyond
+that estimate. Synthetic tests establish shape/gradient/invariance/serialization contracts,
+not throughput or scientific improvement on real proteins.
+
+| Candidate | Trainable parameters, provisional MAX/single ledger |
+|---|---:|
+| baseline | 469,875 |
+| point_geometry | 472,308 |
+| depth_control | 850,724 |
+| depth_control_parameter_matched | 900,388 |
+| bidirectional | 900,388 |
+| vector_8 | 506,243 |
+| vector_16 | 509,331 |
+
+These are constructor counts, not fitted models; a different selected V7 head/pooling changes
+the common total. The return module adds 49,664 nominal parameters beyond depth control.
+
+The scientific priority stays operational positive-protein macro AUPRC S at the checkpoint
+selected by global G. Preserve raw S, global/direct/surface-derived classification, negative
+mass/peak, top-k metrics, temporal coupling/regret, paired seed variability, gate diagnostics
+and costs. Local GT never enters backward or epoch selection; Heat6 deletion audits remain
+unavailable rather than zero. The V7 winner, real paired outcomes and realistic GPU cost remain
+pending; validation and dry-run do not authorize claiming that any architecture helps.
 
 ### 5.6. Post-HPO sparse concept discovery
 

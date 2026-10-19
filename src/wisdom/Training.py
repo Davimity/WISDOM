@@ -24,6 +24,7 @@ from wisdom.data.WisdomCollator import WisdomCollator
 from wisdom.models.DiffusionBlock import DiffusionBlock
 from wisdom.models.WeakLossProfile import WeakLossProfile
 from wisdom.models.WeakSurfaceLoss import WeakSurfaceLoss
+from wisdom.models.ProteinTaskLoss import ProteinTaskLoss
 from wisdom.models.StabilityProfile import StabilityProfile
 from wisdom.models.ArchitectureSpike import ArchitectureSpike
 from wisdom.models.ModelWeightAverage import ModelWeightAverage
@@ -118,6 +119,9 @@ class Training(lf.Work):
         atomic_message_chunk_size: int = 65536,
         vector_atomic_channels: int = 0,
         interaction_round     : str = "single",
+        architecture_implementation: str = "legacy",
+        feedback_weighting    : str = "point",
+        gate_cost_normalization: str = "historical_mean",
         atomic_edge_distance_scale: float = 6.0,
         dropout              : float = 0.2,
         surface_encoder_type : str = "diffusion",
@@ -165,10 +169,17 @@ class Training(lf.Work):
         surface_refiner_crf_steps              : int   = 5,
         surface_refiner_crf_damping            : float = 0.5,
         head_type            : str = "single",
+        head_implementation  : str = "legacy",
+        head_dropout         : float | None = None,
+        global_reduction     : str = "area_mean",
+        film_modulation_scale: float = 1.0,
+        local_head_initialization: str = "independent",
         global_context_dim   : int = 16,
         detach_global_context: bool = True,
         direct_head_weight   : float = 1.0,
         surface_head_weight  : float = 1.0,
+        head_loss_balance    : str = "legacy_sum",
+        surface_loss_fraction: float = 0.5,
         learning_rate        : float = 3.0e-4,
         weight_decay         : float = 1.0e-4,
         gate_lambda          : float = 1.0e-3,
@@ -262,6 +273,11 @@ class Training(lf.Work):
             atomic_message_chunk_size: Maximum atomic messages materialized per RGCN chunk.
             vector_atomic_channels: Equivariant vector-state channels; zero disables spike C.
             interaction_round: ``single``, added-depth control, or bidirectional fusion spike B.
+            architecture_implementation: legacy restores archived RNG/vector/feedback behavior;
+                controlled enables audited V8 semantics and paired optional-module initialization.
+            feedback_weighting: point or represented-area-weighted distance mean (area).
+            gate_cost_normalization: historical_mean or baseline_count; the latter fixes each
+                baseline gate's individual L0 coefficient when optional gates are added.
             atomic_edge_distance_scale: Atomic distance normalization scale in ångströms.
             dropout: Dropout probability in ``[0,1)``.
             surface_encoder_type: V3 surface-propagation hypothesis; v1 requires ``diffusion``.
@@ -316,10 +332,20 @@ class Training(lf.Work):
             surface_refiner_crf_steps: Nonnegative mean-field iteration count.
             surface_refiner_crf_damping: New-proposal fraction in (0,1].
             head_type: V2+ ``single``, ``dual``, ``global_context``, or ``film`` hypothesis.
+            head_implementation: legacy preserves historical module layout/RNG; controlled
+                constructs only participating heads with isolated initialization RNG.
+            head_dropout: Independent direct-head dropout in [0,1); None inherits dropout.
+            global_reduction: area_mean, mean or max over each protein's surface embeddings.
+            film_modulation_scale: Positive multiplier of FiLM's gamma and beta; film only.
+            local_head_initialization: independent or copy from the shared local classifier;
+                copy requires a controlled context/FiLM head.
             global_context_dim: D2/D2b global context bottleneck width.
             detach_global_context: Stop local gradients through the global context path.
             direct_head_weight: BCE weight for the direct protein classifier.
             surface_head_weight: BCE weight for the surface-derived protein classifier.
+            head_loss_balance: legacy_sum preserves the historical weighted sum; normalized
+                uses (1-rho)*BCE_direct+rho*BCE_surface; single's BCE never changes.
+            surface_loss_fraction: rho in [0,1) for normalized multi-head loss; default 0.5.
             learning_rate: Positive AdamW learning rate.
             weight_decay: Non-negative AdamW decoupled weight decay.
             gate_lambda: Non-negative multiplier for normalized expected L0 gate cost.
@@ -413,7 +439,8 @@ class Training(lf.Work):
             surface_report_maximum_mib: Per-Run report byte budget in (0,16] MiB. Omitted viewers
                 are listed explicitly; LambdaForge also caps the complete report at 64 MiB.
             faithfulness_audit: On the restored best checkpoint, measure prediction changes after
-                equal-area top/random/bottom surface deletion and insertion without using local GT.
+                equal-area top/random/bottom deletion/insertion at surface pooling, not the
+                independent direct classifier. Active refiners invalidate this audit; no local GT.
             evaluate_test: Evaluate the held-out test split once after selecting the validation
                 checkpoint. Experimental screening may disable it to prevent repeated test access.
             data_workers: Persistent training-loader subprocesses used to overlap NPZ decoding
@@ -489,6 +516,9 @@ class Training(lf.Work):
             atomic_message_chunk_size=atomic_message_chunk_size,
             vector_atomic_channels=vector_atomic_channels,
             interaction_round=interaction_round,
+            architecture_implementation=architecture_implementation,
+            feedback_weighting=feedback_weighting,
+            gate_cost_normalization=gate_cost_normalization,
             atomic_edge_distance_scale=atomic_edge_distance_scale,
             dropout=dropout,
             surface_encoder_type=surface_encoder_type,
@@ -536,10 +566,17 @@ class Training(lf.Work):
             surface_refiner_crf_steps=surface_refiner_crf_steps,
             surface_refiner_crf_damping=surface_refiner_crf_damping,
             head_type=head_type,
+            head_implementation=head_implementation,
+            head_dropout=head_dropout,
+            global_reduction=global_reduction,
+            film_modulation_scale=film_modulation_scale,
+            local_head_initialization=local_head_initialization,
             global_context_dim=global_context_dim,
             detach_global_context=detach_global_context,
             direct_head_weight=direct_head_weight,
             surface_head_weight=surface_head_weight,
+            head_loss_balance=head_loss_balance,
+            surface_loss_fraction=surface_loss_fraction,
             learning_rate=learning_rate,
             weight_decay=weight_decay,
             gate_lambda=gate_lambda,
@@ -628,6 +665,9 @@ def _train_wisdom(
     atomic_message_chunk_size: int = 65536,
     vector_atomic_channels: int = 0,
     interaction_round     : str = "single",
+    architecture_implementation: str = "legacy",
+    feedback_weighting    : str = "point",
+    gate_cost_normalization: str = "historical_mean",
     atomic_edge_distance_scale: float = 6.0,
     dropout              : float = 0.2,
     surface_encoder_type : str = "diffusion",
@@ -675,10 +715,17 @@ def _train_wisdom(
     surface_refiner_crf_steps              : int   = 5,
     surface_refiner_crf_damping            : float = 0.5,
     head_type            : str = "single",
+    head_implementation  : str = "legacy",
+    head_dropout         : float | None = None,
+    global_reduction     : str = "area_mean",
+    film_modulation_scale: float = 1.0,
+    local_head_initialization: str = "independent",
     global_context_dim   : int = 16,
     detach_global_context: bool = True,
     direct_head_weight   : float = 1.0,
     surface_head_weight  : float = 1.0,
+    head_loss_balance    : str = "legacy_sum",
+    surface_loss_fraction: float = 0.5,
     learning_rate        : float = 3.0e-4,
     weight_decay         : float = 1.0e-4,
     gate_lambda          : float = 1.0e-3,
@@ -772,6 +819,10 @@ def _train_wisdom(
         atomic_message_chunk_size: Maximum RGCN messages per chunk.
         vector_atomic_channels: Equivariant atom-vector channel count; zero keeps scalar atoms.
         interaction_round: Single fusion, equal-depth control, or bidirectional feedback round.
+        architecture_implementation: legacy restores history; controlled isolates new-module RNG
+            and activates coverage/symmetry/AMP fixes, including the null-message matched control.
+        feedback_weighting: point or area times distance mean; no detach in the return path.
+        gate_cost_normalization: historical_mean or fixed baseline_count cost denominator.
         atomic_edge_distance_scale: Atomic distance normalization scale in ångströms.
         dropout: Dropout probability in ``[0,1)``.
         surface_encoder_type: V3 controlled surface encoder name.
@@ -823,10 +874,17 @@ def _train_wisdom(
         surface_refiner_crf_steps: Nonnegative mean-field iteration count.
         surface_refiner_crf_damping: New-proposal fraction in (0,1].
         head_type: V2+ global/local head relationship.
+        head_implementation: legacy restores historical layout; controlled isolates new heads.
+        head_dropout: Direct classifier dropout; None inherits backbone dropout.
+        global_reduction: Per-protein area_mean, mean or max embedding reduction.
+        film_modulation_scale: Positive gamma/beta multiplier for FiLM only.
+        local_head_initialization: independent or controlled conditioned-head copy.
         global_context_dim: D2/D2b context bottleneck width.
         detach_global_context: Whether local gradients stop at global context.
         direct_head_weight: Direct-head protein BCE multiplier.
         surface_head_weight: Surface-derived protein BCE multiplier.
+        head_loss_balance: legacy_sum or normalized; never rescales single's BCE.
+        surface_loss_fraction: Normalized surface BCE share rho in [0,1).
         learning_rate: Positive AdamW learning rate.
         weight_decay: Non-negative AdamW decoupled weight decay.
         gate_lambda: Non-negative multiplier for the normalized expected L0 gate cost.
@@ -899,7 +957,8 @@ def _train_wisdom(
             suppresses the tab; an enabled pruned Run may publish an explanation.
         surface_report_maximum_mib: Presentation byte ceiling in (0,16] MiB, not a metric filter.
         faithfulness_audit: Whether final best-checkpoint evaluation performs V8 surface deletion
-            and insertion controls without accessing local ground truth.
+            and insertion at surface pooling only. No direct-dependency claim or local GT;
+            active refiners make the diagnostic unavailable with an explicit report reason.
         evaluate_test: Evaluate held-out test exactly once after validation selection. False keeps
             HPO and screening completely isolated from test members.
         data_workers: Persistent training-loader subprocesses used to overlap NPZ decoding with
@@ -932,7 +991,16 @@ def _train_wisdom(
         architecture_overrides.get("vector_atomic_channels", vector_atomic_channels),
     )
 
+    if weak_loss_profile.startswith("PENDING"):
+        raise ValueError(
+            "V7/V8 carry-forward ledger is pending: review the upstream decisions, replace "
+            "every REPLACE marker, then set weak_loss_profile=custom. No data have been loaded."
+        )
     loss_profile = WeakLossProfile(weak_loss_profile)
+    protein_task_loss = ProteinTaskLoss(
+        head_type, head_loss_balance, surface_loss_fraction,
+        direct_head_weight, surface_head_weight,
+    )
     loss_overrides = loss_profile.overrides()
     negative_surface_lambda = cast(
         float,
@@ -1113,10 +1181,8 @@ def _train_wisdom(
         raise ValueError("atom K, surface-atom J, and spectral-mode budget must be positive")
     if vector_atomic_channels < 0:
         raise ValueError("vector_atomic_channels cannot be negative")
-    if global_context_dim < 1 or direct_head_weight < 0.0 or surface_head_weight < 0.0:
-        raise ValueError("global context width and head-loss weights are invalid")
-    if head_type != "single" and direct_head_weight == 0.0 and surface_head_weight == 0.0:
-        raise ValueError("a dual-head model requires at least one nonzero protein loss")
+    if global_context_dim < 1:
+        raise ValueError("global context width must be positive")
     if not 0.0 < gate_initial_active < 1.0:
         raise ValueError("gate_initial_active must lie strictly between zero and one")
     if (
@@ -1377,6 +1443,9 @@ def _train_wisdom(
         "atomic_message_chunk_size": atomic_message_chunk_size,
         "vector_atomic_channels": vector_atomic_channels,
         "interaction_round": interaction_round,
+        "architecture_implementation": architecture_implementation,
+        "feedback_weighting": feedback_weighting,
+        "gate_cost_normalization": gate_cost_normalization,
         "atomic_edge_distance_scale": atomic_edge_distance_scale,
         "dropout":              dropout,
         "surface_encoder_type": surface_encoder_type,
@@ -1424,6 +1493,11 @@ def _train_wisdom(
         "surface_refiner_crf_steps": surface_refiner_crf_steps,
         "surface_refiner_crf_damping": surface_refiner_crf_damping,
         "head_type":            head_type,
+        "head_implementation":  head_implementation,
+        "head_dropout":         head_dropout,
+        "global_reduction":     global_reduction,
+        "film_modulation_scale": film_modulation_scale,
+        "local_head_initialization": local_head_initialization,
         "global_context_dim":   global_context_dim,
         "detach_global_context": detach_global_context,
         "curvature_features":   curvature_features,
@@ -1532,6 +1606,7 @@ def _train_wisdom(
     preprocessing_bytes = sum(values["total"] for values in split_storage.values())
 
     parameter_count = sum(parameter.numel() for parameter in model.parameters())
+    trainable_parameter_count = sum(p.numel() for p in model.parameters() if p.requires_grad)
     gate_parameter_count = sum(parameter.numel() for parameter in gate_parameters)
     parameter_bytes = sum(
         parameter.numel() * parameter.element_size()
@@ -1548,6 +1623,7 @@ def _train_wisdom(
     evidence_input_width = int(getattr(model, "evidence_input_width", hidden_dim))
 
     work.metrics.log("parameter_count", float(parameter_count))
+    work.metrics.log("trainable_parameter_count", float(trainable_parameter_count))
     work.metrics.log("gate_parameter_count", float(gate_parameter_count))
     work.metrics.log("semantic_gate_count", float(len(model.semantic_gates.names)))
     work.metrics.log("evidence_head_parameter_count", float(evidence_parameter_count))
@@ -1720,19 +1796,13 @@ def _train_wisdom(
                 if optimization_monitor is not None:
                     optimization_monitor.observe_forward(output)
                 target = _tensor(tensors, "target")
-                direct_task_loss = F.binary_cross_entropy_with_logits(output["logits"], target)
-                if "surface_protein_logits" in output:
-                    surface_task_loss = F.binary_cross_entropy_with_logits(
-                        output["surface_protein_logits"],
-                        target,
-                    )
-                    task_loss = (
-                        direct_head_weight * direct_task_loss
-                        + surface_head_weight * surface_task_loss
-                    )
-                else:
-                    surface_task_loss = direct_task_loss.new_zeros(())
-                    task_loss = direct_task_loss
+                # Both branches use protein labels only. Normalization leaves V6 prior
+                # coefficients comparable to single; legacy_sum remains explicitly available.
+
+                protein_losses    = protein_task_loss(output, target)
+                direct_task_loss  = protein_losses["direct"]
+                surface_task_loss = protein_losses["surface"]
+                task_loss         = protein_losses["total"]
                 # Priors and pooling share the operational field. With an active refiner,
                 # surface_logits is its output; raw_surface_logits is evaluation-only here.
 
@@ -1919,7 +1989,7 @@ def _train_wisdom(
         if optimization_monitor is not None:
             for name, diagnostic_value in optimization_monitor.metrics().items():
                 work.metrics.log(name, diagnostic_value, step=epoch, split="train")
-        gate_expected = float(model.gate_regularization().detach().cpu())
+        gate_expected = float(model.semantic_gates.regularization().detach().cpu())
         gate_deterministic = sum(
             float(model.semantic_gates.deterministic_value(name).detach().cpu()) > 0.0
             for name in model.semantic_gates.names
@@ -2078,6 +2148,12 @@ def _train_wisdom(
                     },
                     "pooling_type":     pooling_type,
                     "head_type":        head_type,
+                    "head_loss_balance": head_loss_balance,
+                    "surface_loss_fraction": surface_loss_fraction,
+                    "resolved_head_weights": {
+                        "direct": protein_task_loss.direct_weight,
+                        "surface": protein_task_loss.surface_weight,
+                    },
                     "direct_head_weight": direct_head_weight,
                     "surface_head_weight": surface_head_weight,
                     "surface_encoder_type": surface_encoder_type,
@@ -2541,6 +2617,13 @@ def _train_wisdom(
         "surface_refiner_type":           surface_refiner_type,
         "selected_refiner_parameters":    final_refiner_values,
         "head_type":                      head_type,
+        "head_loss_balance":              head_loss_balance,
+        "surface_loss_fraction":          surface_loss_fraction,
+        "resolved_head_weights": {
+            "direct": protein_task_loss.direct_weight,
+            "surface": protein_task_loss.surface_weight,
+        },
+        "faithfulness": SurfaceFaithfulnessAudit.status(model, requested=faithfulness_audit),
         "direct_head_weight":             direct_head_weight,
         "surface_head_weight":            surface_head_weight,
         "surface_encoder_type":           surface_encoder_type,
@@ -2595,6 +2678,7 @@ def _train_wisdom(
         "test_surface":                  test_surface_metrics,
         "curvature_features":            curvature_features,
         "parameter_count":               parameter_count,
+        "trainable_parameter_count":     trainable_parameter_count,
         "gate_parameter_count":          gate_parameter_count,
         "semantic_gate_count":           len(model.semantic_gates.names),
         "evidence_head_parameter_count": evidence_parameter_count,
@@ -2624,9 +2708,9 @@ def _train_wisdom(
             ),
             "surface_refiner_type":       surface_refiner_type,
             "surface_refiner_parameters": final_refiner_values,
+            "faithfulness": SurfaceFaithfulnessAudit.status(model, requested=faithfulness_audit),
             "faithfulness_unavailable_reason": (
-                "Vertex deletion invalidates the trained surface refiner's operator."
-                if surface_refiner_type != "none" else None
+                SurfaceFaithfulnessAudit.status(model)["surface_branch"]["reason"]
             ),
         },
     )
@@ -2725,13 +2809,25 @@ def _calibrate_local_head_bias(
         calibration_batches: Positive maximum number of batches to observe.
 
     Returns:
-        Calibrated scalar bias assigned to ``model.local_head.bias``.
+        Calibrated scalar bias assigned to the effective local classifier (conditioned for
+        controlled context/FiLM). Calibration observes surface-derived protein logits, not
+        the independent direct classifier, whose logits cannot respond to a local-bias shift.
 
     Raises:
         ValueError: If the model lacks a compatible head, uses a probability-space pooling, or the
             calibration subset has one class. Probability families are not shift-equivariant.
+            Legacy multi-head calibration is rejected rather than repeating its historically
+            invalid direct-output/local-bias pairing.
     """
     local_head = getattr(model, "local_head", None)
+    heads = getattr(model, "global_surface_heads", None)
+    if heads is not None:
+        if getattr(model, "head_implementation", "legacy") == "legacy":
+            raise ValueError("multi-head bias calibration requires head_implementation=controlled")
+        if getattr(model, "head_type", "single") == "global_context":
+            local_head = heads.context_local_head
+        elif getattr(model, "head_type", "single") == "film":
+            local_head = heads.film_local_head
     if not isinstance(local_head, torch.nn.Linear) or local_head.bias is None:
         raise ValueError("local-head calibration requires one biased linear local_head")
     if getattr(model, "pooling_type", None) in {
@@ -2754,7 +2850,7 @@ def _calibrate_local_head_bias(
                 enabled=autocast_dtype is not None,
             ):
                 output = model(**_model_inputs(tensors))
-            logits.append(output["logits"].float())
+            logits.append(output.get("surface_protein_logits", output["logits"]).float())
             targets.append(_tensor(tensors, "target").float())
 
     observed_logits  = torch.cat(logits)
@@ -2935,6 +3031,7 @@ def _evaluate(
     protein_metrics["loss"] = float(
         F.binary_cross_entropy_with_logits(protein_logits, protein_targets)
     )
+    primary_binary_metrics = dict(protein_metrics)
     protein_count = len(protein_targets)
     protein_metrics["forward_seconds"] = forward_seconds
     protein_metrics["forward_proteins_per_second"] = (
@@ -2944,6 +3041,11 @@ def _evaluate(
         1000.0 * forward_seconds / protein_count
     )
     if surface_protein_logits:
+        # Keep primary metric names for objectives and old readers. Explicit aliases make
+        # the direct branch distinguishable from the pooled surface branch in LF reports.
+
+        protein_metrics.update({f"direct_{name}": value
+                                for name, value in primary_binary_metrics.items()})
         surface_global_logits = torch.cat(surface_protein_logits).cpu()
         surface_global_metrics = BinaryMetricSuite().compute(
             torch.sigmoid(surface_global_logits),
@@ -2959,6 +3061,12 @@ def _evaluate(
             F.binary_cross_entropy_with_logits(surface_global_logits, protein_targets)
         )
         protein_metrics["head_disagreement"] = float(torch.cat(head_disagreements).mean())
+    if faithfulness_audit:
+        # Canonical names declare the branch. Historical names remain exact aliases and
+        # unavailable diagnostics remain absent, never zero-filled quality observations.
+
+        faithfulness_sums.update({f"surface_branch_{name}": value
+                                 for name, value in tuple(faithfulness_sums.items())})
     if not surface_scores:
         faithfulness_metrics: dict[str, float | None] = (
             {

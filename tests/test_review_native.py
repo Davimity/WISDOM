@@ -212,11 +212,11 @@ def test_authored_visualization_defaults_use_saved_seed_and_automatic_cases():
     """Every study gallery exposes simple controls without manual IDs or repeated payload caps."""
     experiments = Path(__file__).resolve().parents[1] / "experiments"
     paths = sorted(experiments.glob("v*/visualization/*.yaml"))
-    assert len(paths) == 21
+    assert len(paths) == 23
     for path in paths:
         authored = yaml.safe_load(path.read_text())
         settings = authored["with"]
-        assert settings["source_seed"] == 4
+        assert settings["source_seed"] == (151 if path.parent.parent.name == "v8" else 4)
         assert settings["maximum_proteins"] > 0
         assert not {"protein_selection", "seed_selection", "trial_selection",
                     "maximum_surface_points", "report_maximum_mib"} & settings.keys()

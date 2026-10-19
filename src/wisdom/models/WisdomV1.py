@@ -19,9 +19,11 @@ from wisdom.models.ResidualInitialization import ResidualInitialization
 from wisdom.models.EmbeddingInitialization import EmbeddingInitialization
 from wisdom.models.DiffusionSurfaceEncoder import DiffusionSurfaceEncoder
 from wisdom.models.gating.SemanticGateRegistry import SemanticGateRegistry
+from wisdom.models.ArchitectureImplementation import GateCostNormalization
 from wisdom.models.SurfaceRepresentationMode import SurfaceRepresentationMode
 from wisdom.models.DiffusionTimeInitialization import DiffusionTimeInitialization
 from wisdom.models.PhysicalEmbeddingInitializer import PhysicalEmbeddingInitializer
+from wisdom.models.ArchitectureImplementation import ArchitectureImplementation, FeedbackWeighting
 
 
 class WisdomV1(Model):
@@ -57,6 +59,9 @@ class WisdomV1(Model):
         atomic_message_chunk_size  : int = 65536,
         vector_atomic_channels     : int = 0,
         interaction_round          : str = "single",
+        architecture_implementation : str = "legacy",
+        feedback_weighting          : str = "point",
+        gate_cost_normalization     : str = "historical_mean",
         atomic_edge_distance_scale : float = 6.0,
         embedding_initialization    : str = "current",
         gate_initial_active         : float = 0.95,
@@ -101,7 +106,16 @@ class WisdomV1(Model):
             vector_atomic_channels: Equivariant atomic vector channels; zero preserves the scalar
                 baseline and positive values activate isolated spike C.
             interaction_round: ``single`` baseline, equally deep ``depth_control``, or one
-                ``bidirectional`` surface-to-atom-to-surface feedback round.
+                ``bidirectional`` round. depth_control_parameter_matched adds the identical
+                atomic update but supplies a zero message, never S1 or detached S1.
+            architecture_implementation: legacy preserves archived module layout, RNG and
+                numerical behavior; controlled isolates new-module initialization and enables
+                audited feedback/vector fixes. Saved constructor parameters restore the policy.
+            feedback_weighting: point (historical distance mean) or area (distance times
+                represented area), used only in feedback/null-control rounds.
+            gate_cost_normalization: historical_mean divides by all available gates;
+                baseline_count divides by the scalar baseline count, preserving the per-gate
+                coefficient when point_geometry adds a gate. The latter cost may exceed one.
             atomic_edge_distance_scale: Atomic edge-distance normalization scale in ångströms.
             embedding_initialization: ``current``, ``fan_scaled``, ``small_normal``, or
                 task-independent ``physical`` categorical table initialization.
@@ -155,6 +169,15 @@ class WisdomV1(Model):
         atomic_residual_mode = ResidualInitialization(atomic_residual_initialization)
         linear_mode = LinearInitialization(linear_initialization)
         interaction_mode = InteractionRound(interaction_round)
+        self.architecture_implementation = ArchitectureImplementation(architecture_implementation)
+        self.feedback_weighting          = FeedbackWeighting(feedback_weighting)
+        self.gate_cost_normalization     = GateCostNormalization(gate_cost_normalization)
+        controlled = self.architecture_implementation is ArchitectureImplementation.CONTROLLED
+        if not controlled and (
+            interaction_mode is InteractionRound.DEPTH_CONTROL_PARAMETER_MATCHED
+            or self.feedback_weighting is not FeedbackWeighting.POINT
+        ):
+            raise ValueError("matched control and area feedback require controlled architecture")
 
         residue_width = embedding_dim if residue_embedding_dim is None else residue_embedding_dim
         if residue_width < 1:
@@ -163,8 +186,13 @@ class WisdomV1(Model):
         self.curvature_scale_count = curvature_features // 3
         gate_definitions = self._gate_definitions(
             self.curvature_scale_count,
-            surface_geometry_transfer,
+            surface_geometry_transfer and not controlled,
         )
+        self.baseline_gate_count = len(self._gate_definitions(self.curvature_scale_count, False))
+        if controlled and surface_geometry_transfer:
+            # Append the extra gate so shared gate indices/initial states remain identical.
+
+            gate_definitions += (("transfer.point_geometry", "surface.atom_context"),)
         self.semantic_gates = SemanticGateRegistry(
             gate_definitions,
             initial_active=gate_initial_active,
@@ -190,18 +218,19 @@ class WisdomV1(Model):
             radius            = surface_atom_radius,
             chunk_size        = surface_chunk_size,
             point_feature_dim = (
-                4 * self.curvature_scale_count if surface_geometry_transfer else 0
+                4 * self.curvature_scale_count
+                if surface_geometry_transfer and not controlled else 0
             ),
             physics_distance_initialization=physics_distance_initialization,
         )
         self.vector_atomic_state = (
-            VectorAtomicState(hidden_dim, vector_atomic_channels)
-            if vector_atomic_channels > 0
+            VectorAtomicState(hidden_dim, vector_atomic_channels, implementation="legacy")
+            if vector_atomic_channels > 0 and not controlled
             else None
         )
         self.surface_atom_feedback = (
-            SurfaceAtomFeedback(hidden_dim)
-            if interaction_mode is InteractionRound.BIDIRECTIONAL
+            SurfaceAtomFeedback(hidden_dim, implementation="legacy")
+            if interaction_mode is InteractionRound.BIDIRECTIONAL and not controlled
             else None
         )
         self.second_surface_transfer = (
@@ -213,7 +242,7 @@ class WisdomV1(Model):
                     4 * self.curvature_scale_count if surface_geometry_transfer else 0
                 ),
             )
-            if interaction_mode is not InteractionRound.SINGLE
+            if interaction_mode is not InteractionRound.SINGLE and not controlled
             else None
         )
         self.second_surface_projection = (
@@ -224,7 +253,7 @@ class WisdomV1(Model):
                 dropout=dropout,
                 residual=True,
             )
-            if interaction_mode is not InteractionRound.SINGLE
+            if interaction_mode is not InteractionRound.SINGLE and not controlled
             else None
         )
         surface_input_width = hidden_dim + 4 * self.curvature_scale_count
@@ -250,7 +279,7 @@ class WisdomV1(Model):
                 initial_times=self._diffusion_times(surface_layers, diffusion_time_mode),
                 residual_initial_scale=self._residual_scale(diffusion_residual_mode),
             )
-            if interaction_mode is not InteractionRound.SINGLE
+            if interaction_mode is not InteractionRound.SINGLE and not controlled
             else None
         )
         self.surface_representation_mode = SurfaceRepresentationMode(surface_representation_mode)
@@ -297,10 +326,16 @@ class WisdomV1(Model):
         self.interaction_round           = interaction_mode
         self.surface_atom_radius         = float(surface_atom_radius)
         self.dropout_probability         = float(dropout)
+        self.linear_initialization       = linear_mode
         self.atomic_input_width          = atomic_input_width
         self.evidence_input_width        = self.surface_evidence_dim
         self.evidence_head_parameter_count = self.surface_evidence_dim + 1
         self.evidence_head_added_parameter_count = 0
+        if controlled:
+            self._initialize_controlled_architecture(
+                diffusion_time_mode, diffusion_residual_mode,
+                neutral_transfer_initialization, physics_distance_initialization,
+            )
         # Explicit mode skips the learned branch, not just its output. Freeze unused tensors
         # so optimizers and trainable-parameter accounting reflect that experimental control.
 
@@ -308,6 +343,81 @@ class WisdomV1(Model):
             for name, parameter in self.named_parameters():
                 if not name.startswith("local_head."):
                     parameter.requires_grad_(False)
+
+    def _initialize_controlled_architecture(
+        self,
+        diffusion_time_mode: DiffusionTimeInitialization,
+        residual_mode: ResidualInitialization,
+        neutral_transfer: bool,
+        physics_distance: bool,
+    ) -> None:
+        """Construct only added V8 modules after the unchanged shared backbone is initialized.
+
+        Each module family uses a private CPU RNG stream derived from the initialization seed.
+        Exiting the fork restores the state used later by V2 pooling/heads/refiners. Depth,
+        matched depth and bidirectional therefore share identical second-round parameters,
+        regardless of feedback capacity, under every supported linear initialization policy.
+
+        Args:
+            diffusion_time_mode: Frozen initial surface time schedule for the second encoder.
+            residual_mode: Frozen initial surface residual scaling for the second encoder.
+            neutral_transfer: Whether orientation/content corrections start at zero.
+            physics_distance: Whether the second transfer starts from its trainable -d/R prior.
+        """
+        seed = torch.initial_seed()
+        with torch.random.fork_rng(devices=[]):
+            if self.surface_geometry_transfer:
+                torch.set_rng_state(torch.Generator().manual_seed(seed ^ 0x503847).get_state())
+                self.surface_atom_transfer.enable_point_geometry(4 * self.curvature_scale_count)
+                for name in ("point_geometry_projection", "point_atom_projection",
+                             "point_pair_projection", "point_geometry_scorer"):
+                    self._initialize_linears(self.linear_initialization,
+                                             root=getattr(self.surface_atom_transfer, name))
+
+            if self.vector_atomic_channels:
+                torch.set_rng_state(torch.Generator().manual_seed(seed ^ 0x563843).get_state())
+                self.vector_atomic_state = VectorAtomicState(
+                    self.hidden_dim, self.vector_atomic_channels, implementation="controlled",
+                )
+                self._initialize_linears(self.linear_initialization, root=self.vector_atomic_state)
+
+            if self.interaction_round in {
+                InteractionRound.BIDIRECTIONAL, InteractionRound.DEPTH_CONTROL_PARAMETER_MATCHED,
+            }:
+                torch.set_rng_state(torch.Generator().manual_seed(seed ^ 0x463842).get_state())
+                self.surface_atom_feedback = SurfaceAtomFeedback(
+                    self.hidden_dim, weighting=self.feedback_weighting.value,
+                    implementation="controlled",
+                )
+                self._initialize_linears(
+                    self.linear_initialization, root=self.surface_atom_feedback,
+                )
+
+            if self.interaction_round is not InteractionRound.SINGLE:
+                torch.set_rng_state(torch.Generator().manual_seed(seed ^ 0x533842).get_state())
+                self.second_surface_transfer = SurfaceAtomTransfer(
+                    self.hidden_dim, radius=self.surface_atom_radius,
+                    chunk_size=self.surface_atom_transfer.chunk_size,
+                    point_feature_dim=(4 * self.curvature_scale_count
+                                       if self.surface_geometry_transfer else 0),
+                    physics_distance_initialization=physics_distance,
+                )
+                self.second_surface_projection = MLP(
+                    in_features=2 * self.hidden_dim, out_features=self.hidden_dim,
+                    hidden=[self.hidden_dim], dropout=self.dropout_probability, residual=True,
+                )
+                self.second_surface_encoder = DiffusionSurfaceEncoder(
+                    self.hidden_dim, layers=self.surface_layers, dropout=self.dropout_probability,
+                    initial_times=self._diffusion_times(self.surface_layers, diffusion_time_mode),
+                    residual_initial_scale=self._residual_scale(residual_mode),
+                )
+                for module in (self.second_surface_transfer, self.second_surface_projection,
+                               self.second_surface_encoder):
+                    self._initialize_linears(self.linear_initialization, root=module)
+                if neutral_transfer:
+                    self.second_surface_transfer.initialize_neutral_residuals()
+                if physics_distance:
+                    self.second_surface_transfer.initialize_physics_distance()
 
     @staticmethod
     def _residual_scale(mode: ResidualInitialization) -> float | None:
@@ -380,16 +490,20 @@ class WisdomV1(Model):
             )
             nn.init.normal_(embedding.weight, mean=0.0, std=standard_deviation)
 
-    def _initialize_linears(self, mode: LinearInitialization) -> None:
+    def _initialize_linears(
+        self, mode: LinearInitialization, root: nn.Module | None = None,
+    ) -> None:
         """Apply an explicit dense-layer policy without touching embeddings or gates.
 
         Args:
             mode: Current module defaults, activation-aware fan scaling, or orthogonal hidden
                 transforms with Xavier fallbacks for non-square projections.
+            root: Optional isolated subtree; None initializes this model exactly as historically.
+                Supplying new heads avoids reinitializing shared backbone/pooling parameters.
         """
         if mode is LinearInitialization.CURRENT:
             return
-        for module in self.modules():
+        for module in (self if root is None else root).modules():
             if not isinstance(module, nn.Linear):
                 continue
             if (
@@ -461,14 +575,26 @@ class WisdomV1(Model):
         return tuple(definitions)
 
     def gate_regularization(self) -> Tensor:
-        """Return the normalized expected L0 semantic-path cost in ``[0,1]``."""
+        """Return expected path L0 cost under the saved normalization policy.
+
+        historical_mean remains the original mean in [0,1]. baseline_count divides the
+        path-probability sum by the unchanged scalar gate count, retaining each shared gate's
+        loss coefficient as optional gates are added; its upper bound is N/N_baseline.
+        """
         if self.surface_representation_mode is SurfaceRepresentationMode.EXPLICIT:
             return self.local_head.weight.sum() * 0.0
-        return self.semantic_gates.regularization()
+        cost = self.semantic_gates.regularization()
+        if self.gate_cost_normalization is GateCostNormalization.BASELINE_COUNT:
+            cost = cost * (len(self.semantic_gates.names) / self.baseline_gate_count)
+        return cost
 
     def gate_summary(self) -> dict[str, object]:
         """Return JSON-compatible learned gate probabilities and deterministic values."""
-        return self.semantic_gates.summary()
+        return {
+            **self.semantic_gates.summary(),
+            "cost_normalization": self.gate_cost_normalization.value,
+            "baseline_gate_count": self.baseline_gate_count,
+        }
 
     def encode_surface(
         self,
@@ -504,7 +630,9 @@ class WisdomV1(Model):
         surface_neighbor_mask             : Tensor | None = None,
         atom_positions                    : Tensor | None = None,
         surface_explicit_features         : Tensor | None = None,
-    ) -> tuple[Tensor, Tensor]:
+        compute_logits                    : bool = True,
+        surface_area_weights              : Tensor | None = None,
+    ) -> tuple[Tensor, Tensor | None]:
         """Encode atoms, transfer context, gate curvature channels, and propagate on the surface.
 
         Args:
@@ -541,9 +669,13 @@ class WisdomV1(Model):
             atom_positions: Optional centered atom coordinates ``[N,3]`` required by spike C.
             surface_explicit_features: Selected train-normalized fixed fields ``[M,K]``;
                 never an annotation or a ligand-dependent input.
+            compute_logits: False skips the unconditioned local head when V7 replaces it;
+                the returned logit is None. True preserves all historical V1/V2 calls.
+            surface_area_weights: Positive represented areas [M] in Å²; needed only when
+                feedback_weighting=area and a feedback or null-control round is active.
 
         Returns:
-            Surface evidence Z ``[M,D]`` and local logits ``[M]``. D is H, K or H+K
+            Surface evidence Z ``[M,D]`` and optional local logits ``[M]``. D is H, K or H+K
             in learned, explicit or hybrid mode respectively.
         """
         if self.surface_representation_mode is not SurfaceRepresentationMode.LEARNED:
@@ -555,9 +687,9 @@ class WisdomV1(Model):
             # DiffusionNet. Its prediction cannot indirectly depend on learned embeddings.
 
             if self.surface_representation_mode is SurfaceRepresentationMode.EXPLICIT:
-                return surface_explicit_features, self.local_head(
-                    surface_explicit_features
-                ).squeeze(-1)
+                logits = (self.local_head(surface_explicit_features).squeeze(-1)
+                          if compute_logits else None)
+                return surface_explicit_features, logits
 
         gates = self.semantic_gates.sample(training=self.training)
 
@@ -628,7 +760,8 @@ class WisdomV1(Model):
 
         # Spike B adds exactly one distinct second round. The depth control repeats transfer and
         # surface propagation without feedback; the bidirectional candidate first lets S1 update
-        # atoms, isolating whether the cross-domain return path matters beyond added capacity.
+        # atoms. The null-message control has the same update capacity/coverage but never reads
+        # S1 through that path; all second rounds still receive S1 through the same projection.
 
         if self.interaction_round is not InteractionRound.SINGLE:
             assert self.second_surface_transfer is not None
@@ -636,13 +769,17 @@ class WisdomV1(Model):
             assert self.second_surface_encoder is not None
             second_atoms = atom_embeddings
             if self.surface_atom_feedback is not None:
+                null_message = (
+                    self.interaction_round is InteractionRound.DEPTH_CONTROL_PARAMETER_MATCHED
+                )
                 second_atoms = self.surface_atom_feedback(
                     atom_embeddings,
-                    encoded,
+                    None if null_message else encoded,
                     surface_atom_neighbors,
                     surface_atom_distances,
                     surface_atom_mask,
                     self.surface_atom_radius,
+                    area_weights=surface_area_weights,
                 )
             second_context = self.second_surface_transfer(
                 second_atoms,
@@ -665,7 +802,7 @@ class WisdomV1(Model):
         if self.surface_representation_mode is SurfaceRepresentationMode.HYBRID:
             assert surface_explicit_features is not None
             encoded = torch.cat((encoded, surface_explicit_features.to(encoded.dtype)), dim=1)
-        logits = self.local_head(encoded).squeeze(-1)
+        logits = self.local_head(encoded).squeeze(-1) if compute_logits else None
         return encoded, logits
 
     def curvature_inputs(
@@ -821,7 +958,6 @@ class WisdomV1(Model):
         Returns:
             Essential ``surface_logits[M]`` and ``logits[B]`` outputs.
         """
-        del surface_area_weights
         surface_evidence_features, surface_logits = self.encode_surface(
             atomic_numbers,
             residue_type_ids,
@@ -855,8 +991,10 @@ class WisdomV1(Model):
             surface_neighbor_mask,
             atom_positions,
             surface_explicit_features,
+            surface_area_weights=surface_area_weights,
         )
         protein_count = len(surface_ptr) - 1
+        assert surface_logits is not None
         protein_logits = self.global_max_pooling(
             surface_logits.unsqueeze(-1), surface_batch, protein_count
         ).squeeze(-1)

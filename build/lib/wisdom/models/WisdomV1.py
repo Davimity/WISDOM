@@ -297,6 +297,7 @@ class WisdomV1(Model):
         self.interaction_round           = interaction_mode
         self.surface_atom_radius         = float(surface_atom_radius)
         self.dropout_probability         = float(dropout)
+        self.linear_initialization       = linear_mode
         self.atomic_input_width          = atomic_input_width
         self.evidence_input_width        = self.surface_evidence_dim
         self.evidence_head_parameter_count = self.surface_evidence_dim + 1
@@ -380,16 +381,20 @@ class WisdomV1(Model):
             )
             nn.init.normal_(embedding.weight, mean=0.0, std=standard_deviation)
 
-    def _initialize_linears(self, mode: LinearInitialization) -> None:
+    def _initialize_linears(
+        self, mode: LinearInitialization, root: nn.Module | None = None,
+    ) -> None:
         """Apply an explicit dense-layer policy without touching embeddings or gates.
 
         Args:
             mode: Current module defaults, activation-aware fan scaling, or orthogonal hidden
                 transforms with Xavier fallbacks for non-square projections.
+            root: Optional isolated subtree; None initializes this model exactly as historically.
+                Supplying new heads avoids reinitializing shared backbone/pooling parameters.
         """
         if mode is LinearInitialization.CURRENT:
             return
-        for module in self.modules():
+        for module in (self if root is None else root).modules():
             if not isinstance(module, nn.Linear):
                 continue
             if (
@@ -504,7 +509,8 @@ class WisdomV1(Model):
         surface_neighbor_mask             : Tensor | None = None,
         atom_positions                    : Tensor | None = None,
         surface_explicit_features         : Tensor | None = None,
-    ) -> tuple[Tensor, Tensor]:
+        compute_logits                    : bool = True,
+    ) -> tuple[Tensor, Tensor | None]:
         """Encode atoms, transfer context, gate curvature channels, and propagate on the surface.
 
         Args:
@@ -541,9 +547,11 @@ class WisdomV1(Model):
             atom_positions: Optional centered atom coordinates ``[N,3]`` required by spike C.
             surface_explicit_features: Selected train-normalized fixed fields ``[M,K]``;
                 never an annotation or a ligand-dependent input.
+            compute_logits: False skips the unconditioned local head when V7 replaces it;
+                the returned logit is None. True preserves all historical V1/V2 calls.
 
         Returns:
-            Surface evidence Z ``[M,D]`` and local logits ``[M]``. D is H, K or H+K
+            Surface evidence Z ``[M,D]`` and optional local logits ``[M]``. D is H, K or H+K
             in learned, explicit or hybrid mode respectively.
         """
         if self.surface_representation_mode is not SurfaceRepresentationMode.LEARNED:
@@ -555,9 +563,9 @@ class WisdomV1(Model):
             # DiffusionNet. Its prediction cannot indirectly depend on learned embeddings.
 
             if self.surface_representation_mode is SurfaceRepresentationMode.EXPLICIT:
-                return surface_explicit_features, self.local_head(
-                    surface_explicit_features
-                ).squeeze(-1)
+                logits = (self.local_head(surface_explicit_features).squeeze(-1)
+                          if compute_logits else None)
+                return surface_explicit_features, logits
 
         gates = self.semantic_gates.sample(training=self.training)
 
@@ -665,7 +673,7 @@ class WisdomV1(Model):
         if self.surface_representation_mode is SurfaceRepresentationMode.HYBRID:
             assert surface_explicit_features is not None
             encoded = torch.cat((encoded, surface_explicit_features.to(encoded.dtype)), dim=1)
-        logits = self.local_head(encoded).squeeze(-1)
+        logits = self.local_head(encoded).squeeze(-1) if compute_logits else None
         return encoded, logits
 
     def curvature_inputs(
@@ -857,6 +865,7 @@ class WisdomV1(Model):
             surface_explicit_features,
         )
         protein_count = len(surface_ptr) - 1
+        assert surface_logits is not None
         protein_logits = self.global_max_pooling(
             surface_logits.unsqueeze(-1), surface_batch, protein_count
         ).squeeze(-1)

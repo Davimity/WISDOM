@@ -1,16 +1,19 @@
-# Controlled architecture spikes; review baseline, depth control and geometric conditioning.
+# Review V8B checkpoints independently; never retrain or choose a V7 winner.
 # Post-hoc inspection does not fit models or replace paired-study decisions.
+name: wisdom-v8b-review  # Inference-only reviewer, not a training campaign.
 run: wisdom.visualization.StudyReview.StudyReview  # Native inference-only Work.
 
 with:  # Select saved evidence, then configure the automatic diagnostic panel.
-  source_execution: REPLACE_WITH_EXECUTION_ID  # Native registered Execution ID or unambiguous Work name.
+  source_execution: REPLACE_WITH_V8B_EXECUTION_ID  # Native registered Execution ID or unambiguous Work name.
   dataset: {dataset: wisdom-dna-reduced@6}  # Exact training dataset content, locally placed.
-  source_seed: 4  # Saved training seed to inspect; this does not train or choose the best seed.
+  source_seed: 151  # Saved training seed to inspect; this does not train or choose the best seed.
+  splits: [val]  # Review validation only, never held-out test.
+  allow_test: false  # Refuse accidental test selection.
   maximum_proteins: 8  # Diagnostic proteins per configuration/split; not a point cap.
 
   # Optional model filter: uncomment only the desired mapping or alternative list.
   # parameter_filter:  # All authored fields must match; list values accept any listed choice.
-  #   architecture_spike: ["baseline","point_geometry","depth_control","bidirectional","vector_8","vector_16"]  # Narrow the recorded configurations to these choices.
+  #   architecture_spike: ["baseline","depth_control","depth_control_parameter_matched","bidirectional"]  # Narrow the recorded configurations to these choices.
   # OR alternative: keep MAX plus only the chosen attention widths.
   # parameter_filter:  # Do not activate two parameter_filter definitions.
   #   - pooling_type: max  # Keep parameter-free MAX without requiring an attention width.

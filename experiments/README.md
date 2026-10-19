@@ -68,7 +68,9 @@ that a formal scientific WISDOM generation has already been validated.
 | 6g | `v6/wisdom_v6g.yaml` | Dirichlet | Frozen V5c backbone; none / Heat6 | Three poolers × Dirichlet lambda × refiner | G/S, raw/gain, negative mass/peak, regret, seeds and cost | Individual evidence for 6h |
 | 6h | `v6/wisdom_v6h.yaml` | exploratory weak-loss mixtures | Frozen V5c/Heat6; V6a–V6f report reviewed, V6g pending | 18 exact candidates × three poolers × four seeds = 216 Runs; core interactions and all-family stress | G/S, raw/gain, negative mass/peak, regret, seeds, term activation and cost | Fresh-seed confirmation before 7 |
 | 7 | `v7/wisdom_v7.yaml` | Which global/local head relationship is accurate and faithful? | Selected weak-loss policy copied into `with` | `head_type` | `val_wisdom_hpo_score` and faithfulness | 8 |
-| 8 | `v8/wisdom_v8.yaml` | Does one isolated architectural spike beat its proper control? | Head winner copied into `with` | `architecture_spike` | `val_wisdom_hpo_score`, faithfulness, compute | 9 |
+| 8a | `v8/wisdom_v8a.yaml` | Does existing point geometry improve candidate-specific transfer? | SAME reviewed V7 pipeline/head ledger; PENDING_V7 guard | baseline/point_geometry, 4 seeds, 8 Runs | S at G-selected checkpoint, paired G-S and cost | Review before 9 |
+| 8b | `v8/wisdom_v8b.yaml` | Does returned surface information help beyond depth/nominal capacity? | SAME pending V7 ledger | baseline/depth/matched-null/bidirectional, 4 seeds, 16 Runs | Primary bidirectional vs depth; matched capacity contrast | Review before 9 |
+| 8c | `v8/wisdom_v8c.yaml` | Does vector-mediated scalar enrichment help? | SAME pending V7 ledger | baseline/vector_8/vector_16, 4 seeds, 12 Runs | Invariance controls, paired S/G and cost | Review before 9 |
 | 9 | `v9/wisdom_v9.yaml` | What small numerical retune best fits the selected final architecture? | Complete winner ledger from 2–8 | Four sensitive continuous parameters | `val_wisdom_hpo_score` | 10 |
 | 10 | `v10/wisdom_v10.yaml` | Does the frozen V1 result replicate on fresh seeds and held-out test data? | Final ledger from 9 | Fresh complete run seed | Uncensored metric distribution and one test evaluation per seed | Freeze V1 or return to the diagnosed experiment |
 
@@ -77,6 +79,10 @@ file begins with `OBJECTIVE`, `PREREQUISITES`, `VARIES`, `FIXED`, and `DECISION`
 `REPLACE` are an explicit decision ledger: copy the reviewed previous-stage winner before launch.
 V6a–V6g resolve the V5c ledger; V6h now declares provisional mixtures, not a confirmed winner.
 Later stages still require an explicit manual freeze, not silent winner selection.
+V8a–V8c freeze V7's selected pipeline/head identically and use seeds 151/157/163/167.
+Their PENDING_V7 guard blocks actual execution before data loading; no V7 winner is assumed.
+The old V8 campaign/reviewer are retained as .yaml.example authoring snapshots, not executable
+catalog entries. The three new reviewers use frozen validation checkpoints without retraining.
 
 Every training study is a single executable Work: none contains `steps`. Only the
 dataset-construction YAML composes sequential actions. Seven isolated V6 Studies share the frozen

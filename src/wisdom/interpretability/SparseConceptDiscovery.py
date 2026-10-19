@@ -520,6 +520,7 @@ class SparseConceptDiscovery(lf.Work):
                     if name in signature
                 }
                 surface, local = predictor.encode_surface(**arguments)
+                assert local is not None  # The default encoder contract computes its local logits.
                 evidence = surface
                 count = len(evidence)
                 if maximum_points_per_protein and count > maximum_points_per_protein:

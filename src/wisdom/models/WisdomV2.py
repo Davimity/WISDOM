@@ -2,7 +2,7 @@
 
 import torch
 
-from torch import Tensor
+from torch import Tensor, nn
 from typing import Any, ClassVar
 from lambdaforge.nn import Scatter
 from collections.abc import Sequence
@@ -12,6 +12,7 @@ from wisdom.models.PoolingType import PoolingType
 from wisdom.models.GlobalSurfaceHeads import GlobalSurfaceHeads
 from wisdom.models.ProteinPoolingHead import ProteinPoolingHead
 from wisdom.models.refinement import build_surface_evidence_refiner
+from wisdom.models.HeadType import HeadImplementation, LocalHeadInitialization
 from wisdom.models.refinement.SurfaceEvidenceContext import SurfaceEvidenceContext
 from wisdom.models.refinement.SurfaceEvidenceRefinerType import SurfaceEvidenceRefinerType
 
@@ -32,6 +33,7 @@ class WisdomV2(WisdomV1):
         "localization_entropy":        "Tensor[B]",
         "maximum_surface_probability": "Tensor[B]",
         "surface_protein_logits":       "Tensor[B] when a direct global head is active",
+        "direct_protein_logits":        "Tensor[B] primary direct classifier; multi-head only",
         "head_disagreement":            "Tensor[B] when a direct global head is active",
     }
 
@@ -82,6 +84,11 @@ class WisdomV2(WisdomV1):
         head_type                : HeadType | str = HeadType.SINGLE,
         global_context_dim       : int = 16,
         detach_global_context    : bool = True,
+        head_implementation      : str = "legacy",
+        head_dropout             : float | None = None,
+        global_reduction         : str = "area_mean",
+        film_modulation_scale    : float = 1.0,
+        local_head_initialization: str = "independent",
         **backbone: Any,
     ) -> None:
         """Build the v1 backbone and one reusable multiple-instance pooling head.
@@ -139,6 +146,14 @@ class WisdomV2(WisdomV1):
             head_type: ``single`` control, D1 ``dual``, D2 ``global_context``, or D2b ``film``.
             global_context_dim: D2/D2b bottleneck width.
             detach_global_context: Prevent local gradients from modifying the direct context path.
+                The pointwise evidence path and the context projection are not detached.
+            head_implementation: legacy preserves old module keys, initialization and RNG;
+                controlled constructs only participating heads under an isolated RNG state.
+            head_dropout: Direct-head dropout; None inherits backbone dropout historically.
+            global_reduction: area_mean, mean or max of Z inside each protein, not logit pooling.
+            film_modulation_scale: Positive FiLM correction scale, active only for film.
+            local_head_initialization: independent retains a fresh conditioned classifier;
+                copy starts it from local_head, with zero context columns for global_context.
             **backbone: Exact gated V1 constructor values fixed from the winning V1 study.
         """
         super().__init__(**backbone)
@@ -173,17 +188,85 @@ class WisdomV2(WisdomV1):
             gem_power_bounds                = gem_power_bounds,
         )
         self.head_type = HeadType(head_type)
-        self.global_surface_heads = (
-            GlobalSurfaceHeads(
-                hidden_dim=self.surface_evidence_dim,
-                head_type=self.head_type,
-                context_dim=global_context_dim,
-                dropout=self.dropout_probability,
-                detach_context=detach_global_context,
-            )
-            if self.head_type is not HeadType.SINGLE
-            else None
-        )
+        self.head_implementation = HeadImplementation(head_implementation)
+        controlled = self.head_implementation is HeadImplementation.CONTROLLED
+        if controlled and self.head_type is HeadType.SINGLE and (
+            head_dropout is not None or global_reduction != "area_mean"
+            or global_context_dim != 16 or not detach_global_context
+        ):
+            raise ValueError("single has no direct head or context; omit inactive head parameters")
+        if controlled and self.head_type is HeadType.DUAL and (
+            global_context_dim != 16 or not detach_global_context
+        ):
+            raise ValueError("dual has no context; omit inactive context parameters")
+        if self.head_type is not HeadType.FILM and film_modulation_scale != 1.0:
+            raise ValueError("film_modulation_scale is active only for film")
+        local_initialization = LocalHeadInitialization(local_head_initialization)
+        if self.head_type not in {HeadType.GLOBAL_CONTEXT, HeadType.FILM} and (
+            local_initialization is not LocalHeadInitialization.INDEPENDENT
+        ):
+            raise ValueError("local_head_initialization=copy requires a conditioned local head")
+        if self.head_implementation is HeadImplementation.LEGACY and (
+            local_initialization is not LocalHeadInitialization.INDEPENDENT
+        ):
+            raise ValueError("copy initialization requires controlled heads, not legacy restore")
+        self.global_surface_heads: GlobalSurfaceHeads | None = None
+        if self.head_type is not HeadType.SINGLE:
+            # Legacy consumes exactly its historical RNG stream. Controlled construction is
+            # isolated so the subsequently built shared refiner remains paired with single.
+
+            if self.head_implementation is HeadImplementation.LEGACY:
+                self.global_surface_heads = GlobalSurfaceHeads(
+                    self.surface_evidence_dim, self.head_type, global_context_dim,
+                    self.dropout_probability if head_dropout is None else head_dropout,
+                    detach_global_context, implementation="legacy",
+                    global_reduction=global_reduction, film_modulation_scale=film_modulation_scale,
+                )
+            else:
+                with torch.random.fork_rng(devices=[]):
+                    # Construction happens on CPU before Training moves the model to CUDA.
+                    # Use a distinct deterministic stream: restoring the shared RNG alone
+                    # would reuse the refiner's random draws in these additional heads.
+
+                    head_seed = torch.initial_seed() ^ 0x574953444F4D
+                    head_rng  = torch.Generator(device="cpu").manual_seed(head_seed)
+                    torch.set_rng_state(head_rng.get_state())
+                    heads = GlobalSurfaceHeads(
+                        self.surface_evidence_dim, self.head_type, global_context_dim,
+                        self.dropout_probability if head_dropout is None else head_dropout,
+                        detach_global_context, implementation="controlled",
+                        global_reduction=global_reduction,
+                        film_modulation_scale=film_modulation_scale,
+                    )
+                    # Custom linear policies run after construction. Reset their private
+                    # stream so common direct-head layers remain identical across variants,
+                    # despite different numbers of context/FiLM modules being constructed.
+
+                    head_rng.manual_seed(head_seed ^ 0x48454144)
+                    torch.set_rng_state(head_rng.get_state())
+                    self._initialize_linears(self.linear_initialization, root=heads)
+                    if self.head_type is HeadType.FILM:
+                        nn.init.zeros_(heads.film_head.weight)
+                        nn.init.zeros_(heads.film_head.bias)
+                    if self.head_type in {HeadType.GLOBAL_CONTEXT, HeadType.FILM}:
+                        local = (
+                            heads.context_local_head if self.head_type is HeadType.GLOBAL_CONTEXT
+                            else heads.film_local_head
+                        )
+                        if local_initialization is LocalHeadInitialization.COPY:
+                            with torch.no_grad():
+                                local.weight.zero_()
+                                local.weight[:, :self.surface_evidence_dim].copy_(
+                                    self.local_head.weight
+                                )
+                                local.bias.copy_(self.local_head.bias)
+                        elif backbone.get("local_head_weight_std") is not None:
+                            nn.init.normal_(local.weight, std=backbone["local_head_weight_std"])
+                        # Keep the inherited classifier for checkpoint compatibility and copy
+                        # provenance, but it is neither executed nor optimized in these modes.
+
+                        self.local_head.requires_grad_(False)
+                    self.global_surface_heads = heads
 
         self.surface_refiner_type = SurfaceEvidenceRefinerType(surface_refiner_type)
         self.surface_refiner = build_surface_evidence_refiner(
@@ -226,7 +309,13 @@ class WisdomV2(WisdomV1):
         operators    = inputs["surface_operators"]
         surface_ptr  = inputs["surface_ptr"]
 
-        evidence_features, surface_logits = self.encode_surface(**inputs)
+        replace_local = (
+            self.head_implementation is HeadImplementation.CONTROLLED
+            and self.head_type in {HeadType.GLOBAL_CONTEXT, HeadType.FILM}
+        )
+        evidence_features, surface_logits = self.encode_surface(
+            **inputs, compute_logits=not replace_local, surface_area_weights=area_weights,
+        )
         protein_count = len(surface_ptr) - 1
         head_output: dict[str, Tensor] = {}
         if self.global_surface_heads is not None:
@@ -237,6 +326,7 @@ class WisdomV2(WisdomV1):
                 protein_count,
             )
             surface_logits = head_output.get("conditioned_surface_logits", surface_logits)
+        assert surface_logits is not None
         # Evidence refinement is inside the training forward: protein BCE differentiates
         # through this operator to the local head. Attention still scores unchanged Z features.
 
@@ -297,6 +387,7 @@ class WisdomV2(WisdomV1):
         if "attention_weights" in pooled:
             output["attention_weights"] = pooled["attention_weights"]
         if "direct_logits" in head_output:
+            output["direct_protein_logits"] = head_output["direct_logits"]
             output["surface_protein_logits"] = pooled["logits"]
             output["logits"]                 = head_output["direct_logits"]
             output["head_disagreement"] = torch.abs(

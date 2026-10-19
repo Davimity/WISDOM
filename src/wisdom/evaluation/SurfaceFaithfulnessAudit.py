@@ -8,9 +8,45 @@ from wisdom.models.PoolingType import PoolingType
 
 
 class SurfaceFaithfulnessAudit:
-    """Measure whether a protein prediction actually depends on its highest-scored regions."""
+    """Intervene on surface pooling only, never on an independent direct protein classifier."""
 
     FRACTIONS = (0.01, 0.02, 0.05, 0.10, 0.20)
+
+    @staticmethod
+    def status(model: torch.nn.Module, requested: bool = True) -> dict[str, Any]:
+        """Describe intervention scope and structural availability without inventing scores.
+
+        Args:
+            model: Evaluated model with optional head, refiner and pooling declarations.
+            requested: Whether the final evaluation requested this diagnostic.
+
+        Returns:
+            Explicit statuses/reasons for surface pooling and direct dependency. Available
+            surface metrics still require positive proteins; their support is logged separately.
+        """
+        pooling = getattr(getattr(model, "pooling_head", None), "pooling_type", PoolingType.MAX)
+        reason = None
+        if not requested:
+            reason = "The final evaluation did not request this audit."
+        elif getattr(model, "surface_refiner_type", "none") != "none":
+            reason = "Vertex deletion invalidates the trained surface refiner's operator."
+        elif pooling in {PoolingType.LOCAL_MEAN_MAX, PoolingType.MULTISCALE_REGIONAL_MAX}:
+            reason = "Vertex deletion invalidates regional pooling's surface operator."
+        multi = getattr(model, "head_type", "single") != "single"
+        return {
+            "surface_branch": {
+                "status": ("disabled" if not requested
+                           else ("unavailable" if reason else "available")),
+                "reason": reason,
+                "scope": "Re-pooling fixed local logits/embeddings, not recomputing the encoder.",
+            },
+            "direct_branch": {
+                "status": "unavailable" if multi else "not_applicable",
+                "reason": ("Local-logit deletion does not intervene on the direct classifier's "
+                           "embedding inputs; no direct-dependency audit is implemented."
+                           if multi else "Single has no independent direct classifier."),
+            },
+        }
 
     def compute(
         self,
@@ -38,7 +74,8 @@ class SurfaceFaithfulnessAudit:
             Callers aggregate sums across batches before dividing by the count. An empty mapping
             and zero count mark an unavailable audit, which currently occurs for
             ``local_mean_max`` and ``multiscale_regional_max`` because deleting points would
-            invalidate their diffusion operators.
+            invalidate their diffusion operators, and for every active surface refiner.
+            ``status`` supplies the reason; no unavailable quality score is replaced by zero.
 
         Raises:
             ValueError: If required point arrays are inconsistent.

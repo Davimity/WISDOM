@@ -163,8 +163,14 @@ class WisdomAnalysisProfile:
                 priority = 20
             category = "quality" if name in {"auprc", "auroc"} else "thresholded"
             bounds = (-1, 1) if name in {"mcc", "cohen_kappa"} else (0, 1)
-            self._metric(f"{prefix}_{name}", description, f"{split}/global/{category}",
+            primary_description = ("Primary protein output: pooled surface for single; "
+                                   "direct classifier for multi-head. " + description)
+            self._metric(f"{prefix}_{name}", primary_description, f"{split}/global/{category}",
                          "max", bounds, priority, split=split, aggregation="selected_epoch")
+            self._metric(f"{prefix}_direct_{name}", "Direct classifier only. " + description,
+                         f"{split}/global/direct-head", "max", bounds, split=split,
+                         derived_from=[f"{prefix}_{name}"], transformation="identity",
+                         discovery=False, aggregation="selected_epoch")
             self._metric(f"{prefix}_surface_derived_{name}",
                          "The surface-derived protein head only. " + description,
                          f"{split}/global/surface-head", "max", bounds, split=split,
@@ -178,6 +184,9 @@ class WisdomAnalysisProfile:
                      "Mean absolute probability gap between the direct and surface-derived protein heads; disagreement is not proof of error.",
                      f"{split}/surface/calibration", bounds=(0, 1), split=split,
                      aggregation="selected_epoch")
+        self._metric(f"{prefix}_direct_loss", "Primary direct-classifier protein BCE only.",
+                     f"{split}/global/direct-head", "min", split=split,
+                     derived_from=[f"{prefix}_loss"], transformation="identity", discovery=False)
 
     def _surface(self, prefix: str, split: str) -> None:
         """Keep macro localization, pooled points, ranking, and negative controls distinct.
@@ -393,7 +402,7 @@ class WisdomAnalysisProfile:
                         if intervention == "deletion" else "positive probability after retaining only the region"
                     )
                     difference = strategy == "top_minus_random"
-                    description = f"Positive-protein mean {meaning}, selecting approximately {100*fraction:g}% represented area by {strategy.replace('_', ' ')} ordering; an intervention on the model, not proof of a biological cause."
+                    description = f"Surface-pooling branch ONLY: positive-protein mean {meaning}, selecting approximately {100*fraction:g}% represented area by {strategy.replace('_', ' ')} ordering. Fixed embeddings; not a direct-classifier dependency audit or biological causality."
                     parents = [f"{prefix}_faithfulness_{intervention}_{mode}_{suffix}" for mode in ("top", "random")] if difference else []
                     if difference:
                         description = "Top intervention minus its equal-area deterministic-random control. " + description
@@ -401,12 +410,18 @@ class WisdomAnalysisProfile:
                     self._metric(name, description, f"{split}/faithfulness/{intervention}",
                                  "max" if difference or strategy == "top" else "unknown", bounds,
                                  55 if difference else 35, split=split, derived_from=parents,
+                                 label=f"Surface branch {intervention} {strategy.replace('_', ' ')} {100*fraction:g}%",
                                  role="derived" if difference else "quality", aggregation="selected_epoch",
                                  transformation="top-random" if difference else "pooling intervention")
+                    canonical = f"{prefix}_surface_branch_faithfulness_{intervention}_{strategy}_{suffix}"
+                    self._metric(canonical, description, f"{split}/faithfulness/surface-branch",
+                                 "max" if difference or strategy == "top" else "unknown", bounds,
+                                 split=split, derived_from=[name], transformation="identity",
+                                 discovery=False, aggregation="selected_epoch")
                     members[name] = {"strategy": strategy, "fraction": fraction}
             self.families[f"{prefix}_faithfulness_{intervention}"] = {
                 "label": f"{split.capitalize()} surface {intervention}",
-                "description": "Regional diffusion audits are unavailable: removing vertices would invalidate their stored operator.",
+                "description": "Surface pooling only, not the direct classifier. Active refiners and regional diffusion invalidate vertex deletion; scores remain unavailable.",
                 "dimensions": {
                     "strategy": {"kind": "categorical", "values": ["top", "random", "bottom", "top_minus_random"]},
                     "fraction": {"kind": "numeric", "values": fractions},
@@ -530,7 +545,7 @@ class WisdomAnalysisProfile:
             "direct_task_loss": "Protein binary cross entropy of the direct global head.",
             "surface_task_loss": "Protein binary cross entropy of the surface-derived global head; no local ground truth is optimized.",
             "negative_surface_loss": "Weak negative-bag penalty from protein labels, never from surface targets.",
-            "gate_regularization": "Mean expected semantic gate activity before multiplying by effective_gate_lambda.",
+            "gate_regularization": "Expected semantic path cost under the saved normalization policy, before effective_gate_lambda. Historical mean is in [0,1]; baseline_count preserves common-gate coefficients and can exceed one.",
         }.items():
             self._metric(f"train_{name}", description, "training/loss", "min", priority=15,
                          split="train", role="optimization", aggregation="latest", visibility="advanced",
@@ -563,7 +578,7 @@ class WisdomAnalysisProfile:
             self._metric(f"train_{name}", "Expected L0 activity fraction." if "expected" in name else "Fraction of semantic gates with a deterministic clipped value greater than zero.",
                          "model/gating", bounds=(0, 1), priority=20, split="train", role="diagnostic",
                          visibility="advanced", aggregation="latest")
-        for name in ("parameter_count", "gate_parameter_count", "semantic_gate_count",
+        for name in ("parameter_count", "trainable_parameter_count", "gate_parameter_count", "semantic_gate_count",
                      "evidence_head_parameter_count", "evidence_head_added_parameter_count", "evidence_input_width"):
             self._metric(name, "Static capacity: " + name.replace("_", " ") + "; may vary with HPO architecture, not an accuracy measure.",
                          "model/capacity", priority=10, role="model-size", unit="count", visibility="hidden",
