@@ -26,13 +26,18 @@ class ProteinReader:
     only immutable WISDOM dataclasses plus separate provenance metadata.
     """
 
-    def __init__(self, config: PreprocessConfig) -> None:
+    def __init__(self, config: PreprocessConfig, preserve_quality: bool = False) -> None:
         """Bind structural selection and normalization policies.
 
         Args:
             config: Model, chain, entity filter, hydrogen, metal, water, and centering settings.
+            preserve_quality: Read explicit mmCIF occupancy/B columns, default false. Structural
+                enrichment enables this; historical geometry avoids a second source-table read.
+                B additionally requires a diffraction/electron-microscopy method, so predicted
+                confidence and unknown experimental methods do not become observed displacement.
         """
         self.config = config
+        self.preserve_quality = preserve_quality
 
     def read(self, source: StructureSource) -> tuple[Protein, PreprocessingProvenance]:
         """Parse, filter, normalize, center, and detach one coordinate structure from Gemmi.
@@ -77,6 +82,32 @@ class ProteinReader:
 
         selected = requested or available
 
+        # Gemmi supplies defaults for absent experimental columns. Only explicitly populated,
+        # uniquely numbered mmCIF rows are eligible as observed occupancy/B values. PDB quality
+        # remains unavailable rather than introducing a second fixed-column coordinate parser.
+
+        quality: dict[int, tuple[float | None, float | None]] = {}
+        if self.preserve_quality and source.format == "mmcif":
+            block = gemmi.cif.read(str(source.path)).sole_block()
+            methods = {str(value).strip("'\"").upper() for value in block.find_values(
+                "_exptl.method")}
+            experimental_b = bool(methods & {"X-RAY DIFFRACTION", "NEUTRON DIFFRACTION",
+                "ELECTRON CRYSTALLOGRAPHY", "ELECTRON MICROSCOPY"})
+            table = block.find("_atom_site.", ["id", "?occupancy", "?B_iso_or_equiv"])
+            duplicated: set[int] = set()
+            for row in table:
+                if not row[0].isdigit():
+                    continue
+                serial = int(row[0])
+                if serial in quality:
+                    duplicated.add(serial)
+                quality[serial] = tuple(  # type: ignore[assignment]
+                    gemmi.cif.as_number(row[i]) if row.has(i) and row[i] not in (".", "?", "")
+                    and (i != 2 or experimental_b) else None
+                    for i in (1, 2))
+            for serial in duplicated:
+                quality.pop(serial, None)
+
         # Traverse the single ownership hierarchy while building addresses for source connections.
         chains     : list[Chain] = []
         atom_index : int         = 0
@@ -110,6 +141,7 @@ class ProteinReader:
 
                 # Keep one atom per name: occupancy first, then blank/A altLoc, then alphabetically.
                 chosen: dict[str, tuple[tuple[float, bool, int], gemmi.Atom]] = {}
+                alternative_counts: dict[str, int] = {}
                 for gemmi_atom in gemmi_residue:
                     element = gemmi_atom.element
                     if element.is_hydrogen and not self.config.include_hydrogens:
@@ -119,6 +151,7 @@ class ProteinReader:
                     ) and not self.config.include_metals:
                         continue
                     name   = gemmi_atom.name.strip()
+                    alternative_counts[name] = alternative_counts.get(name, 0) + 1
                     altloc = self._clean_code(gemmi_atom.altloc)
                     rank   = (
                         float(gemmi_atom.occ),
@@ -151,6 +184,10 @@ class ProteinReader:
                         atomic_number=gemmi_atom.element.atomic_number,
                         position=position,
                         formal_charge=int(gemmi_atom.charge),
+                        occupancy=quality.get(gemmi_atom.serial, (None, None))[0],
+                        b_iso=quality.get(gemmi_atom.serial, (None, None))[1],
+                        altloc=self._clean_code(gemmi_atom.altloc),
+                        alternate_count=alternative_counts[name],
                     )
                     atoms.append(atom)
                     address_to_index[

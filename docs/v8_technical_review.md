@@ -2,7 +2,10 @@
 
 ## 1. Scope and execution status
 
-V8 is now three independent, fixed-design Studies, not one architectural search. No training was
+V8 is now three independent, fixed-design Studies, not one architectural search. The architecture
+audit below was implemented on 2026-10-18; the two-line configuration update is dated 2026-10-19.
+The configuration update changes no implementation under `src/` and no historical V6/V7 YAML.
+No training was
 launched, no held-out test data were inspected, and LambdaForge was not modified. The portable
 reviewers perform inference only on explicitly selected saved checkpoints. The previous combined
 training and review configurations are retained as `.yaml.example` historical snapshots.
@@ -30,15 +33,40 @@ only its optional point-geometry layers after shared initialization.
 
 ## 3. Designs and controls
 
-Every candidate uses seeds **151, 157, 163, 167**. There is no adaptive HPO, competitive pruning,
-seed racing, or Cartesian crossing with pooling/head/loss choices. Ordinary per-Run patience remains.
+Every candidate uses seeds **151, 157, 163, 167**. Each Study contains both complete reviewed V7
+lines, not an independently crossed set of pooling/head/loss choices. There is no adaptive HPO,
+competitive pruning or seed racing. Ordinary per-Run patience remains.
 
 | Study / YAML | Candidates, each evaluated under all four seeds | Native reference | Runs |
 | --- | --- | --- | ---: |
-| `wisdom-v8a` / `experiments/v8/wisdom_v8a.yaml` | `baseline`, `point_geometry` | `baseline` | 8 |
-| `wisdom-v8b` / `experiments/v8/wisdom_v8b.yaml` | `baseline`, `depth_control`, `depth_control_parameter_matched`, `bidirectional` | `depth_control` | 16 |
-| `wisdom-v8c` / `experiments/v8/wisdom_v8c.yaml` | `baseline`, `vector_8`, `vector_16` | `baseline` | 12 |
-| Total | Nine campaign-specific candidates; controls are not pooled across Studies | — | 36 |
+| `wisdom-v8a` / `experiments/v8/wisdom_v8a.yaml` | `baseline`, `point_geometry`, each in A and B | A / `baseline` | 16 |
+| `wisdom-v8b` / `experiments/v8/wisdom_v8b.yaml` | `baseline`, `depth_control`, `depth_control_parameter_matched`, `bidirectional`, each in A and B | A / `depth_control` | 32 |
+| `wisdom-v8c` / `experiments/v8/wisdom_v8c.yaml` | `baseline`, `vector_8`, `vector_16`, each in A and B | A / `baseline` | 24 |
+| Total | Eighteen campaign-specific candidates; controls are not pooled across Studies | — | 72 |
+
+The exact candidate matrix is below. Every row requires all four seeds, not a selected favorable
+subset. Native references identify A by MAX + single, not by an unsupported `pipeline_id` argument.
+
+| Study | Frozen line | Architecture |
+| --- | --- | --- |
+| V8a | A: MAX R Single | baseline |
+| V8a | A: MAX R Single | point_geometry |
+| V8a | B: Attention NRK FiLM | baseline |
+| V8a | B: Attention NRK FiLM | point_geometry |
+| V8b | A: MAX R Single | baseline |
+| V8b | A: MAX R Single | depth_control |
+| V8b | A: MAX R Single | depth_control_parameter_matched |
+| V8b | A: MAX R Single | bidirectional |
+| V8b | B: Attention NRK FiLM | baseline |
+| V8b | B: Attention NRK FiLM | depth_control |
+| V8b | B: Attention NRK FiLM | depth_control_parameter_matched |
+| V8b | B: Attention NRK FiLM | bidirectional |
+| V8c | A: MAX R Single | baseline |
+| V8c | A: MAX R Single | vector_8 |
+| V8c | A: MAX R Single | vector_16 |
+| V8c | B: Attention NRK FiLM | baseline |
+| V8c | B: Attention NRK FiLM | vector_8 |
+| V8c | B: Attention NRK FiLM | vector_16 |
 
 **V8a** tests only whether the existing gated curvature/shape tensor helps assign relative weights
 to candidate atoms. It adds no preprocessing or new source of information. Its descriptors are
@@ -96,9 +124,9 @@ tensor shapes but different semantics: do not manually relabel an old checkpoint
 ## 5. Capacity, cost and metrics
 
 These are **constructor counts**, not measured accuracy or memory improvements. They use the
-provisional V7 backbone (H=128, element width 32, residue width 64, atomic depth 2, projection depth 3,
-surface depth 4), five curvature scales, MAX pooling and a single head. The actual V7 winner can
-change the common counts; Training records both all stored parameters and `trainable_parameter_count`.
+frozen V7 backbone (H=128, element width 32, residue width 64, atomic depth 2, projection depth 3,
+surface depth 4), five curvature scales, and line A MAX/single. Line B attention/FiLM changes the
+common counts; Training records both all stored parameters and `trainable_parameter_count`.
 
 | Variant | Trainable parameters |
 | --- | ---: |
@@ -124,23 +152,134 @@ or backward. The existing joint utility indexes the complete fixed design; it do
 or change epoch selection. Paired seed variability must be assessed within each Study after all
 mandatory cells complete. Four seeds do not guarantee sufficient power for small effects.
 
-## 6. Pending V7 decision
+## 6. Frozen V7 lines and independent launch
 
-All three `with` mappings are identical. Their explicit `weak_loss_profile: PENDING_V7` guard stops
-scientific execution before data loading or model allocation. MAX, single head and zero weak-loss
-coefficients are marked provisional, not selected winners. Native planning is still possible.
+All three `with` mappings are identical and use `weak_loss_profile: custom`. No pending-winner
+placeholder remains. The researcher has retained two lines, bound in explicit conditional
+`sweep.candidates` mappings. There are no MAX FiLM or Attention Single candidates, extra prior
+combinations, duplicate points, inactive head dimensions, dependencies or sequential steps.
 
-After reviewing V7, copy its exact selected pooling and hyperparameters, point/area policy, all weak
-coefficients, head/context/loss-balance settings, refiner (currently explicit Heat6), initialization,
-optimizer, dataset identity and checkpoint semantics identically into all three files. Only then
-replace `PENDING_V7` with the applicable profile. Do not open additional factors or infer the winner
-from the old combined V8 snapshot. Verify the immutable Registry identity on the execution target.
+| Setting | A: MAX R Single | B: Attention NRK FiLM |
+| --- | --- | --- |
+| Pooling / measure | max / point | attention / area |
+| Attention scorer | Inactive, absent | simple, width 256 |
+| Negative suppression N | 0 | 0.03 |
+| Point existence | 0 | 0 |
+| Regional existence R | 0.3 | 0.03 |
+| Regional ranking K | 0 | 0.03 |
+| Cardinality / TV / Dirichlet | 0 / 0 / 0 | 0 / 0 / 0 |
+| Head | controlled single | controlled FiLM |
+| Protein loss | Original BCE unchanged | 0.5 direct BCE + 0.5 surface-derived BCE, applied once |
+| Direct-head dropout / reduction | Inactive, absent | 0 / area_mean |
+| Context width / detached | Inactive, absent | 16 / true |
+| Local initialization / FiLM scale | Inactive, absent | copy / 1 |
+
+Common settings retain the exact V7 backbone, baseline initialization/optimization, AdamW
+learning rate 0.001, weight decay 0.0005, gate coefficient 0.04, Heat6, batch 16, 500 epochs,
+patience 30, delta 0.001, automatic precision and per-epoch numerical surface diagnostics.
+There are no viewers during training, test access or local-GT loss. Checkpoint selection stays G.
+V8 differs from V7 by retaining just these two complete lines, using new paired seeds, introducing
+only each Study's existing architectural factor, selecting controlled architecture behavior,
+area feedback and baseline-denominator gate cost, and reducing operational allocations.
+
+The Registry and physical dataset manifests agree locally and on both targets on content identity
+`sha256:ac1745504422cf60b84e57b90efc99206dea039dc36d0c1359782062cb10e202` for
+`wisdom-dna-reduced@6`. This matches V7. No new data or preprocessing is required.
+
+Within each Study, group results by the complete line coordinates, then architecture, then seed.
+Compute paired S/G differences against the SAME line's control. The single LF reference does not
+replace B's controls. V8b's primary contrast is bidirectional versus depth control in both lines;
+the matched-control contrast is complementary. Cross-line differences are not pooling-only effects.
 
 Each Study has its own reviewer under `experiments/v8/visualization/`. Set its source execution to
 the completed corresponding Study and choose a source seed/configuration explicitly. Review is
 validation-only and never fits a missing model or opens test.
 
+### 6.1. Resource observations and remaining limits
+
+Read-only observations on 2026-10-19 found:
+
+| Target | Host inventory | GPU inventory, not ownership | Requested Study allocation |
+| --- | --- | --- | --- |
+| ctgpgpu12 / V8a | 48 CPUs, 403,642,208,256 bytes RAM (~376 GiB) | Two physical H100 PCIe, 81,559 MiB each | 1 GPU, 12 CPUs, 48 GiB RAM, 168 h |
+| ctgpgpu16 / V8b | 96 CPUs, 810,706,395,136 bytes RAM (~755 GiB) | Four physical H200 NVL, 143,771 MiB each | 1 GPU, 16 CPUs, 64 GiB RAM, 168 h |
+| ctgpgpu16 / V8c | Same host | Same inventory | 1 GPU, 16 CPUs, 48 GiB RAM, 168 h |
+
+The user's one-GPU budget on the 12 is respected even though physical inventory exposes two.
+On the 16, site status showed two free devices, two owned by another user, and **no grant to this
+account**. No reservations were requested during this review. All observed 16 devices have the
+same total memory; there is no observed higher-memory device to prefer for V8b. Prefer it if
+the actual future grant is heterogeneous. Free VRAM and availability are time-dependent.
+
+LF's resource CLI GPU probe reported `ModuleNotFoundError`; direct read-only `nvidia-smi` and
+`free -b` supplied the inventory instead. The 12's native dry-run reported two allocatable GPUs;
+the 16's dry-runs passed but marked GPU capacity unreliable/unknown. Neither is a real-model VRAM
+fit measurement. CPU/RAM inventory is sufficient for the authored requests, subject to live usage
+and native admission; execution is explicitly limited to one Run per Study and one per GPU.
+Do not silently reduce batch size, model widths, seed count or data if a candidate does not fit.
+
+### 6.2. Commands for the researcher; not automatic submissions
+
+Validate/explain/resolve all three YAMLs, then perform target-specific dry-runs before submission.
+The corresponding commands and ordinary independent launches are in README section 5.5.2.
+`resources.gpu: 1` is a Study-wide count, not device affinity or a per-Run repeated reservation.
+No arbitrary GPU index belongs in `Training.run`.
+
+If explicit separation is needed on the 16, use site reservation slots and two exported native
+catalogues rather than editing WISDOM or modifying a live shared profile between submissions.
+The provider's actual help confirms `claim --numgpus`, `exec --gpu-slot` (one-based reservation
+order, NOT physical GPU index), and `env --shell`. Obtain a valid two-device grant yourself on
+the remote host first, subject to site policy:
+
+```bash
+gpu status
+gpu claim --numgpus 2
+gpu mine
+gpu env --shell
+```
+
+Map the larger granted device to V8b if capacities differ; inspect reservation order rather than
+assuming physical indices or that a second reservation is non-preemptible. Then, on the controller:
+
+```bash
+lf clusters export citius-ctgpgpu16 --output /tmp/wisdom-v8b-clusters.yaml
+lf clusters export citius-ctgpgpu16 --output /tmp/wisdom-v8c-clusters.yaml
+lf clusters --catalog /tmp/wisdom-v8b-clusters.yaml set citius-ctgpgpu16 gpu_access.command_prefix '["/home/davidi.lubian/gpu", "exec", "--gpu-slot", "1"]'
+lf clusters --catalog /tmp/wisdom-v8c-clusters.yaml set citius-ctgpgpu16 gpu_access.command_prefix '["/home/davidi.lubian/gpu", "exec", "--gpu-slot", "2"]'
+lf clusters --catalog /tmp/wisdom-v8b-clusters.yaml set citius-ctgpgpu16 gpu_access.visibility_command '["/home/davidi.lubian/gpu", "env", "--shell"]'
+lf clusters --catalog /tmp/wisdom-v8c-clusters.yaml set citius-ctgpgpu16 gpu_access.visibility_command '["/home/davidi.lubian/gpu", "env", "--shell"]'
+lf run experiments/v8/wisdom_v8b.yaml --on citius-ctgpgpu16 --clusters /tmp/wisdom-v8b-clusters.yaml --dry-run
+lf run experiments/v8/wisdom_v8c.yaml --on citius-ctgpgpu16 --clusters /tmp/wisdom-v8c-clusters.yaml --dry-run
+
+# Submit only after reviewing each plan and grant; the Studies have no dependency.
+lf run experiments/v8/wisdom_v8b.yaml --on citius-ctgpgpu16 --clusters /tmp/wisdom-v8b-clusters.yaml
+lf run experiments/v8/wisdom_v8c.yaml --on citius-ctgpgpu16 --clusters /tmp/wisdom-v8c-clusters.yaml
+```
+
+These optional catalogue/claim commands were **not executed**. They describe supported options,
+not a verified reservation-scoped fit or a guarantee against preemption. The account currently
+has no slots to select. Release only your own manual grant after your jobs finish, using the site
+procedure; WISDOM neither claims nor releases devices. Keep the exported catalogue snapshots
+through submission rather than deleting them while asynchronous preparation is pending.
+
 ## 7. Verification actually performed
+
+**2026-10-19 configuration update:** `lf validate`, `lf explain` and `lf config resolve --format
+json` passed for the three authored training files, with exactly 4/8/6 distinct candidates and
+16/32/24 mandatory Runs. Native remote dry-runs passed for V8a→12 and V8b/V8c→16; their capacity
+limitations are stated above. No scientific Run was started. Concurrent initial dry-runs collided
+while LF built its wheel (`build/lib/lambdaforge/clustering/backend.py` deletion race); serial
+retries succeeded without changing LF. Wheel preparation refreshed three tracked WISDOM
+`build/lib` copies; only those generated changes were restored to their original state.
+
+Focused existing suites for V8, V7 heads, diffusion, analysis and configuration produced **213
+passed, 1 skipped** before the user's instruction to stop further command execution. The skip is
+the unavailable generated production benchmark. The configuration regression was updated for
+the new conditional two-line design. Its final signature assertion and subsequent documentation
+edits were not rerun after that instruction. No new full-suite/lint/type-check result is claimed
+for this configuration update. Runtime Python implementation was not changed.
+
+**Historical 2026-10-18 architecture-audit verification (not rerun for the configuration update):**
 
 - Full suite: **618 passed, 4 skipped**. Skips concern an unavailable generated production fixture
   and three unavailable Playwright browser checks, not V8 architecture failures.
@@ -154,12 +293,13 @@ validation-only and never fits a missing model or opens test.
   geometry gate-off equality, CPU BF16 and CUDA FP16, with no surface-target gradient.
 - Native LF validation and explain passed for all six new training/review YAML files. Public native
   WorkRunner dry-run planning produced 8/16/12 training Runs and one Run per reviewer. The automated
-  planning test uses a typed local fixture without publishing a fake DatasetVersion.
+  planning test used a typed local fixture without publishing a fake DatasetVersion. Its old
+  8/16/12 budget was superseded by the two-line 16/32/24 design on 2026-10-19.
 - Required DNA preprocessing validation/explain/dry-run, DNA validation, V1a validation and V2
   validation passed. No real training, preprocessing, or reviewer forward was executed by these checks.
 
 Tests establish technical behavior, not that any architecture improves localization. Scientific
-claims require the frozen V7 ledger, completed repeated runs and their paired results.
+claims require completed repeated runs under the two frozen V7 lines and their paired results.
 
 ## 8. Changed-file map
 
@@ -172,5 +312,7 @@ claims require the frozen V7 ledger, completed repeated runs and their paired re
   and `test_review_native.py`.
 - Documentation: equivalent root READMEs, `docs/model_roadmap.md`, experiment catalogue and this audit.
 
-The accompanying diff is labelled cumulative because some shared files already had uncommitted
-V7 edits when this task began. It must not be interpreted as exclusively this task's changes.
+The configuration update changes only the three V8 training YAMLs, documentation and the existing
+configuration regression test. It does not change model, training, loss or preprocessing source.
+The earlier architecture-audit diff included pre-existing V7 edits and remains a historical record,
+not a patch to apply as if it contained only the current configuration update.

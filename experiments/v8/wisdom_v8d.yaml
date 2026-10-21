@@ -1,0 +1,239 @@
+# OBJECTIVE: test atomic message passing AFTER the audited V8b surface-to-atom update.
+# PREREQUISITES: V8b closure reviewed; first measure D3/D5/D6 feasibility, without launching here.
+# VARIES: D3/D4/D5/D6 within each exact MAX R Single or Attention NRK FiLM policy.
+# FIXED: historical V8b data/topology, heads/priors, 4+4 surface blocks, optimizer and paired seeds.
+# DECISION: paired D5-D3 and D5-D6 in S at G-selected checkpoints, with cost and G reported separately.
+name: wisdom-v8d  # NEW Study; never resume/relabel an archived V8b Execution.
+run: wisdom.Training.Training  # Single public Work; no nested runner or new losses.
+
+with:  # Exact V8b scientific ledger, verified against exported execution-29c7fa9079512348.
+  dataset: {dataset: wisdom-dna-reduced@6}  # Same immutable reduced benchmark as V7.
+  # Required content: sha256:ac1745504422cf60b84e57b90efc99206dea039dc36d0c1359782062cb10e202.
+  # Verify native Registry identity on the execution target; never substitute another release.
+  model_version: 2  # Capability generation, not the scientific campaign number.
+  subset: full  # Same reduced training population; validation is fixed.
+  initialization_profile: baseline  # Frozen in V7; preserve its exact selected value.
+  optimization_profile: baseline  # Frozen in V7; preserve its exact selected value.
+  hidden_dim: 128  # V7 shared width.
+  embedding_dim: 32  # V7 element embedding width.
+  residue_embedding_dim: 64  # V7 residue embedding width.
+  atomic_layers: 2  # V7 atomic depth.
+  projection_depth: 3  # V7 atom-to-surface projection depth.
+  surface_layers: 4  # V7 DiffusionNet depth per surface stage.
+  atom_spatial_k: 8  # V7 active spatial neighborhood budget.
+  surface_atom_k: 16  # V7 transfer neighborhood budget.
+  diffusion_spectral_modes: 32  # V7 spectral budget.
+  surface_atom_radius: 4.0  # V7 transfer radius in angstroms.
+  dropout: 0.2  # V7 backbone/pooling dropout.
+  learning_rate: 0.001  # V7 AdamW rate.
+  weight_decay: 0.0005  # V7 AdamW decay.
+  gate_lambda: 0.04  # Same coefficient; baseline_count below fixes its per-shared-gate meaning.
+  surface_refiner_type: heat  # Explicit V7 refiner; never silently fall back to none.
+  surface_refiner_heat_length: 6.0  # Freeze the reviewed V7 Heat6 policy in both lines.
+  weak_loss_profile: custom  # Use the exact per-line coefficients below, without profile overrides.
+  positive_existence_lambda: 0.0  # Neither retained V7 line uses point-existence supervision.
+  cardinality_lambda: 0.0  # V7 freezes this prior off.
+  total_variation_lambda: 0.0  # V7 freezes this prior off.
+  dirichlet_lambda: 0.0  # V7 freezes this prior off.
+  regional_loss_length: 2.5  # Frozen auxiliary regional length in angstroms.
+  regional_ranking_margin: 0.5  # Frozen positive-minus-negative logit margin.
+  minimum_positive_area: 0.0  # V7 disables cardinality.
+  maximum_positive_area: null  # No upper cardinality bound.
+  head_implementation: controlled  # Preserve the corrected V7 active-head/RNG contract.
+  architecture_implementation: controlled  # Paired shared initialization; audited coverage/vector semantics.
+  feedback_weighting: area  # Freeze area-times-distance integration; inactive without a feedback update.
+  gate_cost_normalization: baseline_count  # Same shared-gate coefficient in every architecture.
+  batch_size: 16  # Preserve V7 optimizer-step size.
+  epochs: 500  # Preserve V7 epoch ceiling.
+  patience: 30  # Ordinary G-based within-Run stopping, not competitive pruning.
+  minimum_delta: 0.001  # Required G checkpoint improvement.
+  precision: auto  # Hardware-safe AMP, FP32 sparse operators and controlled feedback accumulation.
+  surface_metrics: true  # Full validation-local diagnostics; no local targets in backward.
+  surface_metrics_interval: 1  # Preserve raw/operational S, temporal coupling and regret curves.
+  visualization:  # Separate inference-only reviewers inspect saved checkpoints after the campaign.
+    mode: none  # No per-seed viewers or empty tabs during training.
+  faithfulness_audit: false  # Vertex deletion is invalid with the fixed spectral Heat6 refiner.
+  evaluate_test: false  # Never open held-out test during architecture development.
+  optimization_diagnostics: true  # Record gradient, activation and gate-saturation diagnostics.
+  data_workers: 4  # Per-Run NPZ decoding workers; native LF owns concurrency.
+
+  architecture_spike: custom  # feedback_propagation owns this finite study, not a V8b preset.
+  post_feedback_initial_scale: 0.1  # Learned gamma; same D5/D6 initialization, near identity.
+  surface_stage_layers: null  # Main comparison retains surface_layers=4 in BOTH stages.
+  checkpoint_surface: false  # Optional exact non-reentrant recomputation, not detached embeddings.
+  checkpoint_post_feedback: false  # Optional GNN2 recomputation; retain RNG and shared gate sample.
+  # surface_stage_layers: [2, 2]  # Phase 4 ONLY: label a new budget, never a silent OOM fallback.
+  # Other separately labelled budgets: [3,1] and [1,3]. Main reference is [4,4].
+
+# Public defaults (different from the frozen values above):
+# feedback_propagation=none preserves all V8b routes/checkpoint keys; accepts none,d0,d1,...,d8.
+# d0=single, d1=depth, d2=null update, d3=real feedback; no added propagation in d0-d3.
+# d4=real+1 layer, d5=real+2 layers, d6=null+2 layers, d7=depth+2 layers, d8=real+local MLP.
+# All non-none modes require architecture_spike=custom, controlled learned scalar baseline atoms.
+# post_feedback_initial_scale=.1 is a learned scalar; zero is exact identity (no outer LayerNorm).
+# GNN2 parameters are independent, with no input projection and unchanged physical relations.
+# D8 H->2H->H approximates two-layer parameter count at H=128, not functional capacity/FLOPs.
+# surface_stage_layers=null inherits surface_layers per stage; otherwise TWO positive block counts.
+# checkpoint_surface=false and checkpoint_post_feedback=false preserve historical execution.
+# True recomputes live blocks during backward, preserving dropout RNG; no learned cache/detach.
+# No second feedback cycle, recurrent/TTC runner, V9 encoder, vector branch or geometry spike.
+# dataset required; model_version=1, subset=full; initialization/optimization/weak profiles=custom.
+# hidden=128, element=32, residue=null, atomic=2, projection=1, surface=2; widths/depths positive.
+# atom_spatial_k=16, surface_atom_k=16, spectral_modes=128, transfer_radius=6 Å (>0).
+# dropout=.2 in [0,1), lr=3e-4>0, decay=1e-4>=0, gate_lambda=.001>=0.
+# feedback_weighting=point (point/area), implementation=legacy (legacy/controlled).
+# area uses represented Å² * exp(-d/radius), exact original coverage; uncovered atoms stay unchanged.
+# D6 gets an H-vector of zeros, NOT detached S1. Both second projections still read S1.
+# gate_cost_normalization=historical_mean; baseline_count retains the reference inventory denominator.
+# Pooling=max, area_mode=legacy; attention simple/width=32; weak lambdas=0, length=2.5 Å, margin=.5.
+# Head=single, implementation=legacy; balance=legacy_sum. normalized uses rho=.5; single BCE unchanged.
+# context=area_mean/dim16/detached=true; local initialization=independent, FiLM scale=1.
+# epochs=100, batch=2, patience=30>0, delta=.001>=0, precision=auto (BF16 where supported).
+# surface_metrics=true, interval=0; positive N adds every Nth epoch. Local GT is evaluation-only.
+# visualization=null => mode=none; predictions, 2000 points, 12 proteins, 4 MiB, threshold=.5.
+# evaluate_test=true, diagnostics=false, faithfulness=false, data_workers=4>=0.
+# Remaining public fields/defaults: lf explain; no hidden HPO, winner import or changed test policy.
+
+seeds: [151, 157, 163, 167]  # Four contemporaneous pairs; historical Runs are not extra replications.
+
+# All authored cells are mandatory; native sweeps disable competitive pruning/seed racing.
+# G-based within-Run patience still applies. Fresh confirmation seeds must be specified separately.
+
+sweep:  # Main phase: 2 frozen lines x 4 modes x 4 seeds = 32 NEW Runs.
+  space:  # Domains validate complete candidates, not their Cartesian product.
+    feedback_propagation:  # Finite controls; no arbitrary iteration count.
+      values: [d0, d1, d2, d3, d4, d5, d6, d7, d8]  # Only listed candidates execute below.
+    pooling_type:  # Line A=MAX; line B=Attention, never a pooling-only causal contrast.
+      values: [max, attention]  # Closed reviewed values, not an additional hyperparameter search.
+    pooling_area_mode:  # Line A counts points; line B uses represented areas.
+      values: [point, area]  # Closed reviewed values, not an additional hyperparameter search.
+    attention_variant:  # Frozen V7 attention scoring.
+      values: [simple]  # Closed reviewed values, not an additional hyperparameter search.
+      when: {pooling_type: attention}  # Omit this coordinate entirely from inactive candidates.
+    attention_hidden_dim:  # Frozen V7 attention capacity.
+      values: [256]  # Closed reviewed values, not an additional hyperparameter search.
+      when: {pooling_type: attention}  # Omit this coordinate entirely from inactive candidates.
+    negative_surface_lambda:  # Line A=0; line B=.03 negative suppression.
+      values: [0.0, 0.03]  # Closed reviewed values, not an additional hyperparameter search.
+    regional_positive_lambda:  # R is regional existence: line A=.3; line B=.03.
+      values: [0.3, 0.03]  # Closed reviewed values, not an additional hyperparameter search.
+    regional_ranking_lambda:  # K is regional ranking: line A=0; line B=.03.
+      values: [0.0, 0.03]  # Closed reviewed values, not an additional hyperparameter search.
+    head_type:  # Only MAX Single and Attention FiLM are measured.
+      values: [single, film]  # Closed reviewed values, not an additional hyperparameter search.
+    head_loss_balance:  # One normalized sum of the two protein BCEs.
+      values: [normalized]  # Closed reviewed values, not an additional hyperparameter search.
+      when: {head_type: film}  # Omit this coordinate entirely from inactive candidates.
+    surface_loss_fraction:  # FiLM uses .5 direct BCE + .5 surface BCE exactly once.
+      values: [0.5]  # Closed reviewed values, not an additional hyperparameter search.
+      when: {head_type: film}  # Omit this coordinate entirely from inactive candidates.
+    head_dropout:  # Frozen V7 direct-head dropout.
+      values: [0.0]  # Closed reviewed values, not an additional hyperparameter search.
+      when: {head_type: film}  # Omit this coordinate entirely from inactive candidates.
+    global_reduction:  # Area-weighted reduction of surface embeddings.
+      values: [area_mean]  # Closed reviewed values, not an additional hyperparameter search.
+      when: {head_type: film}  # Omit this coordinate entirely from inactive candidates.
+    global_context_dim:  # Frozen context projection width.
+      values: [16]  # Closed reviewed values, not an additional hyperparameter search.
+      when: {head_type: film}  # Omit this coordinate entirely from inactive candidates.
+    detach_global_context:  # Preserve V7's detached local-context path.
+      values: [true]  # Closed reviewed values, not an additional hyperparameter search.
+      when: {head_type: film}  # Omit this coordinate entirely from inactive candidates.
+    local_head_initialization:  # Copy the original local classifier under controlled initialization.
+      values: [copy]  # Closed reviewed values, not an additional hyperparameter search.
+      when: {head_type: film}  # Omit this coordinate entirely from inactive candidates.
+    film_modulation_scale:  # Frozen identity-start FiLM correction multiplier.
+      values: [1.0]  # Closed reviewed values, not an additional hyperparameter search.
+      when: {head_type: film}  # Omit this coordinate entirely from inactive candidates.
+
+  candidates:  # Two complete lines crossed ONLY with this Study's finite feedback modes.
+    - &max_r_single  # MAX R Single: complete baseline candidate and reusable line anchor.
+      pooling_type: max  # Line A: MAX R Single.
+      pooling_area_mode: point  # Exact V7 MAX measure.
+      negative_surface_lambda: 0.0  # No negative suppression.
+      regional_positive_lambda: 0.3  # R: regional existence, not ranking.
+      regional_ranking_lambda: 0.0  # K: regional ranking is disabled.
+      head_type: single  # Original single-head BCE; no inactive FiLM coordinates.
+      feedback_propagation: d3  # D3: contemporary real-feedback reference.
+    - <<: *max_r_single  # Preserve EVERY MAX R Single setting; change only the architecture.
+      feedback_propagation: d4  # Same-line paired post-feedback contrast.
+    - <<: *max_r_single  # Preserve EVERY MAX R Single setting; change only the architecture.
+      feedback_propagation: d5  # Same-line paired post-feedback contrast.
+    - <<: *max_r_single  # Preserve EVERY MAX R Single setting; change only the architecture.
+      feedback_propagation: d6  # Same-line paired post-feedback contrast.
+
+    - &attention_nrk_film  # Attention NRK FiLM: complete baseline candidate and reusable line anchor.
+      pooling_type: attention  # Line B: Attention NRK FiLM.
+      pooling_area_mode: area  # Exact V7 represented-area measure.
+      attention_variant: simple  # Original embedding-based attention scorer.
+      attention_hidden_dim: 256  # Exact V7 attention width.
+      negative_surface_lambda: 0.03  # N: negative suppression.
+      regional_positive_lambda: 0.03  # R: regional existence.
+      regional_ranking_lambda: 0.03  # K: regional ranking.
+      head_type: film  # Direct/global and surface-derived predictions remain distinct.
+      head_loss_balance: normalized  # Apply the .5/.5 BCE mixture once.
+      surface_loss_fraction: 0.5  # Equal direct/surface protein BCE contributions.
+      head_dropout: 0.0  # No head dropout.
+      global_reduction: area_mean  # Area-weighted embedding reduction.
+      global_context_dim: 16  # Frozen context projection width.
+      detach_global_context: true  # Keep the V7 context-gradient contract.
+      local_head_initialization: copy  # Initialize from the original local classifier.
+      film_modulation_scale: 1.0  # Frozen FiLM modulation multiplier.
+      feedback_propagation: d3  # D3: contemporary real-feedback reference.
+    - <<: *attention_nrk_film  # Preserve EVERY Attention NRK FiLM setting; change only the architecture.
+      feedback_propagation: d4  # Same-line paired post-feedback contrast.
+    - <<: *attention_nrk_film  # Preserve EVERY Attention NRK FiLM setting; change only the architecture.
+      feedback_propagation: d5  # Same-line paired post-feedback contrast.
+    - <<: *attention_nrk_film  # Preserve EVERY Attention NRK FiLM setting; change only the architecture.
+      feedback_propagation: d6  # Same-line paired post-feedback contrast.
+
+    # Optional contemporary references / attribution: uncomment the desired paired cells.
+    # - <<: *max_r_single  # D0: add a contemporary MAX single-pass reference.
+    #   feedback_propagation: d0  # One surface stage; no feedback or second GNN.
+    # - <<: *max_r_single  # D1: add the original depth-only MAX control.
+    #   feedback_propagation: d1  # Two surfaces, no U or second GNN.
+    # - <<: *max_r_single  # D2: add the original null-update MAX control.
+    #   feedback_propagation: d2  # Two surfaces and null U, no second GNN.
+    # - <<: *max_r_single  # D7: add propagation without the feedback MLP.
+    #   feedback_propagation: d7  # Two graph layers directly on A1.
+    # - <<: *max_r_single  # D8: add approximately matched nodewise capacity.
+    #   feedback_propagation: d8  # Real U followed by H->2H->H MLP, no graph messages.
+    # - <<: *attention_nrk_film  # Same optional controls for the full frozen FiLM policy.
+    #   feedback_propagation: d0  # Repeat a merge for each desired d1/d2/d7/d8 control.
+
+  reference:  # Unique native reference; analysis still compares within the SAME policy/seed.
+    pooling_type: max  # MAX R Single reference only.
+    head_type: single  # Exclude the independent Attention FiLM policy.
+    feedback_propagation: d3  # Original real feedback, with NO second atomic GNN.
+
+# Optional attribution phase: add d7/d8 candidates by merging the SAME line anchors above.
+# Historical controls: d0/d1/d2 remain available; add contemporary cells if required, never pool
+# archived V8b observations as if they were new Runs. Include every seed in paired summaries.
+# Optional feasibility phase: explicitly retain ONLY d3/d5/d6 and one common seed in a NEW Study
+# before launching the full campaign. Do not edit a running Study's design or scientific identity.
+# Optional depth-budget phase: surface_stage_layers=[2,2],[3,1],[1,3], explicitly labelled NEW cells.
+# sweep.space required; candidates/reference optional. when omits inactive head/pooling children.
+# reference must match one candidate; no search, automatic winner import, steps or nested execution.
+
+# Native defaults: max_parallel/runs_per_gpu=null (automatic), max_runs/max_time=null, failure_retries=1.
+# Native Job/Attempt recovery retains completed evidence; WISDOM adds no OOM catch or fallback.
+
+objective:  # Existing descriptive W; checkpoint epochs remain selected by global G.
+  metric: val_wisdom_hpo_score  # Compare S/raw S/G/regret/coupling and cost separately.
+  mode: max  # Larger composite utility, not a new training loss or surface checkpoint selector.
+  range: [0.0, 1.0]  # Mathematical W bounds.
+  practical_margin: 0.015  # Historical W margin, NOT a significance threshold for S.
+
+# metric required; mode=max by default, range/practical_margin optional.
+# Main contrasts: d5-d3 (new propagation), d5-d6 (real content), d4-d5 (depth).
+# Attribution: d5-d7 (feedback update), d5-d8 (communication), d5-d0 (total benefit/cost).
+# FiLM G remains the direct global-head metric. No local GT enters gradients or epoch selection.
+
+resources:  # Portable operational budget; feasibility is NOT yet measured on production proteins.
+  gpu: 2  # Two requested GPUs; LF owns admission within the actual grant and visible capacity.
+  cpu: 36  # Trainer and persistent decoding; unrelated to scientific identity.
+  memory: 96GiB  # Host RAM, distinct from VRAM.
+  time: 168h  # Native recovery handles interruptions; no automatic batch/model downsizing.
+
+# Defaults: CPU=1, GPU=0, processes=1, memory/gpu_memory/storage=0, time=null.
+# CPU/processes>=1, GPU>=0, processes<=CPU; size/duration units are framework-owned.

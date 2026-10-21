@@ -1,22 +1,20 @@
-# Local retuning around a frozen architecture; inspect all eligible saved configurations.
+# Review one explicitly selected V9a–V9f atomic-encoder Study, without fitting models.
 # Post-hoc inspection does not fit models or replace paired-study decisions.
 run: wisdom.visualization.StudyReview.StudyReview  # Native inference-only Work.
 
 with:  # Select saved evidence, then configure the automatic diagnostic panel.
   source_execution: REPLACE_WITH_EXECUTION_ID  # Native registered Execution ID or unambiguous Work name.
   dataset: {dataset: wisdom-dna-reduced@6}  # Exact training dataset content, locally placed.
-  source_seed: 4  # Saved training seed to inspect; this does not train or choose the best seed.
+  source_seed: 173  # First paired V9 development seed; not a new seed or selected winner.
   maximum_proteins: 8  # Diagnostic proteins per configuration/split; not a point cap.
 
   # Optional model filter: uncomment only the desired mapping or alternative list.
   # parameter_filter:  # One mapping combines all conditions with AND.
-  #   pooling_type: attention  # One family; replace with a saved pooling name.
-  #   attention_hidden_dim: [16, 32]  # Include either saved width, not an interval.
-  # OR alternative: keep MAX plus only the chosen attention widths.
+  #   atomic_encoder_type: [baseline, mpnn_mean]  # Exact profiles present in the source Study.
+  # OR alternative: keep the baseline and one explicit GCN control from V9a.
   # parameter_filter:  # Do not activate two parameter_filter definitions.
-  #   - pooling_type: max  # Keep parameter-free MAX without requiring an attention width.
-  #   - pooling_type: attention  # Every field in this branch must match.
-  #     attention_hidden_dim: [16, 32]  # Include these widths in the attention branch only.
+  #   - atomic_encoder_type: baseline  # Contemporary source baseline.
+  #   - atomic_encoder_type: gcn_conditioned  # Existing profile, never fallback training.
   # content: features  # Optional learned-channel display; predictions are the lightweight default.
 
 # Review defaults (actual public run() values, not the overrides above):

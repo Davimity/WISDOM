@@ -1,0 +1,987 @@
+{
+  "scope": "local diagnostic; no model or dataset publication",
+  "memory_note": "tracked peak is not total RAM; RSS is cumulative process high-water",
+  "measurements": [
+    {
+      "identifier": "1PFI_A",
+      "radius_angstrom": 6,
+      "maximum": 96,
+      "atoms": 322,
+      "points": 4379,
+      "coverage": {
+        "minimum": 3,
+        "mean": 12.765014843571592,
+        "quantiles": [
+          12,
+          21,
+          23,
+          27.220000000000255
+        ],
+        "maximum": 32,
+        "above": {
+          "32": 0,
+          "64": 0,
+          "96": 0,
+          "128": 0
+        }
+      },
+      "discarded": 0,
+      "stored_pairs": 55898,
+      "csr_raw_bytes": 964440,
+      "csr_compressed_bytes": 646659,
+      "dense_raw_bytes": 7146528,
+      "dense_compressed_bytes": 729892,
+      "build_seconds": 0.47230439897975884,
+      "write_seconds": 0.04014835401903838,
+      "load_seconds": 0.004484925972064957,
+      "dense_conversion_seconds": 0.013869752991013229,
+      "tracked_peak_bytes": 3285063,
+      "process_cumulative_peak_rss_kib": 623268,
+      "estimated_gather_float32_h128_bytes": 28619776,
+      "pilot_geometry_seconds": 1.75974121800391,
+      "base_npz_bytes": null,
+      "diffusion_array_bytes": null,
+      "audit_label": 1
+    },
+    {
+      "identifier": "1PFI_A",
+      "radius_angstrom": 8,
+      "maximum": 96,
+      "atoms": 322,
+      "points": 4379,
+      "coverage": {
+        "minimum": 5,
+        "mean": 30.037908198218773,
+        "quantiles": [
+          30,
+          45,
+          49,
+          54
+        ],
+        "maximum": 63,
+        "above": {
+          "32": 0.43000685087919616,
+          "64": 0,
+          "96": 0,
+          "128": 0
+        }
+      },
+      "discarded": 0,
+      "stored_pairs": 131536,
+      "csr_raw_bytes": 2174648,
+      "csr_compressed_bytes": 1535047,
+      "dense_raw_bytes": 7146528,
+      "dense_compressed_bytes": 1626713,
+      "build_seconds": 0.491247673984617,
+      "write_seconds": 0.09663581100176089,
+      "load_seconds": 0.008862457005307078,
+      "dense_conversion_seconds": 0.015013068012194708,
+      "tracked_peak_bytes": 5735991,
+      "process_cumulative_peak_rss_kib": 625192,
+      "estimated_gather_float32_h128_bytes": 67346432,
+      "pilot_geometry_seconds": 1.75974121800391,
+      "base_npz_bytes": null,
+      "diffusion_array_bytes": null,
+      "audit_label": 1
+    },
+    {
+      "identifier": "1PFI_A",
+      "radius_angstrom": 10,
+      "maximum": 96,
+      "atoms": 322,
+      "points": 4379,
+      "coverage": {
+        "minimum": 15,
+        "mean": 53.06782370404202,
+        "quantiles": [
+          55,
+          71,
+          75,
+          79
+        ],
+        "maximum": 86,
+        "above": {
+          "32": 0.8958666362183146,
+          "64": 0.2521123544188171,
+          "96": 0,
+          "128": 0
+        }
+      },
+      "discarded": 0,
+      "stored_pairs": 232384,
+      "csr_raw_bytes": 3788216,
+      "csr_compressed_bytes": 2773593,
+      "dense_raw_bytes": 7146528,
+      "dense_compressed_bytes": 2854509,
+      "build_seconds": 0.5242112780106254,
+      "write_seconds": 0.17031975201098248,
+      "load_seconds": 0.014042402995983139,
+      "dense_conversion_seconds": 0.014606790995458141,
+      "tracked_peak_bytes": 9005551,
+      "process_cumulative_peak_rss_kib": 631340,
+      "estimated_gather_float32_h128_bytes": 118980608,
+      "pilot_geometry_seconds": 1.75974121800391,
+      "base_npz_bytes": null,
+      "diffusion_array_bytes": null,
+      "audit_label": 1
+    },
+    {
+      "identifier": "1PFI_A",
+      "radius_angstrom": 12,
+      "maximum": 96,
+      "atoms": 322,
+      "points": 4379,
+      "coverage": {
+        "minimum": 29,
+        "mean": 75.14341173783968,
+        "quantiles": [
+          79,
+          94,
+          97,
+          102
+        ],
+        "maximum": 107,
+        "above": {
+          "32": 0.9988581868006394,
+          "64": 0.7449189312628454,
+          "96": 0.0621146380452158,
+          "128": 0
+        }
+      },
+      "discarded": 922,
+      "stored_pairs": 328131,
+      "csr_raw_bytes": 5320168,
+      "csr_compressed_bytes": 3937542,
+      "dense_raw_bytes": 7146528,
+      "dense_compressed_bytes": 4001185,
+      "build_seconds": 0.5464329909882508,
+      "write_seconds": 0.24465069000143558,
+      "load_seconds": 0.02062736399238929,
+      "dense_conversion_seconds": 0.014098600018769503,
+      "tracked_peak_bytes": 12109431,
+      "process_cumulative_peak_rss_kib": 637412,
+      "estimated_gather_float32_h128_bytes": 168003072,
+      "pilot_geometry_seconds": 1.75974121800391,
+      "base_npz_bytes": null,
+      "diffusion_array_bytes": null,
+      "audit_label": 1
+    },
+    {
+      "identifier": "1PFI_A",
+      "radius_angstrom": 14,
+      "maximum": 96,
+      "atoms": 322,
+      "points": 4379,
+      "coverage": {
+        "minimum": 45,
+        "mean": 94.80863210778716,
+        "quantiles": [
+          100,
+          116,
+          119,
+          124
+        ],
+        "maximum": 129,
+        "above": {
+          "32": 1,
+          "64": 0.8990637131765243,
+          "96": 0.5686229732815712,
+          "128": 0.0006850879196163508
+        }
+      },
+      "discarded": 31304,
+      "stored_pairs": 383863,
+      "csr_raw_bytes": 6211880,
+      "csr_compressed_bytes": 4610707,
+      "dense_raw_bytes": 7146528,
+      "dense_compressed_bytes": 4631901,
+      "build_seconds": 0.5725125019962434,
+      "write_seconds": 0.29006406301050447,
+      "load_seconds": 0.022239387006266043,
+      "dense_conversion_seconds": 0.01323875499656424,
+      "tracked_peak_bytes": 13924191,
+      "process_cumulative_peak_rss_kib": 639076,
+      "estimated_gather_float32_h128_bytes": 196537856,
+      "pilot_geometry_seconds": 1.75974121800391,
+      "base_npz_bytes": null,
+      "diffusion_array_bytes": null,
+      "audit_label": 1
+    },
+    {
+      "identifier": "1PFI_A",
+      "radius_angstrom": 16,
+      "maximum": 96,
+      "atoms": 322,
+      "points": 4379,
+      "coverage": {
+        "minimum": 53,
+        "mean": 112.07330440739895,
+        "quantiles": [
+          119,
+          136,
+          139,
+          144
+        ],
+        "maximum": 151,
+        "above": {
+          "32": 1,
+          "64": 0.9757935601735556,
+          "96": 0.7558803379767071,
+          "128": 0.27768897008449417
+        }
+      },
+      "discarded": 89197,
+      "stored_pairs": 401572,
+      "csr_raw_bytes": 6495224,
+      "csr_compressed_bytes": 4820343,
+      "dense_raw_bytes": 7146528,
+      "dense_compressed_bytes": 4825055,
+      "build_seconds": 0.5929069009725936,
+      "write_seconds": 0.3016523919941392,
+      "load_seconds": 0.023341233987594023,
+      "dense_conversion_seconds": 0.012779117008903995,
+      "tracked_peak_bytes": 14520431,
+      "process_cumulative_peak_rss_kib": 645472,
+      "estimated_gather_float32_h128_bytes": 205604864,
+      "pilot_geometry_seconds": 1.75974121800391,
+      "base_npz_bytes": null,
+      "diffusion_array_bytes": null,
+      "audit_label": 1
+    },
+    {
+      "identifier": "2NRA_C",
+      "radius_angstrom": 6,
+      "maximum": 96,
+      "atoms": 2000,
+      "points": 14411,
+      "coverage": {
+        "minimum": 3,
+        "mean": 15.606619943099021,
+        "quantiles": [
+          14,
+          27,
+          32,
+          44
+        ],
+        "maximum": 54,
+        "above": {
+          "32": 0.04586773992089376,
+          "64": 0,
+          "96": 0,
+          "128": 0
+        }
+      },
+      "discarded": 0,
+      "stored_pairs": 224907,
+      "csr_raw_bytes": 3829096,
+      "csr_compressed_bytes": 2634243,
+      "dense_raw_bytes": 23518752,
+      "dense_compressed_bytes": 2919084,
+      "build_seconds": 1.6539222249994054,
+      "write_seconds": 0.15636515800724737,
+      "load_seconds": 0.014196105999872088,
+      "dense_conversion_seconds": 0.041035560017917305,
+      "tracked_peak_bytes": 12028699,
+      "process_cumulative_peak_rss_kib": 799740,
+      "estimated_gather_float32_h128_bytes": 115152384,
+      "pilot_geometry_seconds": 7.012878916983027,
+      "base_npz_bytes": null,
+      "diffusion_array_bytes": null,
+      "audit_label": 1
+    },
+    {
+      "identifier": "2NRA_C",
+      "radius_angstrom": 8,
+      "maximum": 96,
+      "atoms": 2000,
+      "points": 14411,
+      "coverage": {
+        "minimum": 5,
+        "mean": 37.943099021580736,
+        "quantiles": [
+          35,
+          63,
+          73,
+          101
+        ],
+        "maximum": 120,
+        "above": {
+          "32": 0.5499271389910485,
+          "64": 0.09263756852404413,
+          "96": 0.013808895982235793,
+          "128": 0
+        }
+      },
+      "discarded": 1805,
+      "stored_pairs": 544993,
+      "csr_raw_bytes": 8950472,
+      "csr_compressed_bytes": 6464550,
+      "dense_raw_bytes": 23518752,
+      "dense_compressed_bytes": 6749673,
+      "build_seconds": 1.8879779360140674,
+      "write_seconds": 0.39481969000189565,
+      "load_seconds": 0.03275938401930034,
+      "dense_conversion_seconds": 0.04345544698298909,
+      "tracked_peak_bytes": 22285571,
+      "process_cumulative_peak_rss_kib": 799740,
+      "estimated_gather_float32_h128_bytes": 279036416,
+      "pilot_geometry_seconds": 7.012878916983027,
+      "base_npz_bytes": null,
+      "diffusion_array_bytes": null,
+      "audit_label": 1
+    },
+    {
+      "identifier": "2NRA_C",
+      "radius_angstrom": 10,
+      "maximum": 96,
+      "atoms": 2000,
+      "points": 14411,
+      "coverage": {
+        "minimum": 11,
+        "mean": 73.67656651169246,
+        "quantiles": [
+          68,
+          120,
+          137,
+          190.79999999999927
+        ],
+        "maximum": 230,
+        "above": {
+          "32": 0.9036152938727361,
+          "64": 0.5459024356394421,
+          "96": 0.22746513080285893,
+          "128": 0.06932204565956561
+        }
+      },
+      "discarded": 93037,
+      "stored_pairs": 968716,
+      "csr_raw_bytes": 15730040,
+      "csr_compressed_bytes": 11737990,
+      "dense_raw_bytes": 23518752,
+      "dense_compressed_bytes": 11929562,
+      "build_seconds": 2.26001697400352,
+      "write_seconds": 0.7291991830279585,
+      "load_seconds": 0.057526063988916576,
+      "dense_conversion_seconds": 0.043708901008358225,
+      "tracked_peak_bytes": 35865515,
+      "process_cumulative_peak_rss_kib": 799740,
+      "estimated_gather_float32_h128_bytes": 495982592,
+      "pilot_geometry_seconds": 7.012878916983027,
+      "base_npz_bytes": null,
+      "diffusion_array_bytes": null,
+      "audit_label": 1
+    },
+    {
+      "identifier": "2NRA_C",
+      "radius_angstrom": 12,
+      "maximum": 96,
+      "atoms": 2000,
+      "points": 14411,
+      "coverage": {
+        "minimum": 21,
+        "mean": 121.92033863021304,
+        "quantiles": [
+          115,
+          193,
+          221.5,
+          302.89999999999964
+        ],
+        "maximum": 388,
+        "above": {
+          "32": 0.9818888349177711,
+          "64": 0.8544861564082992,
+          "96": 0.6309763375199501,
+          "128": 0.4028172923461245
+        }
+      },
+      "discarded": 520562,
+      "stored_pairs": 1236432,
+      "csr_raw_bytes": 20013496,
+      "csr_compressed_bytes": 15039263,
+      "dense_raw_bytes": 23518752,
+      "dense_compressed_bytes": 15093718,
+      "build_seconds": 2.848165904986672,
+      "write_seconds": 0.9357449980161618,
+      "load_seconds": 0.07562314000097103,
+      "dense_conversion_seconds": 0.051439936010865495,
+      "tracked_peak_bytes": 44449427,
+      "process_cumulative_peak_rss_kib": 799740,
+      "estimated_gather_float32_h128_bytes": 633053184,
+      "pilot_geometry_seconds": 7.012878916983027,
+      "base_npz_bytes": null,
+      "diffusion_array_bytes": null,
+      "audit_label": 1
+    },
+    {
+      "identifier": "2NRA_C",
+      "radius_angstrom": 14,
+      "maximum": 96,
+      "atoms": 2000,
+      "points": 14411,
+      "coverage": {
+        "minimum": 25,
+        "mean": 185.06106446464506,
+        "quantiles": [
+          176,
+          292,
+          329,
+          444.89999999999964
+        ],
+        "maximum": 550,
+        "above": {
+          "32": 0.9970161682048435,
+          "64": 0.9610714037887724,
+          "96": 0.8724585386163347,
+          "128": 0.7386718478939699
+        }
+      },
+      "discarded": 1328441,
+      "stored_pairs": 1338474,
+      "csr_raw_bytes": 21646168,
+      "csr_compressed_bytes": 16282810,
+      "dense_raw_bytes": 23518752,
+      "dense_compressed_bytes": 16256598,
+      "build_seconds": 3.348409921018174,
+      "write_seconds": 1.0076271739962976,
+      "load_seconds": 0.07900682999752462,
+      "dense_conversion_seconds": 0.04074279998894781,
+      "tracked_peak_bytes": 47736731,
+      "process_cumulative_peak_rss_kib": 799740,
+      "estimated_gather_float32_h128_bytes": 685298688,
+      "pilot_geometry_seconds": 7.012878916983027,
+      "base_npz_bytes": null,
+      "diffusion_array_bytes": null,
+      "audit_label": 1
+    },
+    {
+      "identifier": "2NRA_C",
+      "radius_angstrom": 16,
+      "maximum": 96,
+      "atoms": 2000,
+      "points": 14411,
+      "coverage": {
+        "minimum": 33,
+        "mean": 263.63076816320864,
+        "quantiles": [
+          249,
+          415,
+          462,
+          617.5999999999985
+        ],
+        "maximum": 769,
+        "above": {
+          "32": 1,
+          "64": 0.9882728471306641,
+          "96": 0.9498299909791131,
+          "128": 0.9031989452501561
+        }
+      },
+      "discarded": 2430895,
+      "stored_pairs": 1368288,
+      "csr_raw_bytes": 22123192,
+      "csr_compressed_bytes": 16644528,
+      "dense_raw_bytes": 23518752,
+      "dense_compressed_bytes": 16591132,
+      "build_seconds": 4.119143174990313,
+      "write_seconds": 1.0361637430032715,
+      "load_seconds": 0.08341899700462818,
+      "dense_conversion_seconds": 0.0575450400065165,
+      "tracked_peak_bytes": 48733459,
+      "process_cumulative_peak_rss_kib": 799740,
+      "estimated_gather_float32_h128_bytes": 700563456,
+      "pilot_geometry_seconds": 7.012878916983027,
+      "base_npz_bytes": null,
+      "diffusion_array_bytes": null,
+      "audit_label": 1
+    },
+    {
+      "identifier": "3UGJ_A",
+      "radius_angstrom": 6,
+      "maximum": 96,
+      "atoms": 9884,
+      "points": 43739,
+      "coverage": {
+        "minimum": 3,
+        "mean": 18.427947598253276,
+        "quantiles": [
+          17,
+          32,
+          38,
+          47
+        ],
+        "maximum": 63,
+        "above": {
+          "32": 0.09376071698026932,
+          "64": 0,
+          "96": 0,
+          "128": 0
+        }
+      },
+      "discarded": 0,
+      "stored_pairs": 806020,
+      "csr_raw_bytes": 13596152,
+      "csr_compressed_bytes": 9573174,
+      "dense_raw_bytes": 71382048,
+      "dense_compressed_bytes": 10433284,
+      "build_seconds": 5.297844015993178,
+      "write_seconds": 0.5500944820232689,
+      "load_seconds": 0.04810959700262174,
+      "dense_conversion_seconds": 0.12539574698894285,
+      "tracked_peak_bytes": 40823799,
+      "process_cumulative_peak_rss_kib": 1713740,
+      "estimated_gather_float32_h128_bytes": 412682240,
+      "pilot_geometry_seconds": 26.765085708000697,
+      "base_npz_bytes": null,
+      "diffusion_array_bytes": null,
+      "audit_label": 0
+    },
+    {
+      "identifier": "3UGJ_A",
+      "radius_angstrom": 8,
+      "maximum": 96,
+      "atoms": 9884,
+      "points": 43739,
+      "coverage": {
+        "minimum": 5,
+        "mean": 46.74546743181143,
+        "quantiles": [
+          43,
+          79,
+          91,
+          111
+        ],
+        "maximum": 131,
+        "above": {
+          "32": 0.7158371247627975,
+          "64": 0.19165961727520062,
+          "96": 0.03619195683486134,
+          "128": 0.00020576602117103728
+        }
+      },
+      "discarded": 17197,
+      "stored_pairs": 2027403,
+      "csr_raw_bytes": 33138280,
+      "csr_compressed_bytes": 24271438,
+      "dense_raw_bytes": 71382048,
+      "dense_compressed_bytes": 25095808,
+      "build_seconds": 6.566337997006485,
+      "write_seconds": 1.5071905860095285,
+      "load_seconds": 0.1174284010194242,
+      "dense_conversion_seconds": 0.11912754998775199,
+      "tracked_peak_bytes": 80379831,
+      "process_cumulative_peak_rss_kib": 1713740,
+      "estimated_gather_float32_h128_bytes": 1038030336,
+      "pilot_geometry_seconds": 26.765085708000697,
+      "base_npz_bytes": null,
+      "diffusion_array_bytes": null,
+      "audit_label": 0
+    },
+    {
+      "identifier": "3UGJ_A",
+      "radius_angstrom": 10,
+      "maximum": 96,
+      "atoms": 9884,
+      "points": 43739,
+      "coverage": {
+        "minimum": 8,
+        "mean": 94.23496193328609,
+        "quantiles": [
+          85,
+          157,
+          187,
+          216
+        ],
+        "maximum": 250,
+        "above": {
+          "32": 0.9751023114383045,
+          "64": 0.7327785271725462,
+          "96": 0.3938590274126066,
+          "128": 0.18587530579117034
+        }
+      },
+      "discarded": 709663,
+      "stored_pairs": 3412080,
+      "csr_raw_bytes": 55293112,
+      "csr_compressed_bytes": 41599401,
+      "dense_raw_bytes": 71382048,
+      "dense_compressed_bytes": 42000399,
+      "build_seconds": 7.871558134997031,
+      "write_seconds": 2.4369353179936297,
+      "load_seconds": 0.19966171999112703,
+      "dense_conversion_seconds": 0.1208939479838591,
+      "tracked_peak_bytes": 125528383,
+      "process_cumulative_peak_rss_kib": 1713740,
+      "estimated_gather_float32_h128_bytes": 1746984960,
+      "pilot_geometry_seconds": 26.765085708000697,
+      "base_npz_bytes": null,
+      "diffusion_array_bytes": null,
+      "audit_label": 0
+    },
+    {
+      "identifier": "3UGJ_A",
+      "radius_angstrom": 12,
+      "maximum": 96,
+      "atoms": 9884,
+      "points": 43739,
+      "coverage": {
+        "minimum": 23,
+        "mean": 161.86117652438327,
+        "quantiles": [
+          146,
+          269,
+          322,
+          367
+        ],
+        "maximum": 407,
+        "above": {
+          "32": 0.9990168956766272,
+          "64": 0.9626191728205948,
+          "96": 0.8338782322412492,
+          "128": 0.6192642721598574
+        }
+      },
+      "discarded": 3027144,
+      "stored_pairs": 4052502,
+      "csr_raw_bytes": 65539864,
+      "csr_compressed_bytes": 49547704,
+      "dense_raw_bytes": 71382048,
+      "dense_compressed_bytes": 49511188,
+      "build_seconds": 10.072385263978504,
+      "write_seconds": 2.954042467987165,
+      "load_seconds": 0.2354049599962309,
+      "dense_conversion_seconds": 0.12379344299552031,
+      "tracked_peak_bytes": 147212127,
+      "process_cumulative_peak_rss_kib": 1713740,
+      "estimated_gather_float32_h128_bytes": 2074881024,
+      "pilot_geometry_seconds": 26.765085708000697,
+      "base_npz_bytes": null,
+      "diffusion_array_bytes": null,
+      "audit_label": 0
+    },
+    {
+      "identifier": "3UGJ_A",
+      "radius_angstrom": 14,
+      "maximum": 96,
+      "atoms": 9884,
+      "points": 43739,
+      "coverage": {
+        "minimum": 43,
+        "mean": 253.74686206817714,
+        "quantiles": [
+          228,
+          429,
+          499,
+          578
+        ],
+        "maximum": 623,
+        "above": {
+          "32": 1,
+          "64": 0.9965248405313336,
+          "96": 0.972427353163081,
+          "128": 0.9097830311621208
+        }
+      },
+      "discarded": 6918166,
+      "stored_pairs": 4180468,
+      "csr_raw_bytes": 67587320,
+      "csr_compressed_bytes": 51113862,
+      "dense_raw_bytes": 71382048,
+      "dense_compressed_bytes": 50937817,
+      "build_seconds": 12.732528693013592,
+      "write_seconds": 3.082861919014249,
+      "load_seconds": 0.23910522600635886,
+      "dense_conversion_seconds": 0.1214489690028131,
+      "tracked_peak_bytes": 152886199,
+      "process_cumulative_peak_rss_kib": 1713740,
+      "estimated_gather_float32_h128_bytes": 2140399616,
+      "pilot_geometry_seconds": 26.765085708000697,
+      "base_npz_bytes": null,
+      "diffusion_array_bytes": null,
+      "audit_label": 0
+    },
+    {
+      "identifier": "3UGJ_A",
+      "radius_angstrom": 16,
+      "maximum": 96,
+      "atoms": 9884,
+      "points": 43739,
+      "coverage": {
+        "minimum": 63,
+        "mean": 372.888543405199,
+        "quantiles": [
+          334,
+          635,
+          738,
+          852
+        ],
+        "maximum": 925,
+        "above": {
+          "32": 1,
+          "64": 0.9999085484350351,
+          "96": 0.9974850819634651,
+          "128": 0.9849790804545143
+        }
+      },
+      "discarded": 12111990,
+      "stored_pairs": 4197782,
+      "csr_raw_bytes": 67864344,
+      "csr_compressed_bytes": 51323515,
+      "dense_raw_bytes": 71382048,
+      "dense_compressed_bytes": 51125406,
+      "build_seconds": 16.308310515014455,
+      "write_seconds": 3.1462904590007383,
+      "load_seconds": 0.24970665798173286,
+      "dense_conversion_seconds": 0.12906425099936314,
+      "tracked_peak_bytes": 155471967,
+      "process_cumulative_peak_rss_kib": 1713740,
+      "estimated_gather_float32_h128_bytes": 2149264384,
+      "pilot_geometry_seconds": 26.765085708000697,
+      "base_npz_bytes": null,
+      "diffusion_array_bytes": null,
+      "audit_label": 0
+    }
+  ],
+  "integration_fixture_note": "Seventeen-atom synthetic regression fixture with complete schema-3 NPZ and eight eigenmodes; not a production protein or representative size sample.",
+  "integration_fixture_measurements": [
+    {
+      "identifier": "tiny",
+      "radius_angstrom": 6,
+      "maximum": 96,
+      "atoms": 17,
+      "points": 427,
+      "coverage": {
+        "minimum": 3,
+        "mean": 8.775175644028103,
+        "quantiles": [
+          9,
+          14,
+          14,
+          15
+        ],
+        "maximum": 16,
+        "above": {
+          "32": 0,
+          "64": 0,
+          "96": 0,
+          "128": 0
+        }
+      },
+      "discarded": 0,
+      "stored_pairs": 3747,
+      "csr_raw_bytes": 66792,
+      "csr_compressed_bytes": 42443,
+      "dense_raw_bytes": 696864,
+      "dense_compressed_bytes": 48497,
+      "build_seconds": 0.044614316982915625,
+      "write_seconds": 0.0020731879922095686,
+      "load_seconds": 0.0008728459943085909,
+      "dense_conversion_seconds": 0.001299049996305257,
+      "csr_two_copy_cpu_batch_seconds": 0.0001650249760132283,
+      "tracked_peak_bytes": 321876,
+      "process_cumulative_peak_rss_kib": 569924,
+      "estimated_gather_float32_h128_bytes": 1918464,
+      "base_npz_bytes": 225057,
+      "diffusion_array_bytes": 186204
+    },
+    {
+      "identifier": "tiny",
+      "radius_angstrom": 8,
+      "maximum": 96,
+      "atoms": 17,
+      "points": 427,
+      "coverage": {
+        "minimum": 6,
+        "mean": 12.688524590163935,
+        "quantiles": [
+          13,
+          17,
+          17,
+          17
+        ],
+        "maximum": 17,
+        "above": {
+          "32": 0,
+          "64": 0,
+          "96": 0,
+          "128": 0
+        }
+      },
+      "discarded": 0,
+      "stored_pairs": 5418,
+      "csr_raw_bytes": 93528,
+      "csr_compressed_bytes": 60485,
+      "dense_raw_bytes": 696864,
+      "dense_compressed_bytes": 66593,
+      "build_seconds": 0.04543130801175721,
+      "write_seconds": 0.002699784003198147,
+      "load_seconds": 0.0009778770036064088,
+      "dense_conversion_seconds": 0.0013443159987218678,
+      "csr_two_copy_cpu_batch_seconds": 0.00012342500849626958,
+      "tracked_peak_bytes": 383975,
+      "process_cumulative_peak_rss_kib": 570564,
+      "estimated_gather_float32_h128_bytes": 2774016,
+      "base_npz_bytes": 225057,
+      "diffusion_array_bytes": 186204
+    },
+    {
+      "identifier": "tiny",
+      "radius_angstrom": 10,
+      "maximum": 96,
+      "atoms": 17,
+      "points": 427,
+      "coverage": {
+        "minimum": 10,
+        "mean": 15.217798594847775,
+        "quantiles": [
+          16,
+          17,
+          17,
+          17
+        ],
+        "maximum": 17,
+        "above": {
+          "32": 0,
+          "64": 0,
+          "96": 0,
+          "128": 0
+        }
+      },
+      "discarded": 0,
+      "stored_pairs": 6498,
+      "csr_raw_bytes": 110808,
+      "csr_compressed_bytes": 72385,
+      "dense_raw_bytes": 696864,
+      "dense_compressed_bytes": 78105,
+      "build_seconds": 0.04486638802336529,
+      "write_seconds": 0.003393889986909926,
+      "load_seconds": 0.0010341650049667805,
+      "dense_conversion_seconds": 0.00120043198694475,
+      "csr_two_copy_cpu_batch_seconds": 0.00011002999963238835,
+      "tracked_peak_bytes": 427023,
+      "process_cumulative_peak_rss_kib": 570692,
+      "estimated_gather_float32_h128_bytes": 3326976,
+      "base_npz_bytes": 225057,
+      "diffusion_array_bytes": 186204
+    },
+    {
+      "identifier": "tiny",
+      "radius_angstrom": 12,
+      "maximum": 96,
+      "atoms": 17,
+      "points": 427,
+      "coverage": {
+        "minimum": 14,
+        "mean": 16.475409836065573,
+        "quantiles": [
+          17,
+          17,
+          17,
+          17
+        ],
+        "maximum": 17,
+        "above": {
+          "32": 0,
+          "64": 0,
+          "96": 0,
+          "128": 0
+        }
+      },
+      "discarded": 0,
+      "stored_pairs": 7035,
+      "csr_raw_bytes": 119400,
+      "csr_compressed_bytes": 78351,
+      "dense_raw_bytes": 696864,
+      "dense_compressed_bytes": 83752,
+      "build_seconds": 0.04463777202181518,
+      "write_seconds": 0.0032250469957944006,
+      "load_seconds": 0.0010512970038689673,
+      "dense_conversion_seconds": 0.0012170039990451187,
+      "csr_two_copy_cpu_batch_seconds": 0.000112804991658777,
+      "tracked_peak_bytes": 448623,
+      "process_cumulative_peak_rss_kib": 570820,
+      "estimated_gather_float32_h128_bytes": 3601920,
+      "base_npz_bytes": 225057,
+      "diffusion_array_bytes": 186204
+    },
+    {
+      "identifier": "tiny",
+      "radius_angstrom": 14,
+      "maximum": 96,
+      "atoms": 17,
+      "points": 427,
+      "coverage": {
+        "minimum": 16,
+        "mean": 16.971896955503514,
+        "quantiles": [
+          17,
+          17,
+          17,
+          17
+        ],
+        "maximum": 17,
+        "above": {
+          "32": 0,
+          "64": 0,
+          "96": 0,
+          "128": 0
+        }
+      },
+      "discarded": 0,
+      "stored_pairs": 7247,
+      "csr_raw_bytes": 122792,
+      "csr_compressed_bytes": 80613,
+      "dense_raw_bytes": 696864,
+      "dense_compressed_bytes": 85775,
+      "build_seconds": 0.04463275198941119,
+      "write_seconds": 0.0032070520101115108,
+      "load_seconds": 0.0010227529855910689,
+      "dense_conversion_seconds": 0.0011545349843800068,
+      "csr_two_copy_cpu_batch_seconds": 0.00010528098209761083,
+      "tracked_peak_bytes": 457183,
+      "process_cumulative_peak_rss_kib": 570820,
+      "estimated_gather_float32_h128_bytes": 3710464,
+      "base_npz_bytes": 225057,
+      "diffusion_array_bytes": 186204
+    },
+    {
+      "identifier": "tiny",
+      "radius_angstrom": 16,
+      "maximum": 96,
+      "atoms": 17,
+      "points": 427,
+      "coverage": {
+        "minimum": 17,
+        "mean": 17,
+        "quantiles": [
+          17,
+          17,
+          17,
+          17
+        ],
+        "maximum": 17,
+        "above": {
+          "32": 0,
+          "64": 0,
+          "96": 0,
+          "128": 0
+        }
+      },
+      "discarded": 0,
+      "stored_pairs": 7259,
+      "csr_raw_bytes": 122984,
+      "csr_compressed_bytes": 80703,
+      "dense_raw_bytes": 696864,
+      "dense_compressed_bytes": 85840,
+      "build_seconds": 0.0474905890005175,
+      "write_seconds": 0.003254873998230323,
+      "load_seconds": 0.0010133949981536716,
+      "dense_conversion_seconds": 0.0011641329911071807,
+      "csr_two_copy_cpu_batch_seconds": 0.00010494000161997974,
+      "tracked_peak_bytes": 457703,
+      "process_cumulative_peak_rss_kib": 570820,
+      "estimated_gather_float32_h128_bytes": 3716608,
+      "base_npz_bytes": 225057,
+      "diffusion_array_bytes": 186204
+    }
+  ]
+}

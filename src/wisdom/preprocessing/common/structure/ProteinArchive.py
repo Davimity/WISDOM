@@ -82,6 +82,22 @@ class ProteinArchive:
         """
         self.config = config
 
+    @staticmethod
+    def sha256(path: Path) -> str:
+        """Hash archive/source bytes without retaining another whole-file buffer in memory.
+
+        Args:
+            path: Existing readable immutable file, independent of suffix or compression.
+
+        Returns:
+            Hexadecimal SHA-256 over exact bytes, not numerical equivalence or timestamps.
+        """
+        digest = hashlib.sha256()
+        with path.open("rb") as stream:
+            for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+                digest.update(chunk)
+        return digest.hexdigest()
+
     @property
     def config_hash(self) -> str:
         """Return the SHA-256 identity of settings that change scientific arrays.

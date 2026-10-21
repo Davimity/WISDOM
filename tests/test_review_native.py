@@ -216,7 +216,8 @@ def test_authored_visualization_defaults_use_saved_seed_and_automatic_cases():
     for path in paths:
         authored = yaml.safe_load(path.read_text())
         settings = authored["with"]
-        assert settings["source_seed"] == (151 if path.parent.parent.name == "v8" else 4)
+        expected_seed = {"v8": 151, "v9": 173}.get(path.parent.parent.name, 4)
+        assert settings["source_seed"] == expected_seed
         assert settings["maximum_proteins"] > 0
         assert not {"protein_selection", "seed_selection", "trial_selection",
                     "maximum_surface_points", "report_maximum_mib"} & settings.keys()

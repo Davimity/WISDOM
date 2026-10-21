@@ -68,10 +68,16 @@ that a formal scientific WISDOM generation has already been validated.
 | 6g | `v6/wisdom_v6g.yaml` | Dirichlet | Frozen V5c backbone; none / Heat6 | Three poolers × Dirichlet lambda × refiner | G/S, raw/gain, negative mass/peak, regret, seeds and cost | Individual evidence for 6h |
 | 6h | `v6/wisdom_v6h.yaml` | exploratory weak-loss mixtures | Frozen V5c/Heat6; V6a–V6f report reviewed, V6g pending | 18 exact candidates × three poolers × four seeds = 216 Runs; core interactions and all-family stress | G/S, raw/gain, negative mass/peak, regret, seeds, term activation and cost | Fresh-seed confirmation before 7 |
 | 7 | `v7/wisdom_v7.yaml` | Which global/local head relationship is accurate and faithful? | Selected weak-loss policy copied into `with` | `head_type` | `val_wisdom_hpo_score` and faithfulness | 8 |
-| 8a | `v8/wisdom_v8a.yaml` | Does existing point geometry improve candidate-specific transfer? | SAME reviewed V7 pipeline/head ledger; PENDING_V7 guard | baseline/point_geometry, 4 seeds, 8 Runs | S at G-selected checkpoint, paired G-S and cost | Review before 9 |
-| 8b | `v8/wisdom_v8b.yaml` | Does returned surface information help beyond depth/nominal capacity? | SAME pending V7 ledger | baseline/depth/matched-null/bidirectional, 4 seeds, 16 Runs | Primary bidirectional vs depth; matched capacity contrast | Review before 9 |
-| 8c | `v8/wisdom_v8c.yaml` | Does vector-mediated scalar enrichment help? | SAME pending V7 ledger | baseline/vector_8/vector_16, 4 seeds, 12 Runs | Invariance controls, paired S/G and cost | Review before 9 |
-| 9 | `v9/wisdom_v9.yaml` | What small numerical retune best fits the selected final architecture? | Complete winner ledger from 2–8 | Four sensitive continuous parameters | `val_wisdom_hpo_score` | 10 |
+| 8a | `v8/wisdom_v8a.yaml` | Does existing point geometry improve candidate-specific transfer? | MAX R Single and Attention NRK FiLM, complete frozen lines | 2 architectures × 2 lines × 4 seeds = 16 Runs | Same-line/seed S/G and cost; cluster 12, one GPU | Independent of 8b/8c |
+| 8b | `v8/wisdom_v8b.yaml` | Does returned surface information help beyond depth/nominal capacity? | Same two frozen V7 lines | 4 architectures × 2 lines × 4 seeds = 32 Runs | Same-line bidirectional vs depth and matched control; cluster 16, one GPU | Independent of 8a/8c |
+| 8c | `v8/wisdom_v8c.yaml` | Does vector-mediated scalar enrichment help? | Same two frozen V7 lines | 3 architectures × 2 lines × 4 seeds = 24 Runs | Same-line/seed S/G, invariance and cost; cluster 16, one GPU | Independent of 8a/8b |
+| 8d | `v8/wisdom_v8d.yaml` | Does atomic propagation after feedback help beyond depth, extra GNN and local capacity? | Exact exported V8b MAX R Single / Attention NRK FiLM, 4+4 surface blocks | Main D3–D6 × two lines × four seeds = 32 new Runs; D0–D8 implemented | S at G-selected checkpoints, paired D5−D3/D6 and cost; real feasibility pending | Attribution D7/D8, explicit compact budgets, independent confirmation |
+| 9a | `v9/wisdom_v9a.yaml` | Classical atomic propagation | Frozen MAX R Single / Heat6, not an assumed V8 winner | 10 profiles × 4 new seeds | Same-seed S at G-selected checkpoints, G, stability and cost | Review feasibility and shortlist |
+| 9b | `v9/wisdom_v9b.yaml` | Edge-conditioned messages | Same frozen context | 7 profiles × 4 seeds | Same paired criteria | Independent of 9a |
+| 9c | `v9/wisdom_v9c.yaml` | Aggregation and sparse attention | Same frozen context | 9 profiles × 4 seeds | Same paired criteria | Independent of 9a/9b |
+| 9d | `v9/wisdom_v9d.yaml` | Radial and directional propagation | Same frozen context; explicit triplet/support guards | 6 profiles × 4 seeds | Same paired criteria plus feasibility | Review without silent truncation |
+| 9e | `v9/wisdom_v9e.yaml` | Persistent vectors and latent coordinates | Same frozen context; physical geometry unchanged | 5 profiles × 4 seeds | Same paired criteria plus symmetry/displacement | Independent family comparison |
+| 9f | `v9/wisdom_v9f.yaml` | Sparse versus global structural attention | Same frozen context; approved bounded dense exception | 6 profiles × 4 seeds | Same paired criteria plus quadratic-memory feasibility | Review before capacity-matched follow-up |
 | 10 | `v10/wisdom_v10.yaml` | Does the frozen V1 result replicate on fresh seeds and held-out test data? | Final ledger from 9 | Fresh complete run seed | Uncensored metric distribution and one test evaluation per seed | Freeze V1 or return to the diagnosed experiment |
 
 Run experiments in this order, but do not run a conditional experiment merely because its YAML exists. Each
@@ -79,14 +85,47 @@ file begins with `OBJECTIVE`, `PREREQUISITES`, `VARIES`, `FIXED`, and `DECISION`
 `REPLACE` are an explicit decision ledger: copy the reviewed previous-stage winner before launch.
 V6a–V6g resolve the V5c ledger; V6h now declares provisional mixtures, not a confirmed winner.
 Later stages still require an explicit manual freeze, not silent winner selection.
-V8a–V8c freeze V7's selected pipeline/head identically and use seeds 151/157/163/167.
-Their PENDING_V7 guard blocks actual execution before data loading; no V7 winner is assumed.
+V8a–V8c each contain both researcher-reviewed V7 lines and use seeds 151/157/163/167: 72 Runs.
+Explicit conditional candidates keep each line's pooling/priors/head bound together. There are
+no sequential dependencies, pending-winner guard, extra combinations or automatically added seeds.
+Analyze within-line, within-seed architecture differences; a cross-line difference is not pooling-only.
 The old V8 campaign/reviewer are retained as .yaml.example authoring snapshots, not executable
 catalog entries. The three new reviewers use frozen validation checkpoints without retraining.
+
+V9a–V9f compare 43 campaign cells, including repeated contemporary controls, with four new paired
+seeds (173/179/181/191): 172 mandatory Runs. They replace the former numerical-retuning proposal.
+Only the atomic encoder changes. The shared
+surface pipeline is initialized identically for each seed even when different atomic operators
+consume different random draws. LF public graph operators own all message/attention equations;
+WISDOM owns their scientific relations, source gates and invariant scalar interface.
+See root README §5.5.4 for precise adaptations and limits. In particular, V9f uses generic LF
+structural attention, not an original Graphormer path-edge recipe. The native inference reviewer
+under `v9/visualization` can inspect one explicit completed campaign without fitting.
+
+The completed V8 audits do not establish a feedback-specific gain or a universal benefit from
+late vector augmentation. All six training Studies therefore explicitly disable these V8 routes
+and retain the single-pass MAX context. They request 2 GPUs, 36 CPUs and 96 GiB total host RAM;
+no `execution` block serializes native LF admission. Keep a small attention/FiLM follow-up with
+its own baseline separate from this 172-Run screen, rather than doubling every cell implicitly.
+See [the execution review](../docs/v9_execution_review.md) for the evidence and limitations.
+
+The later report protocol still requires real feasibility measurements, parameter/compute-matched
+follow-ups, equal retuning budgets and fresh confirmation after a reviewed shortlist exists.
+These initial YAMLs do not invent that shortlist, launch jobs, establish hardware fit or authorize
+test access. V10 must be explicitly rebound to the final reviewed configuration before use.
 
 Every training study is a single executable Work: none contains `steps`. Only the
 dataset-construction YAML composes sequential actions. Seven isolated V6 Studies share the frozen
 parent; V6h combines loss anchors and labels missing or weak evidence explicitly.
+
+V8d is a new scientific design, not recovery or continuation of V8b. Its audited historical source
+is `execution-29c7fa9079512348`; its D0–D3 routes preserve old state keys/outputs. The main new
+factor is one/two independently weighted hidden-state atomic graph layers AFTER the existing
+area-weighted real/null feedback. An explicit nodewise D8 control approximately matches nominal
+two-layer parameters. `surface_stage_layers=null` retains 4+4; [2,2]/[3,1]/[1,3] are separate
+budget experiments, never silent OOM remedies. All local GT stays outside backward and checkpoint
+selection. See [the V8d audit](../docs/v8d_technical_review.md) and root README §5.5.3.
+Only synthetic tests/microbenchmarks have run; no real feasibility or scientific result is claimed.
 
 ## Why V1a, V1b and V1c have no `search`
 
@@ -102,12 +141,12 @@ variance estimate, so it also has no `search` section.
 ## Diagnostics, complete sweeps, and adaptive HPO
 
 - **Diagnostics:** V1a, V1b and V1c estimate variance and causation; they select nothing.
-- **Complete finite sweeps:** V2, V3, V5a/V5b/V5c, V6a–V6g, V7, and V8 use LambdaForge's explicit
+- **Complete finite sweeps:** V2, V3, V5a/V5b/V5c, V6a–V6g, V7, V8a–V8d, and V9a–V9f use LambdaForge's explicit
   `sweep.space`. V5c also uses a complete conditional sweep. Every authored cell is mandatory.
   V5 and V6 require exactly four explicit paired seeds; stages with automatic seeds use native
   shared-seed blocks and an anytime-valid paired analysis. HPO pruning and per-cell seed racing
   are disabled by the sweep contract; ordinary within-Run validation patience remains active.
-- **Adaptive HPO:** V4 and V9 use `search.goal: optimize` plus `search.space`. Candidate
+- **Adaptive HPO:** V4 uses `search.goal: optimize` plus `search.space`. Candidate
   generation, seed allocation, curve pruning, convergence, fresh confirmation, and child-Run
   packing remain automatic. The authored `objective.practical_margin` defines which score gaps are
   scientifically negligible.

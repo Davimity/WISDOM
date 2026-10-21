@@ -1,0 +1,149 @@
+# OBJECTIVE: compare sparse dot-product attention versus explicitly bounded global structural attention.
+# PREREQUISITES: review the V9 protocol/resource limits; no upstream Study is automatically selected.
+# VARIES: atomic_encoder_type only; each profile fixes its operator and declared controls.
+# FIXED: reviewed MAX R Single, Heat6, original data/topology, common backbone and optimizer.
+# DECISION: compare same-seed S at G-selected checkpoints, G-S trade-offs, stability and cost.
+name: wisdom-v9f  # Independent atomic-encoder Study; not a numerical HPO.
+run: wisdom.Training.Training  # One public Work; no steps, nested runner or fallback GNN.
+
+with:  # Frozen surface-oriented line A from reviewed V7; no assumed V8 winner.
+  dataset: {dataset: wisdom-dna-reduced@6}  # Same immutable content as V7/V8.
+  # Expected identity: sha256:ac1745504422cf60b84e57b90efc99206dea039dc36d0c1359782062cb10e202.
+  model_version: 2  # Existing scalar surface/model capabilities, not a new model generation.
+  subset: full  # Complete reduced train population; validation stays fixed.
+  surface_representation_mode: learned  # Preserve the learned surface route; optional new sidecars are unused.
+  surface_encoder_type: diffusion  # Keep DiffusionNet fixed while comparing atomic encoders.
+  initialization_profile: baseline  # Same historical numerical initialization policy.
+  optimization_profile: baseline  # Fixed AdamW policy; do not reopen HPO.
+  hidden_dim: 128  # Common scalar atom output and surface width D.
+  embedding_dim: 32  # Original element embedding width.
+  residue_embedding_dim: 64  # Original residue embedding width.
+  atomic_layers: 2  # Two interactions; triplet/global reach is explicitly not equal to two local hops.
+  projection_depth: 3  # Freeze atom-to-surface projection depth.
+  surface_layers: 4  # Freeze DiffusionNet.
+  atom_spatial_k: 8  # Same nested spatial topology; never generate new neighbors.
+  surface_atom_k: 16  # Same atom-to-surface candidates.
+  diffusion_spectral_modes: 32  # Same surface spectral budget.
+  surface_atom_radius: 4.0  # Same transfer radius, in angstroms.
+  atomic_edge_distance_scale: 6.0  # Baseline scalar edge normalization in angstroms.
+  dropout: 0.2  # Fixed common dropout.
+  learning_rate: 0.001  # Fixed V7 AdamW rate.
+  weight_decay: 0.0005  # Fixed V7 decay.
+  gate_lambda: 0.04  # Same per-source cost coefficient and baseline denominator.
+  pooling_type: max  # MAX R Single is the declared context, not another search axis.
+  pooling_area_mode: point  # Same point-based MAX pipeline.
+  surface_refiner_type: heat  # Same operational evidence refiner.
+  surface_refiner_heat_length: 6.0  # Heat6, in angstroms.
+  weak_loss_profile: custom  # Apply the exact reviewed weak coefficients.
+  negative_surface_lambda: 0.0  # No negative suppression in line A.
+  positive_existence_lambda: 0.0  # No point-existence term.
+  regional_positive_lambda: 0.3  # R is regional existence, not ranking.
+  regional_ranking_lambda: 0.0  # K remains disabled.
+  regional_loss_length: 2.5  # Existing auxiliary regional scale, angstroms.
+  regional_ranking_margin: 0.5  # Frozen, inactive ranking margin.
+  cardinality_lambda: 0.0  # Disabled.
+  total_variation_lambda: 0.0  # Disabled.
+  dirichlet_lambda: 0.0  # Disabled.
+  head_type: single  # Exact original single-head protein BCE; no FiLM parameters.
+  head_implementation: controlled  # Preserve the corrected V7 contract.
+  architecture_spike: baseline  # No geometry-conditioned transfer, feedback or post-hoc V8 vectors.
+  surface_geometry_transfer: false  # V8a is not adopted; keep the reviewed transfer scorer.
+  interaction_round: single  # No second DiffusionNet pass or surface-to-atom return.
+  vector_atomic_channels: 0  # No V8c augmentation; V9e's own vector encoders remain the tested factor.
+  feedback_propagation: none  # No V8d post-feedback GNN/MLP or extra surface stage.
+  architecture_implementation: controlled  # Paired initialization of the common surface route.
+  gate_cost_normalization: baseline_count  # No dilution when a family omits attributes.
+  atomic_radial_count: 16  # Fixed radial width; DimeNet uses three spherical orders.
+  atomic_vector_channels: 16  # GVP channels; PaiNN uses D by its public contract.
+  atomic_basis_count: 4  # Fixed NNConv basis count; inactive for full matrices.
+  atomic_spatial_cutoff: 6.0  # Fixed atomic radial support, not the 4-Angstrom transfer radius.
+  atomic_covalent_cutoff: 64.0  # Explicit DimeNet covalent support; out-of-support input fails.
+  atomic_maximum_triplets: 1000000  # Feasibility guard; never truncate typed triplets.
+  atomic_maximum_pairwise_bytes: 134217728  # 128 MiB principal tensor guard, NOT total VRAM.
+  atomic_allow_dense_global: true  # Researcher-approved dense exception ONLY for V9f global candidates.
+  batch_size: 16  # Unchanged optimization batch; do not shrink silently for expensive variants.
+  epochs: 500  # Existing safety ceiling.
+  patience: 30  # G-based within-Run stopping; no competitive pruning.
+  minimum_delta: 0.001  # Existing checkpoint improvement tolerance.
+  precision: auto  # Hardware-safe mixed precision with invariant numerical checks.
+  surface_metrics: true  # Evaluation-only local GT; never a gradient input.
+  surface_metrics_interval: 1  # Retain original/operational S and temporal G-S coupling/regret.
+  visualization:  # Saved checkpoints can be reviewed after the fixed comparison.
+    mode: none  # No per-seed gallery generation during training.
+  faithfulness_audit: false  # Vertex-deletion interventions are incompatible with fixed Heat6 operators.
+  evaluate_test: false  # Held-out test remains sealed.
+  optimization_diagnostics: true  # Retain optimization, activation and gate diagnostics.
+  data_workers: 4  # Persistent training decoding, not a scientific factor.
+
+# Actual public defaults, not the overrides above:
+# dataset required; model_version=1, subset=full, initialization/optimization/weak profiles=custom.
+# surface_representation_mode=learned (learned|explicit|hybrid); this comparison requires learned.
+# surface_encoder_type=diffusion (diffusion|dmasif|deltaconv|ptv3|point_mamba); fixed here to diffusion.
+# hidden=128, element=32, residue=null, atomic=2, projection=1, surface=2; widths/depths positive.
+# atom_spatial_k=16, surface_atom_k=16, spectral_modes=128, transfer radius=6 Å; no graph reconstruction.
+# atomic_encoder_type=baseline preserves old keys/RNG. Alternative profiles require controlled,
+# learned surface input and baseline spike; they cannot be silently combined with V8 mechanisms.
+# radial_count=16, vector_channels=16, basis_count=4, spatial_cutoff=6 Å, covalent_cutoff=64 Å.
+# maximum_triplets=1000000, maximum_pairwise_bytes=134217728, allow_dense_global=false.
+# Guards fail explicitly: no topology truncation, batch shrink, sparse/global substitution or fake quality.
+# PNA log-degree means are derived ONLY from the exact training view/topology and saved in checkpoints;
+# they are not tunable YAML inputs. Scalar sources structurally absent from a control are frozen off.
+# architecture_spike=custom, implementation=legacy, gate_cost_normalization=historical_mean.
+# geometry_transfer=false, interaction_round=single, vector_atomic_channels=0,
+# feedback_propagation=none are true defaults; no V8 intervention is inherited by this campaign.
+# pooling=max, area_mode=legacy; head=single, head_implementation=legacy. Single BCE is unchanged.
+# refiner=none, Heat length=3 Å; weak lambdas=0; regional length=2.5 Å, margin=.5.
+# dropout=.2 in [0,1), lr=3e-4>0, decay=1e-4>=0, gate_lambda=.001>=0.
+# batch=2, epochs=100, patience=30>0, minimum_delta=.001>=0, precision=auto.
+# surface_metrics=true, interval=0 (best checkpoint only); positive N adds every Nth validation epoch.
+# visualization=null => mode=none; other defaults: predictions, 2000 display points, 12 proteins,
+# 4 MiB report, threshold=.5, embed_report=true. mode=none suppresses all presentation.
+# diagnostics=false, faithfulness=false, evaluate_test=true, data_workers=4>=0.
+# Unchanged public parameters/defaults remain authoritative in lf explain; no hidden HPO or test use.
+
+seeds: [173, 179, 181, 191]  # Four new complete paired seeds, not recycled V7/V8 evidence.
+
+# Explicit seeds fix every required cell; no automatic growth, racing or favorable-seed selection.
+# Independent confirmation needs a NEW predeclared seed block; these are development replications.
+
+sweep:  # 6 candidates x four seeds = 24 mandatory Runs.
+  space:  # One factor; no crossing operators with pooling, head, optimizer or priors.
+    atomic_encoder_type:  # Every named profile has a documented public-LF operator contract.
+      values:  # Keep all declared alternatives; feasibility failure is not poor prediction.
+        - baseline  # Contemporary unchanged atomic encoder.
+        - baseline_no_attributes  # Exact operator/control profile; see the V9 protocol.
+        - transformer_sparse  # Exact operator/control profile; see the V9 protocol.
+        - transformer_no_attributes  # Exact operator/control profile; see the V9 protocol.
+        - structural_global  # Exact operator/control profile; see the V9 protocol.
+        - global_no_structure  # Exact operator/control profile; see the V9 protocol.
+  reference: {atomic_encoder_type: baseline}  # Unique contemporary same-seed control.
+
+# sweep.space required; reference optional but must select one candidate; no search/pruning authored.
+# Attribute-masked alternatives also need their matched baseline_no_attributes/baseline_radial control.
+# Report paired differences, coverage and resource failures; never replace missing quality by zero.
+# Defaults for seeds are automatic shared blocks only when omitted; not this design.
+
+# Execution is intentionally omitted: LF chooses concurrent admission on both granted GPUs.
+# Defaults: max_parallel/runs_per_gpu=null (automatic), max_runs/max_time=null, failure_retries=1.
+# Auto admission is resource-aware, not a guarantee that every candidate fits or overlaps.
+# Concurrent timings reflect shared hardware; do not interpret them as isolated encoder latency.
+# The six Studies are independent; no stage dependency or implicit winner import exists.
+
+objective:  # Existing descriptive development utility; checkpoint epochs remain G-selected.
+  metric: val_wisdom_hpo_score  # Preserve W and its G/S/regret/coupling components.
+  mode: max  # Larger W is better; not permission to select epochs by local GT.
+  range: [0.0, 1.0]  # Mathematical utility bounds.
+  practical_margin: 0.015  # Existing practical-equivalence margin.
+
+# Objective requires metric; mode defaults max; range and practical_margin are optional.
+# Scientific priority: operational positive-protein macro S at the checkpoint selected by G.
+# Keep raw S, global AUROC/AUPRC, negative evidence, top-k recall/enrichment, seeds and costs separate.
+
+resources:  # Study-wide budget; target capacity and model fit have NOT been measured.
+  gpu: 2  # Request two accelerators; native LF admits independent Runs automatically.
+  cpu: 36  # Total study-wide CPU budget, shared by concurrently admitted Runs.
+  memory: 96GiB  # Total study-wide host RAM; not a per-Run or GPU-VRAM reservation.
+  time: 168h  # Interruption may require native recovery of missing mandatory cells.
+
+# Defaults: cpu=1, gpu=0, processes=1, memory/gpu_memory/storage=0, time=null.
+# cpu/processes>=1, GPU>=0, processes<=CPU. No expensive variant may silently alter the science to fit.

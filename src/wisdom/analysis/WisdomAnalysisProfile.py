@@ -583,6 +583,20 @@ class WisdomAnalysisProfile:
             self._metric(name, "Static capacity: " + name.replace("_", " ") + "; may vary with HPO architecture, not an accuracy measure.",
                          "model/capacity", priority=10, role="model-size", unit="count", visibility="hidden",
                          discovery=name == "parameter_count")
+        self._metric(
+            "post_feedback_parameter_count",
+            "Parameters of V8d's added atomic transform including learned gamma; absent without "
+            "that transform. Nominal count is not effective capacity or a quality metric.",
+            "model/capacity", priority=20, role="model-size", unit="count",
+            visibility="advanced", discovery=False, aggregation="terminal",
+        )
+        self._metric(
+            "train_post_feedback_scale",
+            "Learned V8d residual gamma at the end of the training epoch; zero is exact identity. "
+            "This unconstrained scalar is not a probability, semantic gate or validation outcome.",
+            "model/feedback", priority=25, role="control", unit="dimensionless", split="train",
+            visibility="advanced", discovery=False, aggregation="latest",
+        )
         self._metric("preprocessing_bytes", "Sum of base structural archive sizes consumed by the training population; input storage, not GPU memory.",
                      "runtime/data", "min", priority=5, role="resource", unit="bytes", visibility="hidden")
         for name in ("maximum_surface_points", "maximum_atoms", "maximum_active_atomic_edges",

@@ -21,6 +21,7 @@ from wisdom.features.SurfaceFeatureSidecar import SurfaceFeatureSidecar
 from wisdom.preprocessing.zinc.ZincCoordination import ZincCoordination
 from wisdom.preprocessing.common.structure.ProteinArchive import ProteinArchive
 from wisdom.preprocessing.common.structure.PreprocessConfig import PreprocessConfig
+from wisdom.preprocessing.common.structure.StructuralSidecars import StructuralSidecars
 
 
 class ZincValidation(lf.Work):
@@ -157,6 +158,7 @@ class ZincValidation(lf.Work):
                 if np.any(arrays["atomic_numbers"] == 30):
                     raise ValueError("Zn atom leaked into universal inputs")
                 ZincAnnotation.validate(annotation, base)
+                StructuralSidecars.validate_assets(base, paths)
                 # Optional fields carry their own point-order binding and exactly the published
                 # training population. An asset claiming train-only without those IDs is unsafe.
 

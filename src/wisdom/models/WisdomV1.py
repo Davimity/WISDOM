@@ -10,16 +10,20 @@ from lambdaforge.nn.models import MLP, Model
 from collections.abc import Mapping, Sequence
 from lambdaforge.nn.pooling import SparseMaxPooling
 from wisdom.models.InteractionRound import InteractionRound
+from wisdom.models.AtomicEncoderType import AtomicEncoderType
 from wisdom.models.VectorAtomicState import VectorAtomicState
+from wisdom.models.AtomicGraphEncoder import AtomicGraphEncoder
 from wisdom.models.GatedAtomicEncoder import GatedAtomicEncoder
-from wisdom.models.SurfaceAtomTransfer import SurfaceAtomTransfer
 from wisdom.models.SurfaceAtomFeedback import SurfaceAtomFeedback
+from wisdom.models.SurfaceAtomTransfer import SurfaceAtomTransfer
 from wisdom.models.LinearInitialization import LinearInitialization
 from wisdom.models.ResidualInitialization import ResidualInitialization
-from wisdom.models.EmbeddingInitialization import EmbeddingInitialization
 from wisdom.models.DiffusionSurfaceEncoder import DiffusionSurfaceEncoder
-from wisdom.models.gating.SemanticGateRegistry import SemanticGateRegistry
+from wisdom.models.EmbeddingInitialization import EmbeddingInitialization
+from wisdom.models.FeedbackPropagationMode import FeedbackPropagationMode
+from wisdom.models.PostFeedbackPropagation import PostFeedbackPropagation
 from wisdom.models.ArchitectureImplementation import GateCostNormalization
+from wisdom.models.gating.SemanticGateRegistry import SemanticGateRegistry
 from wisdom.models.SurfaceRepresentationMode import SurfaceRepresentationMode
 from wisdom.models.DiffusionTimeInitialization import DiffusionTimeInitialization
 from wisdom.models.PhysicalEmbeddingInitializer import PhysicalEmbeddingInitializer
@@ -57,6 +61,21 @@ class WisdomV1(Model):
         surface_geometry_transfer  : bool = False,
         surface_chunk_size         : int = 8192,
         atomic_message_chunk_size  : int = 65536,
+        atomic_encoder_type: str = "baseline",
+        atomic_radial_count: int = 16,
+        atomic_vector_channels: int = 16,
+        atomic_basis_count: int = 4,
+        atomic_spatial_cutoff: float = 6.0,
+        atomic_covalent_cutoff: float = 64.0,
+        atomic_maximum_triplets: int = 1_000_000,
+        atomic_maximum_pairwise_bytes: int = 134_217_728,
+        atomic_allow_dense_global: bool = False,
+        atomic_degree_log_means: Sequence[float] | None = None,
+        feedback_propagation       : str = "none",
+        post_feedback_initial_scale: float = 0.1,
+        surface_stage_layers       : Sequence[int] | None = None,
+        checkpoint_surface         : bool = False,
+        checkpoint_post_feedback   : bool = False,
         vector_atomic_channels     : int = 0,
         interaction_round          : str = "single",
         architecture_implementation : str = "legacy",
@@ -103,6 +122,25 @@ class WisdomV1(Model):
                 condition the relative atom-to-surface attention scores.
             surface_chunk_size: Maximum points per transfer activation chunk.
             atomic_message_chunk_size: Recorded edge-work budget for reproducibility.
+            atomic_encoder_type: Exact V9 atomic operator/control; baseline keeps historical keys.
+            atomic_radial_count: Gaussian/sinusoidal/Bessel radial basis count, positive.
+            atomic_vector_channels: Positive GVP polar-channel count; PaiNN uses hidden_dim.
+            atomic_basis_count: Positive NNConv basis count, inactive for full filters.
+            atomic_spatial_cutoff: Spatial radial support in Å, without generating new neighbors.
+            atomic_covalent_cutoff: Finite DimeNet covalent support in Å; out-of-support edges fail.
+            atomic_maximum_triplets: Hard bound on explicit typed directional triplet count.
+            atomic_maximum_pairwise_bytes: Principal directional/path/attention tensor byte guard,
+                not a forecast of total backward or optimizer VRAM.
+            atomic_allow_dense_global: Explicit permission for the bounded global-only experiment.
+            atomic_degree_log_means: Derived frozen training log-degree means for full PNA;
+                persisted in checkpoints, not an independently tuned input.
+            feedback_propagation: none preserves old routes; d0-d8 selects a bounded V8d control.
+            post_feedback_initial_scale: Initial learned gamma of the separate GNN/local update;
+                zero is exact identity and initially blocks its internal weight gradients.
+            surface_stage_layers: Optional positive [first,second] DiffusionNet block counts,
+                only for two-stage V8d; None keeps surface_layers blocks in each stage.
+            checkpoint_surface: Recompute surface blocks during backward without detaching.
+            checkpoint_post_feedback: Recompute the added atomic transform during backward.
             vector_atomic_channels: Equivariant atomic vector channels; zero preserves the scalar
                 baseline and positive values activate isolated spike C.
             interaction_round: ``single`` baseline, equally deep ``depth_control``, or one
@@ -173,6 +211,26 @@ class WisdomV1(Model):
         self.feedback_weighting          = FeedbackWeighting(feedback_weighting)
         self.gate_cost_normalization     = GateCostNormalization(gate_cost_normalization)
         controlled = self.architecture_implementation is ArchitectureImplementation.CONTROLLED
+        self.feedback_propagation = FeedbackPropagationMode(feedback_propagation)
+        if self.feedback_propagation is not FeedbackPropagationMode.NONE:
+            if (not controlled or surface_geometry_transfer or vector_atomic_channels
+                    or atomic_encoder_type != "baseline"
+                    or surface_representation_mode != "learned"):
+                raise ValueError(
+                    "V8d requires controlled scalar baseline atoms and learned surfaces"
+                )
+            interaction_mode = self.feedback_propagation.interaction()
+
+        second_surface_layers = surface_layers
+        if surface_stage_layers is not None:
+            if (self.feedback_propagation is FeedbackPropagationMode.NONE
+                    or interaction_mode is InteractionRound.SINGLE
+                    or len(surface_stage_layers) != 2
+                    or any(value < 1 for value in surface_stage_layers)):
+                raise ValueError(
+                    "surface_stage_layers requires two positive counts for two-stage V8d"
+                )
+            surface_layers, second_surface_layers = surface_stage_layers
         if not controlled and (
             interaction_mode is InteractionRound.DEPTH_CONTROL_PARAMETER_MATCHED
             or self.feedback_weighting is not FeedbackWeighting.POINT
@@ -182,6 +240,17 @@ class WisdomV1(Model):
         residue_width = embedding_dim if residue_embedding_dim is None else residue_embedding_dim
         if residue_width < 1:
             raise ValueError("residue_embedding_dim must be positive")
+
+        self.atomic_encoder_type = AtomicEncoderType(atomic_encoder_type)
+        if self.atomic_encoder_type is not AtomicEncoderType.BASELINE and (
+            not controlled or surface_geometry_transfer or vector_atomic_channels
+            or interaction_mode is not InteractionRound.SINGLE
+            or SurfaceRepresentationMode(surface_representation_mode)
+            is not SurfaceRepresentationMode.LEARNED
+        ):
+            raise ValueError(
+                "V9 changes only the controlled learned atomic encoder, not V8/surface hypotheses"
+            )
 
         self.curvature_scale_count = curvature_features // 3
         gate_definitions = self._gate_definitions(
@@ -196,6 +265,7 @@ class WisdomV1(Model):
         self.semantic_gates = SemanticGateRegistry(
             gate_definitions,
             initial_active=gate_initial_active,
+            inactive_names=self.atomic_encoder_type.inactive_sources(),
         )
 
         self.atomic_number_embedding = nn.Embedding(atomic_number_count, embedding_dim)
@@ -204,7 +274,7 @@ class WisdomV1(Model):
         self.hybridization_embedding  = nn.Embedding(4, 4)
 
         atomic_input_width = embedding_dim + residue_width + 8 + 4 + 6
-        self.atomic_encoder = GatedAtomicEncoder(
+        self.atomic_encoder: Any = GatedAtomicEncoder(
             input_dim      = atomic_input_width,
             hidden_dim     = hidden_dim,
             layers         = atomic_layers,
@@ -317,6 +387,7 @@ class WisdomV1(Model):
         self.atomic_layers               = atomic_layers
         self.projection_depth            = projection_depth
         self.surface_layers              = surface_layers
+        self.second_surface_layers       = second_surface_layers
         self.atom_spatial_k              = atom_spatial_k
         self.surface_atom_k              = surface_atom_k
         self.diffusion_spectral_modes    = diffusion_spectral_modes
@@ -336,6 +407,56 @@ class WisdomV1(Model):
                 diffusion_time_mode, diffusion_residual_mode,
                 neutral_transfer_initialization, physics_distance_initialization,
             )
+        if self.atomic_encoder_type is not AtomicEncoderType.BASELINE:
+            # Allocate alternatives after the entire common backbone. A private stream cannot
+            # move V2 head/pooling initialization; copy the shared input transform explicitly.
+
+            reference_encoder = self.atomic_encoder
+            with torch.random.fork_rng(devices=[]):
+                stream = torch.Generator().manual_seed(torch.initial_seed() ^ 0x563941)
+                torch.set_rng_state(stream.get_state())
+                alternative = AtomicGraphEncoder(
+                    atomic_input_width, hidden_dim, atomic_layers, dropout,
+                    atomic_edge_distance_scale, atomic_message_chunk_size, atomic_encoder_type,
+                    radial_count=atomic_radial_count, vector_channels=atomic_vector_channels,
+                    basis_count=atomic_basis_count, spatial_cutoff=atomic_spatial_cutoff,
+                    covalent_cutoff=atomic_covalent_cutoff,
+                    degree_log_means=atomic_degree_log_means,
+                    maximum_triplets=atomic_maximum_triplets,
+                    maximum_pairwise_bytes=atomic_maximum_pairwise_bytes,
+                    allow_dense_global=atomic_allow_dense_global,
+                )
+                self._initialize_linears(linear_mode, root=alternative)
+            if alternative.reference is not None:
+                alternative.reference.load_state_dict(reference_encoder.state_dict(), strict=True)
+            else:
+                alternative.input_projection.load_state_dict(reference_encoder.input_projection.state_dict())
+            self.atomic_encoder = alternative
+
+        # GNN2 has no categorical-input projection and owns independent weights. Its private
+        # stream leaves GNN1, both surface stages and all V2 heads exactly seed-paired.
+
+        self.post_feedback_propagation: PostFeedbackPropagation | None = None
+        mode = self.feedback_propagation
+        if mode.layers() or mode is FeedbackPropagationMode.D8:
+            with torch.random.fork_rng(devices=[]):
+                stream = torch.Generator().manual_seed(torch.initial_seed() ^ 0x503844)
+                torch.set_rng_state(stream.get_state())
+                self.post_feedback_propagation = PostFeedbackPropagation(
+                    hidden_dim, mode.layers() or 2, dropout,
+                    atomic_edge_distance_scale, atomic_message_chunk_size,
+                    initial_scale=post_feedback_initial_scale,
+                    nodewise=mode is FeedbackPropagationMode.D8,
+                    activation_checkpointing=checkpoint_post_feedback,
+                )
+                self._initialize_linears(linear_mode, root=self.post_feedback_propagation)
+        if checkpoint_surface:
+            if not isinstance(self.surface_encoder, DiffusionSurfaceEncoder):
+                raise ValueError("checkpoint_surface requires the DiffusionNet surface encoder")
+            self.surface_encoder.activation_checkpointing = True
+            if isinstance(self.second_surface_encoder, DiffusionSurfaceEncoder):
+                self.second_surface_encoder.activation_checkpointing = True
+
         # Explicit mode skips the learned branch, not just its output. Freeze unused tensors
         # so optimizers and trainable-parameter accounting reflect that experimental control.
 
@@ -407,8 +528,11 @@ class WisdomV1(Model):
                     hidden=[self.hidden_dim], dropout=self.dropout_probability, residual=True,
                 )
                 self.second_surface_encoder = DiffusionSurfaceEncoder(
-                    self.hidden_dim, layers=self.surface_layers, dropout=self.dropout_probability,
-                    initial_times=self._diffusion_times(self.surface_layers, diffusion_time_mode),
+                    self.hidden_dim, layers=self.second_surface_layers,
+                    dropout=self.dropout_probability,
+                    initial_times=self._diffusion_times(
+                        self.second_surface_layers, diffusion_time_mode,
+                    ),
                     residual_initial_scale=self._residual_scale(residual_mode),
                 )
                 for module in (self.second_surface_transfer, self.second_surface_projection,
@@ -632,6 +756,7 @@ class WisdomV1(Model):
         surface_explicit_features         : Tensor | None = None,
         compute_logits                    : bool = True,
         surface_area_weights              : Tensor | None = None,
+        atom_batch                        : Tensor | None = None,
     ) -> tuple[Tensor, Tensor | None]:
         """Encode atoms, transfer context, gate curvature channels, and propagate on the surface.
 
@@ -666,7 +791,9 @@ class WisdomV1(Model):
             surface_normals: Optional V3 normals ``[M,3]``.
             surface_neighbors: Optional V3 neighbours ``[M,K]``.
             surface_neighbor_mask: Optional V3 validity ``[M,K]``.
-            atom_positions: Optional centered atom coordinates ``[N,3]`` required by spike C.
+            atom_batch: Explicit protein ownership [N], required for bounded global attention.
+            atom_positions: Optional centered coordinates ``[N,3]``, Å; required by spike C
+                and V9 directional, persistent-vector and EGNN encoders.
             surface_explicit_features: Selected train-normalized fixed fields ``[M,K]``;
                 never an annotation or a ligand-dependent input.
             compute_logits: False skips the unconditioned local head when V7 replaces it;
@@ -709,7 +836,7 @@ class WisdomV1(Model):
             ),
             dim=1,
         )
-        atom_embeddings = self.atomic_encoder(
+        encoder_arguments = (
             atom_features,
             atom_edge_index,
             atom_edge_is_spatial,
@@ -720,6 +847,11 @@ class WisdomV1(Model):
             atom_edge_same_chain,
             atom_edge_residue_separation,
             gates,
+        )
+        atom_embeddings = (
+            self.atomic_encoder(*encoder_arguments, positions=atom_positions, atom_batch=atom_batch)
+            if isinstance(self.atomic_encoder, AtomicGraphEncoder)
+            else self.atomic_encoder(*encoder_arguments)
         )
         if self.vector_atomic_state is not None:
             if atom_positions is None:
@@ -746,6 +878,18 @@ class WisdomV1(Model):
             gates,
             point_features=(curvature if self.surface_geometry_transfer else None),
         ) * gates["surface.atom_context"]
+
+        # All V8d stages reference the same physical data and one derived sparse gradient tensor
+        # per protein. Only this forward owns the derived container; no learned state is cached.
+
+        if (self.feedback_propagation is not FeedbackPropagationMode.NONE
+                and self.interaction_round is not InteractionRound.SINGLE):
+            surface_operators = tuple(
+                dict(operator, stacked_gradient=DiffusionSurfaceEncoder.stacked_gradient(
+                    operator, int(surface_ptr[index + 1] - surface_ptr[index]),
+                ))
+                for index, operator in enumerate(surface_operators)
+            )
 
         initial   = self.surface_projection(torch.cat((atom_context, curvature), dim=1))
         encoded   = self.encode_surface_features(
@@ -780,6 +924,10 @@ class WisdomV1(Model):
                     surface_atom_mask,
                     self.surface_atom_radius,
                     area_weights=surface_area_weights,
+                )
+            if self.post_feedback_propagation is not None:
+                second_atoms = self.post_feedback_propagation(
+                    second_atoms, *encoder_arguments[1:],
                 )
             second_context = self.second_surface_transfer(
                 second_atoms,
@@ -915,6 +1063,7 @@ class WisdomV1(Model):
         surface_neighbor_mask             : Tensor | None = None,
         atom_positions                    : Tensor | None = None,
         surface_explicit_features         : Tensor | None = None,
+        atom_batch                        : Tensor | None = None,
     ) -> dict[str, Tensor]:
         """Predict local surface evidence and one MAX-pooled protein logit.
 
@@ -951,9 +1100,11 @@ class WisdomV1(Model):
             surface_normals: Optional V3 normals ``[M,3]``.
             surface_neighbors: Optional V3 neighbours ``[M,K]``.
             surface_neighbor_mask: Optional V3 validity mask ``[M,K]``.
-            atom_positions: Optional atom coordinates ``[N,3]`` for vector-state spike C.
+            atom_positions: Optional centered coordinates ``[N,3]``, Å, for spike C and
+                directional, persistent-vector or EGNN atomic encoders.
             surface_explicit_features: Optional frozen train-normalized fields ``[M,K]``;
                 mandatory in explicit/hybrid mode, never a surface reference target.
+            atom_batch: Explicit protein ownership [N], required for bounded global attention.
 
         Returns:
             Essential ``surface_logits[M]`` and ``logits[B]`` outputs.
@@ -992,6 +1143,7 @@ class WisdomV1(Model):
             atom_positions,
             surface_explicit_features,
             surface_area_weights=surface_area_weights,
+            atom_batch=atom_batch,
         )
         protein_count = len(surface_ptr) - 1
         assert surface_logits is not None

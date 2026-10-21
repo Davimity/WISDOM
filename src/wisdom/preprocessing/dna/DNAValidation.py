@@ -20,6 +20,7 @@ from collections import Counter, defaultdict
 from scipy.stats import wasserstein_distance
 from sklearn.preprocessing import RobustScaler
 from wisdom.features.SurfaceFeatureSidecar import SurfaceFeatureSidecar
+from wisdom.preprocessing.common.structure.StructuralSidecars import StructuralSidecars
 
 matplotlib.use("Agg")
 
@@ -183,6 +184,14 @@ class DNAValidation(lf.Work):
             group_splits[group].add(split)
             try:
                 self._validate_member(root, member)
+                StructuralSidecars.validate_assets(root / member.assets["universal_npz"].path,
+                    {name: root / asset.path for name, asset in member.assets.items()})
+                for name in ("atomic_context", "extended_surface_atom"):
+                    if name in member.assets:
+                        asset = member.assets[name]
+                        digest = hashlib.sha256((root / asset.path).read_bytes()).hexdigest()
+                        if asset.sha256 != "sha256:" + digest:
+                            raise ValueError(f"optional structural asset checksum mismatch: {name}")
                 feature_names: list[str] = []
                 for name in member.metadata.get("optional_surface_feature_assets", ()):
                     path = root / member.assets[name].path

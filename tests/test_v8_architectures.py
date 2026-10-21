@@ -8,6 +8,7 @@ import torch
 import pytest
 
 from pathlib import Path
+from inspect import signature
 from test_wisdom_v2 import _v2
 from collections import Counter
 from test_v7_heads import batch as _v7_batch
@@ -16,7 +17,7 @@ from wisdom.models.WeakSurfaceLoss import WeakSurfaceLoss
 from wisdom.models.ArchitectureSpike import ArchitectureSpike
 from wisdom.models.VectorAtomicState import VectorAtomicState
 from wisdom.models.SurfaceAtomFeedback import SurfaceAtomFeedback
-from wisdom.Training import _train_wisdom, _create_model, _model_inputs
+from wisdom.Training import Training, _create_model, _model_inputs
 
 
 SPIKES = (
@@ -390,14 +391,14 @@ def test_amp_is_finite_and_surface_gt_is_not_an_input(spike):
     assert all(torch.isfinite(p.grad).all() for p in predictor.parameters() if p.grad is not None)
 
 
-def test_v8_campaigns_and_pending_ledger_are_native_fixed_designs():
-    """Three identical pending ledgers expand to 8/16/12 Runs and cannot start computation."""
+def test_v8_campaigns_are_native_paired_two_line_fixed_designs():
+    """Exact conditional candidates bind two frozen V7 lines to 16/32/24 mandatory Runs."""
     root = Path(__file__).parents[1] / "experiments/v8"
     ledgers = []
     for suffix, count, reference in (
-        ("a", 8, "baseline"),
-        ("b", 16, "depth_control"),
-        ("c", 12, "baseline"),
+        ("a", 16, "baseline"),
+        ("b", 32, "depth_control"),
+        ("c", 24, "baseline"),
     ):
         authored = WorkConfig.from_yaml(root / f"wisdom_v8{suffix}.yaml")
         fixture = authored.to_dict()
@@ -410,16 +411,71 @@ def test_v8_campaigns_and_pending_ledger_are_native_fixed_designs():
         work = config.levels[0].runs[0]
         native = work.study_design.to_dict()
         assert work.seeds == (151, 157, 163, 167) and work.search_policy is None
-        assert native["reference"] == {"architecture_spike": reference}
+        assert native["reference"] == {
+            "pooling_type": "max", "head_type": "single", "architecture_spike": reference,
+        }
         requirements = native["evidence"]["requirements"]
         assert Counter(r["seed"] for r in requirements) == dict.fromkeys(work.seeds, count // 4)
-        ledgers.append(config.to_dict()["with"])
+        resolved = config.to_dict()
+        common = resolved["with"]
+        ledgers.append(common)
+        assert common["weak_loss_profile"] == "custom"
+        assert common["evaluate_test"] is False
+        assert common["architecture_implementation"] == "controlled"
+        assert common["gate_cost_normalization"] == "baseline_count"
+        assert common["feedback_weighting"] == "area"
+        assert not {"head_type", "head_loss_balance", "surface_loss_fraction"} & common.keys()
+        assert resolved["resources"]["gpu"] >= 1
+        assert resolved.get("execution", {}).get("max_parallel") in {None, 1}
+        assert resolved.get("execution", {}).get("runs_per_gpu") in {None, 1}
+        assert not {"steps", "search"} & resolved.keys()
+
+        # Sparse candidates, not the domain cross-product, define the mandatory evidence.
+        # Each line must cover every architecture exactly once without inactive head inputs.
+
+        candidates = resolved["sweep"]["candidates"]
+        assert len(candidates) == count // 4
+        assert len({repr(sorted(item.items())) for item in candidates}) == len(candidates)
+        film_fields = {
+            "head_loss_balance": "normalized", "surface_loss_fraction": 0.5,
+            "head_dropout": 0.0, "global_reduction": "area_mean", "global_context_dim": 16,
+            "detach_global_context": True, "local_head_initialization": "copy",
+            "film_modulation_scale": 1.0,
+        }
+        attention_fields = {"attention_variant": "simple", "attention_hidden_dim": 256}
+        variants = {
+            "a": {"baseline", "point_geometry"},
+            "b": {"baseline", "depth_control", "depth_control_parameter_matched", "bidirectional"},
+            "c": {"baseline", "vector_8", "vector_16"},
+        }[suffix]
+        seen = {"max": set(), "attention": set()}
+        for candidate in candidates:
+            line = candidate["pooling_type"]
+            seen[line].add(candidate["architecture_spike"])
+            assert (common.keys() | candidate.keys()) <= signature(Training.run).parameters.keys()
+            assert ArchitectureSpike(candidate["architecture_spike"]).overrides()
+            if line == "max":
+                assert candidate["head_type"] == "single"
+                assert candidate["pooling_area_mode"] == "point"
+                assert candidate["negative_surface_lambda"] == 0
+                assert candidate["regional_ranking_lambda"] == 0
+                assert candidate["regional_positive_lambda"] == 0.3
+                assert not (film_fields.keys() | attention_fields.keys()) & candidate.keys()
+            else:
+                assert line == "attention" and candidate["head_type"] == "film"
+                assert candidate["pooling_area_mode"] == "area"
+                assert candidate["negative_surface_lambda"] == 0.03
+                assert candidate["regional_positive_lambda"] == 0.03
+                assert candidate["regional_ranking_lambda"] == 0.03
+                assert all(candidate[key] == value for key, value in film_fields.items())
+                assert all(candidate[key] == value for key, value in attention_fields.items())
+            assert candidate.keys() == (resolved["sweep"]["space"].keys()
+                                        if line == "attention" else
+                                        resolved["sweep"]["space"].keys() - film_fields.keys()
+                                        - attention_fields.keys())
+        assert seen["max"] == seen["attention"] == variants
         plan = WorkRunner().run(config, dry_run=True).to_dict()
         assert sum(len(level) for level in plan["levels"]) == count
-        with pytest.raises(ValueError, match="ledger is pending"):
-            _train_wisdom(
-                None, Path("not-read"), weak_loss_profile=ledgers[-1]["weak_loss_profile"]
-            )
     assert ledgers[0] == ledgers[1] == ledgers[2]
     assert not (root / "wisdom_v8.yaml").exists()
 

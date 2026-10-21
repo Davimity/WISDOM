@@ -6,6 +6,7 @@ import torch
 
 from torch import Tensor, nn
 from collections.abc import Mapping, Sequence
+from torch.utils.checkpoint import checkpoint
 from wisdom.models.DiffusionBlock import DiffusionBlock
 
 
@@ -19,6 +20,7 @@ class DiffusionSurfaceEncoder(nn.Module):
         dropout   : float = 0.0,
         initial_times: Sequence[float] | None = None,
         residual_initial_scale: float | None = None,
+        activation_checkpointing: bool = False,
     ) -> None:
         """Build a compact DiffusionNet with physical multiscale time initialization.
 
@@ -34,6 +36,8 @@ class DiffusionSurfaceEncoder(nn.Module):
             initial_times: Optional positive time in Å² for every block. ``None`` uses the
                 historical geometric schedule ``2**layer``.
             residual_initial_scale: Optional learnable residual scale passed to every block.
+            activation_checkpointing: Recompute individual blocks during backward; RNG is
+                preserved and no embeddings are detached. False preserves archived execution.
 
         Raises:
             ValueError: If width/layer count is non-positive or dropout is invalid.
@@ -57,6 +61,7 @@ class DiffusionSurfaceEncoder(nn.Module):
             for index in range(layers)
         )
         self.hidden_dim = hidden_dim
+        self.activation_checkpointing = activation_checkpointing
 
     def forward(
         self,
@@ -99,13 +104,12 @@ class DiffusionSurfaceEncoder(nn.Module):
             eigenvectors = operator["eigenvectors"].float()
 
             for block in self.blocks:
-                local = block(
-                    local,
-                    mass,
-                    eigenvalues,
-                    eigenvectors,
-                    gradient,
-                )
+                arguments = (local, mass, eigenvalues, eigenvectors, gradient)
+                if self.activation_checkpointing and self.training and torch.is_grad_enabled():
+                    local = checkpoint(block, *arguments, use_reentrant=False,
+                                       preserve_rng_state=True)
+                else:
+                    local = block(*arguments)
             outputs.append(local)
         return torch.cat(outputs, dim=0)
 
@@ -246,6 +250,11 @@ class DiffusionSurfaceEncoder(nn.Module):
         Returns:
             Coalesced stacked tangent derivative matrix with shape ``[2M,M]``.
         """
+        # A multi-stage forward may prepare this derived sparse tensor once. It is never kept
+        # between optimizer steps and the original physical operator arrays are only referenced.
+
+        if "stacked_gradient" in operator:
+            return operator["stacked_gradient"]
         index         = operator["gradient_index"]
         entry_count   = index.shape[1]
         stacked_index = index.repeat(1, 2)

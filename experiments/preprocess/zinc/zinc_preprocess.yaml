@@ -71,9 +71,14 @@ steps:  # Sequential scientific boundaries visible in LambdaForge.
       design: {from: select.zinc-design}  # Exact selected coordinates and fixed partitions.
       # design: {file: ../../../data/zinc/design}  # Independent preprocessing: replace from and remove prior steps.
       dataset_name: wisdom-zinc  # Separate managed family; zinc_binding remains compatible.
-      dataset_version: "1"  # New scientific content requires a new immutable version.
+      dataset_version: "2"  # Optional common structural assets; published @1 stays immutable.
       training_subset: full  # Or replicate-00/train-25; evaluation remains fixed.
       workers: 12  # Bounded geometry processes and annotation threads.
+      atomic_context: true  # Protein-only identity, masked torsions and covalent context.
+      source_quality: true  # Observed source quality metadata, not active neural inputs.
+      extended_surface_atom: true  # CSR asset; do not replace the historic 6 Å/K32 base table.
+      extended_radius: 12.0  # Protein atom-center cutoff in Å, independent of Zn targets.
+      extended_k_max: 96  # Store up to 96 real candidates per point and audit all discarded ones.
     # ZincPreprocessing defaults: skip=false, design=null (required unless skipped),
     # dataset_name="wisdom-zinc", dataset_version="1", training_subset="full", workers=8 (>0),
     # surface_resolution=1, probe_radius=1.4, atom_spatial_radius=6, surface_atom_radius=6 Å;
@@ -81,6 +86,10 @@ steps:  # Sequential scientific boundaries visible in LambdaForge.
     # surface_neighbor_k_max=24 (>0), curvature_scales=[2.5,5] (increasing positive).
     # positive_gap=1.4, negative_gap=3 Å (0<=positive<negative), sensitivity_gaps=[1,1.4,2];
     # progress_log_seconds=120 (>0), verbose=false. Zn never enters universal NPZ inputs.
+    # Optional-family defaults: atomic_context=false, source_quality=true,
+    # extended_surface_atom=false, extended_radius=12 Å (>0), extended_k_max=96 (>0 integer).
+    # Empty/short CSR rows are legal; counts and discarded_count make truncation explicit.
+    # These independently enabled families do not alter the base schema/configuration hash.
     resources: {cpu: 12, memory: 64GiB}  # Geometry dominates CPU/memory demand.
   - name: validate  # Independent audit after publication and before viewers.
     run: wisdom.preprocessing.zinc.ZincValidation.ZincValidation  # Scientific validation, not just hashes.

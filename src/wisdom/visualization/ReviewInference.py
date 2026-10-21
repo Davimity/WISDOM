@@ -14,6 +14,7 @@ from collections.abc import Mapping, Sequence
 from wisdom.data.WisdomDataset import WisdomDataset
 from wisdom.Training import _create_model, _evaluate
 from wisdom.data.WisdomCollator import WisdomCollator
+from wisdom.models.AtomicEncoderType import AtomicEncoderType
 from wisdom.visualization.ModelValidation import ModelValidation
 from wisdom.visualization.ProteinReportPage import ProteinReportPage
 from wisdom.evaluation.SurfacePredictionReport import SurfacePredictionReport
@@ -275,8 +276,12 @@ class ReviewInference:
                         or state["model_parameters"].get("surface_refiner_type", "none")
                         not in {"none", "heat", "learned_heat"}
                     ),
-                    include_atom_geometry=state["model_parameters"].get("vector_atomic_channels", 0)
-                    > 0,
+                    include_atom_geometry=(
+                        state["model_parameters"].get("vector_atomic_channels", 0) > 0
+                        or AtomicEncoderType(
+                            state["model_parameters"].get("atomic_encoder_type", "baseline")
+                        ).needs_positions()
+                    ),
                 )
                 total = len(data)
                 found.update(str(record[3]) for record in data.records if record[3] in identifiers)

@@ -46,6 +46,7 @@ gradient or checkpoint choice.
   - [4.8. Code architecture and testing](#48-code-architecture-and-testing)
   - [4.9. Scientific limitations](#49-scientific-limitations)
   - [4.10. Optional fixed physicochemical surface fields](#410-optional-fixed-physicochemical-surface-fields)
+  - [4.11. Optional universal atomic context and extended candidates](#411-optional-universal-atomic-context-and-extended-candidates)
 - [5. Trainable WISDOM models](#5-trainable-wisdom-models)
   - [5.1. Dataset index and graph batching](#51-dataset-index-and-graph-batching)
   - [5.2. Semantic adaptive architecture and WISDOMv1](#52-semantic-adaptive-architecture-and-wisdomv1)
@@ -55,6 +56,8 @@ gradient or checkpoint choice.
   - [5.5. Training, evaluation, and artifacts](#55-training-evaluation-and-artifacts)
     - [5.5.1. V7: comparing global and local heads fairly](#551-v7-comparing-global-and-local-heads-fairly)
     - [5.5.2. V8a–V8c: independent architectural controls](#552-v8av8c-independent-architectural-controls)
+    - [5.5.3. V8d: atomic propagation after surface feedback](#553-v8d-atomic-propagation-after-surface-feedback)
+    - [5.5.4. V9a–V9f: controlled atomic-encoder comparisons](#554-v9av9f-controlled-atomic-encoder-comparisons)
   - [5.6. Post-HPO sparse concept discovery](#56-post-hpo-sparse-concept-discovery)
   - [5.7. Formal roadmap and decision gates](#57-formal-roadmap-and-decision-gates)
   - [5.8. Research analysis: finding useful evidence](#58-research-analysis-finding-useful-evidence)
@@ -68,9 +71,14 @@ gradient or checkpoint choice.
 
 WISDOM has three ordered actions:
 
+The current enriched build targets `wisdom-dna-reduced@8` (Zn: `wisdom-zinc@2`). Commands and
+training studies that explicitly name @6 refer to the existing historical benchmark; change that
+selector only when you deliberately want the new release, after publishing it. See Section 4.11
+for enrichment without another geometry build.
+
 1. `Selection` decides which proteins belong to train, validation, and test.
 2. `Preprocessing` converts those proteins into NPZ files and publishes the configured immutable
-   version; the checked-in screening recipe publishes `wisdom-dna-reduced@6`.
+   version; the enriched screening recipe publishes `wisdom-dna-reduced@8`.
 3. `Visualization` reads the published dataset and creates interactive three-dimensional views.
 
 All three actions are declared in `experiments/preprocess/dna/dna_preprocess.yaml`. Their first argument is
@@ -81,7 +89,7 @@ the YAML contains their alternative values as comments beside each step:
 | Intended action | `select.skip` | `preprocess.skip` | `visualize.skip` | Required input |
 |---|---:|---:|---:|---|
 | Rebuild the selection only | `false` | `true` | `true` | `select.raw_path` points to `raw.jsonl`. |
-| Reuse a complete design and build `wisdom-dna-reduced@6` | `true` | `false` | `true` | Set `select.existing_design`; the directory must include the labelled splits, catalog, dilutions, and `structures/index.json` snapshot. |
+| Reuse a complete design and build `wisdom-dna-reduced@8` | `true` | `false` | `true` | Set `select.existing_design`; the directory must include the labelled splits, catalog, dilutions, and `structures/index.json` snapshot. |
 | Visualize an existing `wisdom-dna-reduced@6` | `true` | `true` | `false` | No design directory; the dataset is resolved by name and version. |
 
 The complete `true/false/false` workflow can build and then visualize a new version in one command:
@@ -192,7 +200,7 @@ The `[tool.lambdaforge.environment]` table in [pyproject.toml](pyproject.toml) d
 means a command-line program installed outside Python's wheel mechanism. The declaration is part of
 the managed-environment identity; it is not repeated in each experiment YAML.
 
-WISDOM requires LambdaForge `>=0.16.0` and deliberately sets no upper version bound while the
+WISDOM requires LambdaForge `>=0.19.0` and deliberately sets no upper version bound while the
 project follows the current framework release. Every executable action is a direct `Work` subclass with one
 `run()` method. LambdaForge is the source of truth for typed file/dataset resolution, bounded maps,
 safe JSON checkpoints, progress, immutable dataset publication, the placement Registry, logs,
@@ -232,7 +240,7 @@ unexpected LambdaForge directory. In order, it:
 2. creates the `wisdom` environment, or offers to update an existing one with `--prune`;
 3. reuses `./LambdaForge` or `../LambdaForge`, asks for another checkout, or clones the official
    repository;
-4. verifies that LambdaForge satisfies the minimum version `>=0.16.0`;
+4. verifies that LambdaForge satisfies the minimum version `>=0.19.0`;
 5. removes obsolete editable `wisdom-protein` metadata from older releases, then installs
    LambdaForge and `wisdom[dev]` in editable mode inside the Conda environment;
 6. optionally checks Python, dependency consistency, LambdaForge, MMseqs2, Foldseek, Biopython, and
@@ -364,7 +372,7 @@ flowchart LR
     B --> C["Phase B<br/>revalidate and group all candidates"]
     C --> D["Balance, split, and create<br/>nested training subsets"]
     D --> E["Phase C<br/>universal NPZ + DNA reference file"]
-    E --> F["Validate and publish<br/>wisdom-dna-reduced@6"]
+    E --> F["Validate and publish<br/>wisdom-dna-reduced@8"]
 ```
 
 | Phase | Main operation | Result used by the next phase |
@@ -492,9 +500,9 @@ reserving 36 CPUs does not by itself create 36 workers.
 
 LambdaForge 0.15 has no `lf run --step` option. Edit the first `skip` parameter of each step in the
 single YAML. The checked-in configuration has `true/false/true`: Selection forwards the declared
-`data/dna/design` directory, Preprocessing builds and publishes version 6, and Visualization does
+`data/dna/design` directory, Preprocessing builds and publishes version 8, and Visualization does
 nothing. To render immediately after a successful publication, set only `visualize.skip: false`;
-the third step then consumes the named `preprocess.dataset` output, so version 6 does not have to
+the third step then consumes the named `preprocess.dataset` output, so version 8 does not have to
 exist beforehand. In visualization-only mode, replace that output reference with the commented
 Registry selector `{dataset: wisdom-dna-reduced@6}`.
 
@@ -1193,17 +1201,17 @@ section.
 | Parameter | Value in this YAML | Meaning |
 |---|---:|---|
 | Three `skip` fields | `true`; `false`; `true` | Reuse Selection output, run Preprocessing, and skip visualization. |
-| `select.existing_design` | `{file: ../data/dna/design}` | Complete prior Selection directory forwarded without recomputation. Set it to null for visualization-only or while rebuilding Selection. |
+| `select.existing_design` | `{file: ../../../data/dna/design}` | Complete prior Selection directory forwarded without recomputation. Set it to null for visualization-only or while rebuilding Selection. |
 | `train`; `validation`; `test` | `{from: select.train}` and equivalent outputs | Three complete JSONL files or three `identifier<TAB>label` split files. The current workflow receives the labelled outputs forwarded by `select`. |
 | `catalog` | `{from: select.catalog}` | Required with labelled TXT inputs; supplies assembly, contact, group, phenotype, and source-evidence fields. |
 | `dilutions` | `{from: select.dilutions}` | Directory of `replicate-*/train-*-labelled.txt` views stored as dataset subset membership. |
 | `structures` | `{from: select.structures}` | Selection snapshot containing one exact compressed mmCIF per selected PDB plus `index.json`. The three labelled TXT files cannot replace it. |
 | `dataset_name` | `wisdom-dna-reduced` | Stable managed dataset name passed to `self.outputs.dataset`; the Python default is `wisdom-dna`. |
-| `dataset_version` | `6` | Immutable schema-3 release label; the Python default is `5`, and intended byte changes require a new value. |
+| `dataset_version` | `8` | Enriched immutable schema-3 release; Python default `5` is unchanged. Historical studies keep their explicit @6 inputs. |
 | `include_full_train` | `false` | Exclude train members outside the selected dilution; the Python default is true. |
 | `train_dilutions` | `[replicate-00/train-25]` | Retain this nested training view; the Python default is empty. Filtering happens before geometry. |
 | `include_validation`; `include_test` | `true`; `false` | Keep complete validation and omit held-out test bytes during HPO; both Python defaults are true. |
-| `workers` | `36` | Spawned record processes, normally one per requested CPU. |
+| `workers` | `12` | Spawned record processes in this recipe; Python default 36. Match the requested CPU budget. |
 | `requests_per_second` (Selection) | `60.0` | Aggregate RCSB request starts per second while designing; Preprocessing performs no downloads. |
 | `verbose` | `false` | Add per-record debug lines; normal mode keeps phase summaries and heartbeats. |
 | `retries` (Selection) | `5` | Additional HTTP attempts after a failed structure request during design only. |
@@ -1211,6 +1219,8 @@ section.
 | `surface_resolution`; `probe_radius` | `1.0`; `1.4` Å | Surface spacing and solvent-probe radius. |
 | `atom_spatial_radius`; `atom_spatial_k_max` | `6.0 Å`; `32` | Physical atom cutoff and largest ranked spatial-neighbor budget persisted once. |
 | `surface_atom_radius`; `surface_atom_k_max` | `6.0 Å`; `32` | Physical transfer cutoff and largest nearest-atom table width persisted once. |
+| `atomic_context`; `source_quality` | `true`; `true` | Optional canonical context and observed metadata; actual Work defaults false/true. Not model activation. |
+| `extended_surface_atom`; `extended_radius`; `extended_k_max` | `true`; `12 Å`; `96` | Separate CSR candidates, default false/12/96; explicit clipping counts, unchanged base table. See 4.11. |
 | `diffusion_spectral_modes_max`; `surface_neighbor_k_max` | `128`; `24` | Maximum low-frequency modes and bounded local neighbors used to construct differential operators. |
 | `curvature_scales` | `1.5, 2.5, 5.0, 7.5, 10.0` | Ordered curvature-radius superset in surface-resolution units; it retains the historical 2.5/5.0 scales. |
 | `positive_gap`; `negative_gap` | `1.4`; `3.0` Å | Confident positive/negative DNA surface-gap boundaries. |
@@ -2551,6 +2561,83 @@ redundancy, not an instruction to remove a channel; correlation with a constant 
 not zero. Fits are descriptive, not hypothesis tests. Corrected fields or added assets require a new
 immutable DatasetVersion; the supplied augmentation targets `wisdom-dna-features@2`.
 
+### 4.11. Optional universal atomic context and extended candidates
+
+The preprocessing recipes now reserve **DNA release 8** and **Zn release 2** for optional structural
+enrichment. Existing training studies still select their original datasets; no published version is
+changed. The base NPZ remains schema **3.0**, with exactly its historical arrays, point order and
+6 Å/32-atom transfer table. Two separate **sidecars**—companion files tied to the exact base file's
+SHA-256 fingerprint—add information without silently changing model inputs:
+
+| Asset, independent schema 1.0 | Stored information | Missing information |
+| --- | --- | --- |
+| `atomic_context` | Compact categorical atom-name, residue/atom identity and chemical-position IDs; atom→residue/chain mapping reuses the base; residue author numbering, insertion codes, polymer flags and chain names when verified; masked backbone/side-chain torsions; represented heavy-atom degree, ring membership and overlapping chemical motifs | Category zero means unknown, never a measured chemical zero. Angle and quality arrays have validity masks. Source-only fields remain unavailable if exact original bytes cannot be verified. |
+| `extended_surface_atom` | Sparse per-point candidate lists at 12 Å, up to 96 atoms, with distance, signed normal offset, tangential distance and pre/post-cap counts | An empty list contains no atom. `discarded_count` explicitly counts in-radius atoms omitted by the cap. |
+
+Enable these independently with `atomic_context: true` and `extended_surface_atom: true` in the
+Preprocessing step. Their actual Work defaults are false, so old configurations keep their behavior.
+`source_quality: true` is the default for the optional observed metadata; `extended_radius: 12.0`
+and `extended_k_max: 96` control the new candidate family only. The atomic graph remains at 6 Å/K32;
+no surface resolution, label, split, loss or model changes as a side effect. Quality fields are not
+automatically used by any neural network: experimental quality can reveal acquisition bias.
+
+To enrich a registered dataset **without rebuilding geometry**, edit the source selector and an unused
+destination version in `experiments/preprocess/enrich_structures.yaml`, then run that Work. It verifies
+existing base NPZs, reuses task annotations and publishes new optional assets through LambdaForge.
+It preserves the source population and geometry settings; it does not apply new selection filters
+or curvature scales to those existing bytes.
+This and the full DNA recipe both propose destination version 8: choose one route, not two writes to
+the same release. If original source paths are gone after an import, new context built from only the
+base masks author/quality fields; an existing compatible context is retained, not downgraded. The Work
+never downloads a later public revision to fill missing values.
+
+An atom's name is not its element: canonical `CA` means alpha carbon, not calcium. Categories are
+fixed from canonical residue templates, never fitted to training frequencies. Alpha/beta/gamma-like
+positions are categories, not numerical distances. Exact names such as ASP OD1 and OD2 remain distinct;
+we do not assume protonation-dependent equivalence. Motif bits describe canonical chemical roles, not
+measured charge or protonation. Ring membership follows cycles in the represented intra-residue
+covalent graph; unknown component chemistry has a false `chemistry_known` mask. Heavy degree counts
+retained heavy neighbors, not complete valence with absent hydrogens. Historical approximate donor,
+acceptor and hybridization fields retain their original semantics and are not overwritten.
+
+A **torsion** measures twisting around a bond. Backbone phi uses `(C_previous,N,CA,C)`, psi uses
+`(N,CA,C,N_next)`, and omega uses `(CA,C,N_next,CA_next)`. Previous/next residues must have an actual
+represented C–N covalent connection; consecutive residue numbers are not enough. Canonical chi1–chi4
+use explicit named-atom templates. Missing atoms, chain breaks, unknown residues and degenerate
+geometry yield a false mask and a zero placeholder, never an observed zero angle. The signed angle
+lies in [−π,π] radians (π radians = 180°); see the [audit](docs/structural_enrichment_audit.md) for its
+formula and complete schema. Optional local frames and covalent triplet angles are runtime derivations,
+not redundant persisted graphs. Observed occupancy and isotropic B (Å², describing displacement/order
+in the deposited model) come only from explicitly populated mmCIF fields. B additionally requires a
+declared diffraction/electron-microscopy method; predicted or unknown methods remain masked rather
+than interpreting confidence scores as experimental B. PDB quality fields are left
+unavailable rather than treating parser defaults as measurements; selected alternates are preserved.
+
+The extended file uses **CSR**, a compact list representation: `point_ptr[p]:point_ptr[p+1]` indexes
+the atoms belonging to point p. Rows sort by persisted float32 distance, then atom ID. Short rows
+need no padding; the explicit `dense` conversion uses −1 IDs, a false mask and zero geometry. Never
+concatenate indices from different proteins without offsetting atom IDs and point pointers separately.
+The opt-in `ExtendedSurfaceAtom.batch` performs that disjoint concatenation using complete base
+atom counts, including atoms absent from the candidate lists; the historical collator stays unchanged.
+For point x, atom a and outward unit normal n, displacement is v=a−x, distance is d=‖v‖, normal offset
+is z=v·n and tangential distance is ρ=‖v−zn‖. The last form avoids subtracting nearly equal squares.
+
+The local pilot covered three real chains (322, 2,000 and 9,884 atoms), not the whole benchmark. At
+12 Å/K96, compressed candidate payloads were about 3.76, 14.34 and 47.25 MiB; 6.2%, 63.1% and 83.4%
+of points exceeded the cap. Thus **96 is a bounded nearest-candidate budget, not complete 12 Å
+coverage**. Increase it deliberately when a future hypothesis needs more support; compare clipping
+and cost first. CSR and padded dense payloads compressed similarly for dense rows. Larger radius does
+not itself establish a maximum molecular interaction range. Run
+`python scripts/benchmark_structural_sidecars.py ARCHIVE.npz --output costs.json` to measure existing
+archives; `--design data/dna/design` instead runs the explicitly limited three-chain geometry pilot.
+The [full audit](docs/structural_enrichment_audit.md) separates measured cost, estimates and limitations.
+
+Current `WisdomDataset`, collator and models do not open either asset. A future experiment must opt in
+explicitly, validate the sidecar against its exact base, interpret masks and declare its hypothesis.
+No learned embedding, partial charge, electrostatic potential, task atom, prediction or target enters
+these assets. Per-atom solvent-accessible area is deferred: the installed Biopython Shrake–Rupley
+implementation needs its own validated identity/radii contract; surface weights are not a substitute.
+
 ## 5. Trainable WISDOM models
 
 WISDOM receives one label for a complete protein: `1` means positive under the selected task's
@@ -3081,8 +3168,8 @@ pre-freeze sanity check before any formal version is assigned to a pooling study
 `wisdom_v10.yaml`. These labels order the construction campaign; they are not ten validated model
 generations. V1a–V1c diagnose seed variance, V2 selects initialization, V3 selects optimizer
 stability, V4 performs broad core HPO, V5 checks pooling and evidence refinement, and V6 screens
-seven isolated weak regularizers before a deferred combination. V7 compares heads, V8 tests isolated spikes, V9 performs a
-small final retune, and V10 confirms the frozen ledger on fresh seeds.
+seven isolated weak regularizers before a deferred combination. V7 compares heads, V8 tests isolated
+spikes, V9a–V9f compare atomic encoders, and V10 confirms the frozen ledger on fresh seeds.
 [`experiments/README.md`](experiments/README.md) gives the authoritative order. Formal scientific
 WISDOM generations in the roadmap remain distinct from these compact experiment labels.
 
@@ -3599,7 +3686,8 @@ explicitly; automatic compatibility would hide a scientific change.
 | `V6a`–`V6g` | Screen one weak regularizer per Study; TV/Dirichlet cross Heat on/off. |
 | `wisdom_v6h.yaml` | Deferred template for individually justified regularizer interactions. |
 | `V7`–`V8` | Compare head relationships and then isolated architecture spikes. |
-| `V9`–`V10` | Retune sensitive numeric values, then confirm the frozen ledger on fresh seeds. |
+| `V9a`–`V9f` | Compare atomic encoders on one frozen MAX R Single / Heat6 context. |
+| `V10` | Confirm the explicitly frozen ledger on fresh seeds. |
 | `interpretability_sparse_concepts.yaml` | Analyze one explicit frozen checkpoint post hoc. |
 
 The `model_version` field is only an internal capability selector: `1` enforces the original
@@ -3613,14 +3701,14 @@ V3 tests `ema_0999`. The older combined `stability_profile` is accepted only to 
 archived YAMLs and cannot be mixed with either new selector.
 
 The baseline uses all ten ordered seeds `[4,7,32,54,65,94,109,124,142,167]`; none may be pruned.
-Finite comparisons (V2, V3, V5, V6a–V6g, V7, and V8) use LambdaForge's explicit
+Finite comparisons (V2, V3, V5, V6a–V6g, V7, V8, and V9a–V9f) use LambdaForge's explicit
 `sweep.space`. Every authored cell is mandatory. The controller starts every cell with the same
 project seed, opens another complete shared-seed block only after the previous block finishes, and
 stops through an anytime-valid paired analysis of the authored `objective.practical_margin` when seeds
 are automatic. V5a/V5b/V5c and all seven isolated V6 sweeps instead fix exactly four historical paired seeds
 per candidate, without automatic extension. Fixed sweeps never use HPO curve pruning, per-cell seed
-racing, or winner-only confirmation. V4 and
-V9 instead use `search.goal: optimize`: LambdaForge automatically chooses proposals, replication,
+racing, or winner-only confirmation. V9a–V9f fix four new paired seeds per candidate.
+V4 instead uses `search.goal: optimize`: LambdaForge automatically chooses proposals, replication,
 curve pruning, convergence, and disjoint confirmation seeds because their purpose is efficient
 multidimensional optimization. In both modes, omitted execution caps let the adaptive resource
 intelligence (ARI) place Runs from the allocated CPUs, GPUs, live free memory, and measured peaks.
@@ -4239,7 +4327,7 @@ lf run experiments/v7/wisdom_v7.yaml
 lf run experiments/v8/wisdom_v8a.yaml  # only after freezing the reviewed V7 ledger
 lf run experiments/v8/wisdom_v8b.yaml
 lf run experiments/v8/wisdom_v8c.yaml
-lf run experiments/v9/wisdom_v9.yaml
+lf run experiments/v9/wisdom_v9a.yaml  # classical atomic operators; independently review b–f
 lf run experiments/v10/wisdom_v10.yaml
 lf results analyze EXECUTION_ID
 ```
@@ -4297,9 +4385,9 @@ The primary study crosses these four alternatives with four fixed V6h pipelines 
 
 V7's 16 candidates use seeds 101/103/107/109: 64 required Runs. The four pipelines preserve
 their exact weak-prior policies and Heat6. Compare each head with single of the same pipeline
-and seed before aggregating differences. V7 selects no winner automatically for V8. The pending
-upstream-ledger execution guard now belongs to V8a–V8c, described below; syntax validation and
-dry runs never establish scientific readiness.
+and seed before aggregating differences. V7 selects no winner automatically for V8. Researcher
+review has now retained two complete lines for V8a–V8c, described below; syntax validation and
+dry runs do not demonstrate that either line improves scientifically or fits in GPU memory.
 
 | Hypothesis | Primary protein prediction | Surface logits before the fixed refiner |
 |---|---|---|
@@ -4416,25 +4504,41 @@ technical correctness, not scientific improvement; that needs the frozen ledger 
 #### 5.5.2. V8a–V8c: independent architectural controls
 
 These are three construction-stage studies, **not three new scientific model generations**.
-Run them only after reviewing V7 and copying the same selected pipeline, head, applicable head
-parameters and loss balance into all three YAMLs. Their identical `with` ledgers explicitly retain
-the V7 backbone and Heat6, but pooling/head/weak coefficients are still pending. The value
-`weak_loss_profile: PENDING_V7` stops actual execution before loading any dataset or allocating
-a model. Replace the marked fields and finally set `custom` only after that review; do not let
-the provisional MAX/single values stand in for a scientific decision.
+Each independently executes **both complete lines retained after reviewing V7**. Common backbone,
+Heat6 and training settings remain in identical `with` mappings; explicit `sweep.candidates` bind
+the line-specific pooling, weak coefficients and head. There are no dependencies between Studies
+and no pending-winner guard. `weak_loss_profile: custom` applies the reviewed coefficients directly.
+
+| Frozen V7 line | Pooling / measure | Negative / regional-existence / regional-ranking coefficients | Head and protein BCE |
+|---|---|---|---|
+| A: MAX R Single | MAX / point | 0 / 0.3 / 0 | Single, original unscaled BCE |
+| B: Attention NRK FiLM | Simple attention, width 256 / area | 0.03 / 0.03 / 0.03 | FiLM, exactly 0.5 direct BCE + 0.5 surface-derived BCE |
+
+R denotes regional existence and K regional ranking; neither denotes point existence, which stays
+zero in both lines. Cardinality, total variation and Dirichlet penalties also stay zero. The FiLM
+line freezes head dropout 0, area-mean global reduction, context width 16, detached context, copied
+local-head initialization and modulation scale 1. These coordinates are conditional on FiLM and
+are absent from MAX Single candidates. Attention-only coordinates are likewise absent from MAX.
+Researcher-supplied V7 summaries were approximately S=0.276/G=0.714 for A and S=0.238/G=0.817 for B;
+these are historical descriptive values, not measurements of the new V8 architectures.
 
 | Study | Sole factor | Contemporary controls | Required Runs |
 |---|---|---|---:|
-| `wisdom-v8a` | Existing point geometry conditions atom-to-surface scores | baseline vs point_geometry | 8 |
-| `wisdom-v8b` | A surface-to-atom return path | baseline, depth_control, depth_control_parameter_matched, bidirectional | 16 |
-| `wisdom-v8c` | Vector-mediated invariant atomic enrichment | baseline, vector_8, vector_16 | 12 |
+| `wisdom-v8a` | Existing point geometry conditions atom-to-surface scores | baseline vs point_geometry in A and B | 16 |
+| `wisdom-v8b` | A surface-to-atom return path | baseline, depth_control, depth_control_parameter_matched, bidirectional in A and B | 32 |
+| `wisdom-v8c` | Vector-mediated invariant atomic enrichment | baseline, vector_8, vector_16 in A and B | 24 |
 
-Each candidate runs seeds **151, 157, 163, 167**. These 36 required Runs have no HPO, competitive
+Each candidate runs seeds **151, 157, 163, 167**. These 72 required Runs have no HPO, competitive
 pruning or seed racing. Ordinary training patience still applies. A baseline measured in another
 campaign is not an extra replication. The old combined campaign and reviewer are retained as
 `.yaml.example` authoring snapshots, excluded from the executable catalog; they are not defaults.
 Individual reviewers in `experiments/v8/visualization/` inspect only saved validation checkpoints,
 with `source_seed: 151` and `allow_test: false`; missing checkpoints never trigger training.
+
+Compare an architecture only with the control of its **own line and seed**, then aggregate those
+paired differences. The unique native LF reference is MAX Single baseline in V8a/V8c and MAX
+Single depth control in V8b; it does not replace the Attention FiLM controls. Differences between
+A and B combine pooling, priors and head, so they cannot isolate an effect of pooling alone.
 
 **V8a: one interaction, existing evidence.** The implemented point-geometry residual multiplies
 a projection of the point's already gated curvature descriptors by atom/pair-dependent features.
@@ -4514,7 +4618,7 @@ the matched control requires controlled behavior. New defaults are
 `feedback_weighting=point` and `gate_cost_normalization=historical_mean`. No new grid of feedback
 strengths, widths or rounds is opened. Inspect actual values with `lf explain`.
 
-For the provisional V7-width backbone, MAX/single and 15 stored curvature columns, trainable
+For the frozen V7-width backbone, line A MAX/single and 15 stored curvature columns, trainable
 counts are reported by the technical audit, not as a selected V7 architecture. Every Run logs
 `trainable_parameter_count` separately from all stored `parameter_count`, along with existing
 epoch/forward times and peak CUDA memory. Intermediate vectors alone require approximately
@@ -4522,7 +4626,7 @@ epoch/forward times and peak CUDA memory. Intermediate vectors alone require app
 that estimate. Synthetic tests establish shape/gradient/invariance/serialization contracts,
 not throughput or scientific improvement on real proteins.
 
-| Candidate | Trainable parameters, provisional MAX/single ledger |
+| Candidate | Trainable parameters, line A MAX/single ledger |
 |---|---:|
 | baseline | 469,875 |
 | point_geometry | 472,308 |
@@ -4532,15 +4636,282 @@ not throughput or scientific improvement on real proteins.
 | vector_8 | 506,243 |
 | vector_16 | 509,331 |
 
-These are constructor counts, not fitted models; a different selected V7 head/pooling changes
-the common total. The return module adds 49,664 nominal parameters beyond depth control.
+These are constructor counts, not fitted models; line B's attention/FiLM changes the common
+total. The return module adds 49,664 nominal parameters beyond depth control.
 
 The scientific priority stays operational positive-protein macro AUPRC S at the checkpoint
 selected by global G. Preserve raw S, global/direct/surface-derived classification, negative
 mass/peak, top-k metrics, temporal coupling/regret, paired seed variability, gate diagnostics
 and costs. Local GT never enters backward or epoch selection; Heat6 deletion audits remain
-unavailable rather than zero. The V7 winner, real paired outcomes and realistic GPU cost remain
-pending; validation and dry-run do not authorize claiming that any architecture helps.
+unavailable rather than zero. Real paired outcomes and realistic GPU cost remain pending;
+validation and dry-run do not authorize claiming that any architecture helps.
+
+**Independent launch and resource limits.** Each Study requests one GPU and caps execution at
+one Run at a time. In LF these are Study-wide allocations, not repeated allocations per seed.
+V8a targets cluster 12 with 12 CPUs/48 GiB RAM; V8b and V8c target cluster 16 with 16 CPUs each,
+64 and 48 GiB RAM respectively. All retain the 168-hour ceiling, batch 16 and the full selected
+population. V8b and V8c can coexist if the site grants two distinct devices and host capacity.
+
+On 2026-10-19, read-only inventory showed 48 CPUs/~376 GiB RAM and H100 80-GB devices on the 12,
+96 CPUs/~755 GiB RAM and H200 ~140-GiB devices on the 16. Physical visibility is not a reservation:
+the account held no GPU grant on the 16. Native dry-runs passed, but target GPU capacity there
+remained unverified. No real-data FiLM, feedback or vector peak-memory fit has been measured.
+The [V8 technical review](docs/v8_technical_review.md) explains site-controlled device assignment
+and the remaining checks. Configuration validation cannot establish that every candidate fits.
+
+Validate and inspect the exact required evidence before submitting; the following commands are
+instructions for the researcher, not automatic launches:
+
+```bash
+for campaign in a b c; do
+  lf validate experiments/v8/wisdom_v8${campaign}.yaml
+  lf explain experiments/v8/wisdom_v8${campaign}.yaml
+  lf config resolve experiments/v8/wisdom_v8${campaign}.yaml --format json
+done
+lf run experiments/v8/wisdom_v8a.yaml --on citius-ctgpgpu12 --dry-run
+lf run experiments/v8/wisdom_v8b.yaml --on citius-ctgpgpu16 --dry-run
+lf run experiments/v8/wisdom_v8c.yaml --on citius-ctgpgpu16 --dry-run
+
+# Submit only after reviewing the preflights and current site grants.
+lf run experiments/v8/wisdom_v8a.yaml --on citius-ctgpgpu12
+lf run experiments/v8/wisdom_v8b.yaml --on citius-ctgpgpu16
+lf run experiments/v8/wisdom_v8c.yaml --on citius-ctgpgpu16
+```
+
+#### 5.5.3. V8d: atomic propagation after surface feedback
+
+V8b returns the first surface's embeddings to atoms and updates each atom independently. It does
+**not** run another atomic graph after that update. V8d tests that missing communication: can an
+atom receiving surface information pass it to a neighbouring atom before building the second
+surface representation? It reuses the existing scalar relational encoder, not any V9 family.
+Historical V8b configurations, checkpoints and conclusions remain unchanged.
+
+For original atomic features X, physical relations E and initial geometry X_geom, the first stage
+constructs atomic states A1 and surface states S1 as before. Feedback produces A2, and the new
+hidden-state encoder F propagates A2 along exactly E. Its stable residual integration is:
+
+```math
+A_1=GNN_1(X,E),\qquad S_1=D_1(P_1([T_1(A_1),X_{geom}])),
+```
+
+```math
+A_2=U(A_1,m),\qquad A_3=A_2+\gamma\,[F(A_2,E)-A_2],
+\qquad S_2=D_2(P_2([S_1,T_2(A_3)])).
+```
+
+T denotes atom-to-surface transfer, P a projection and D a DiffusionNet stage. U is the exact
+controlled V8b update of §5.5.2: each atom receives the area-times-exp(−distance/radius) weighted
+mean m of supported S1 points. Covered atoms use LayerNorm(A1+MLP([A1,m])); uncovered atoms stay
+unchanged **at U**, but may now change through neighbouring atoms in F. Padding/invalid candidates
+never become messages. F receives already encoded N×H states, without looking up elements or
+repeating the initial feature projection. It owns independent weights and keeps both original
+relations, overlap, attributes and the same single-forward gate sample.
+
+The subtraction in F(A2,E)−A2 is essential: the existing encoder ends with LayerNorm and SiLU,
+so merely zeroing its internal edge residual would not make it identity. Gamma is one learned
+scalar, initially 0.1. An explicit zero start gives A3=A2 exactly, with no outer normalization;
+the first backward then trains gamma but not F's internal weights. This initialization is a
+separate declared factor, not a retrospective change to V8b. No intermediate BCE or local GT
+loss is added. Gradients flow from the final existing heads through both surface stages and GNNs.
+FiLM retains its existing detached global-context policy; no new detach is inserted in feedback.
+
+| `feedback_propagation` | Atom path between surface stages | Purpose |
+|---|---|---|
+| `none` | Existing `interaction_round` unchanged | Default, exact historical compatibility |
+| `d0` | No second stage | Existing single-pass reference |
+| `d1` | A1 unchanged | Existing extra-surface-depth control |
+| `d2` | U(A1,0) | Existing matched null-message control, original coverage |
+| `d3` | U(A1,m) | Existing real V8b feedback, no new atomic propagation |
+| `d4` | U(A1,m), then one hidden-state graph layer | Short post-feedback reach |
+| `d5` | U(A1,m), then two hidden-state graph layers | Main V8d hypothesis |
+| `d6` | U(A1,0), then the same two-layer GNN | Separate real surface content from extra GNN capacity |
+| `d7` | A1, then the same two-layer GNN, without U | Extra propagation without the feedback MLP |
+| `d8` | U(A1,m), then a residual H→2H→H SiLU MLP | Extra local capacity without communication |
+
+D6 uses a genuine H-vector of zeros, never a detached summary of S1. D2/D6 still receive S1 in
+the second surface projection, just like their real-feedback pairs. At H=128, GNN2 has 33,113
+parameters with one layer and 66,225 with two, including gamma. D8 adds 65,921, only 304 fewer
+than D5; matching parameter counts does not match functional capacity or communication cost.
+The complete two-layer models have 966,613 parameters for MAX Single and 1,023,336 for Attention
+FiLM when using the archived dataset's five curvature scales. These include unchanged inherited
+parameters; they are not all active in every control. Training records added parameter count and
+gamma's trajectory alongside existing G, S, original S, W, regret, coupling, negative evidence,
+enrichment, epoch times and CUDA peaks. Native LF analysis handles repeated-seed comparisons.
+
+**Configuration and cost.** `experiments/v8/wisdom_v8d.yaml` preserves the exact scientific ledger
+of exported V8b `execution-29c7fa9079512348`: MAX R Single and Attention NRK FiLM, widths 128,
+two initial atomic layers, 4+4 surface blocks, Heat6, the original priors/optimizer/neighbours and
+seeds 151/157/163/167. It prepares D3–D6 in both lines: 32 new mandatory Runs, not reused V8b
+observations. Primary contrasts are D5−D3 and D5−D6; D5−D7 and D5−D8 require the separate attribution
+cells, and D4−D5 tests depth. Compare within policy/seed; never treat a MAX–FiLM difference as one
+isolated pooling change. Checkpoints still use G, specifically the direct head for FiLM, not S.
+
+The public defaults are `feedback_propagation: none`, `post_feedback_initial_scale: 0.1`,
+`surface_stage_layers: null`, `checkpoint_surface: false` and `checkpoint_post_feedback: false`.
+V8d requires internal `model_version: 2`, scalar baseline atoms, learned DiffusionNet surfaces,
+`architecture_spike: custom`, `architecture_implementation: controlled`; it cannot silently combine
+V8a geometry, V8c vectors or V9 encoders. Two feedback cycles/weight sharing are not implemented:
+production feasibility of even one extended cycle is not yet established.
+
+Keeping `surface_stage_layers: null` uses four blocks in each stage: eight, not four, in total.
+An explicit `[2,2]`, `[3,1]` or `[1,3]` is a separately labelled scientific budget, never an OOM
+fallback. Both checkpoint flags optionally recompute blocks during backward without storing all
+activations, preserving dropout RNG and gradients. They do not checkpoint a new training lifecycle.
+Physical arrays and candidate tables are shared; each multi-stage forward also reuses one derived
+sparse gradient per protein. No learned embedding is cached between optimizer steps.
+
+Before launching the campaign yourself, validate and measure bounded **synthetic** cases:
+
+```bash
+lf validate experiments/v8/wisdom_v8d.yaml
+lf explain experiments/v8/wisdom_v8d.yaml
+lf config resolve experiments/v8/wisdom_v8d.yaml --format json
+OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 python scripts/benchmark_v8d.py --device cpu
+# Optional local CUDA audit; still synthetic, never a scientific Work or a cluster submission.
+python scripts/benchmark_v8d.py --device cuda --checkpoint
+```
+
+The benchmark uses two unequal toy proteins, full authored widths/depths and five curvature scales,
+and prints parameter counts plus median forward/loss, backward, optimizer and complete-step times.
+CUDA additionally measures allocated peak VRAM; unsupported VRAM/epoch/FLOP estimates remain null.
+Toy operator shapes and sizes do **not** establish production fit or predict an epoch duration.
+First measure D3/D5/D6 on representative training sizes under an identical resource budget, then
+perform the main paired comparison, attribution, compact budgets and fresh-seed confirmation.
+Those real Runs, production memory, median epoch costs and scientific results remain pending.
+OOM propagates to native LF Attempt/recovery; no smaller batch, topology or successful score is
+silently substituted. See [the V8d audit](docs/v8d_technical_review.md) for the inspected sources,
+exact counts, synthetic measurements and acceptance boundaries.
+
+#### 5.5.4. V9a–V9f: controlled atomic-encoder comparisons
+
+V9 asks whether changing how atoms exchange information improves **where** the surface predicts
+binding, not just whether the protein score is correct. The encoder receives the existing atom
+features and two fixed relations: covalent bonds and nearby spatial neighbours. It must return one
+scalar embedding of width 128 per atom. Transfer to the surface, DiffusionNet, Heat6, MAX, the
+single head, weak regional loss R with coefficient 0.3, and optimizer remain fixed. This is the
+researcher-reviewed MAX R Single context, **not an inferred winner of V8**. No new dataset or
+preprocessing is needed. Internal `model_version: 2` supplies existing capabilities; it does not
+rename these construction experiments into formal model generations.
+
+Each YAML is an independent complete sweep of `atomic_encoder_type`. The same four development
+seeds `[173,179,181,191]` pair every candidate with a contemporary unchanged baseline. There are
+172 planned Runs, with no search, competitive pruning, automatic seed growth or test evaluation.
+G-based patience still applies. Read a failure to fit memory as a feasibility failure, not a
+prediction score of zero.
+
+The completed V8 review does not justify adding feedback or geometry-conditioned transfer to
+this baseline: their surface gains relative to matched controls are small or inconsistent.
+V8c's eight-channel vector augmentation is a relatively inexpensive lead for attention/FiLM
+(mean S change +0.0161 across four seeds, about +0.53 GiB peak allocated memory), but not for
+MAX (−0.0043). This is a hypothesis to confirm, not an established improvement. Both policies
+can respond differently, and they differ in head and losses as well as pooling. Keep the broad
+V9 screen at 172 Runs on MAX, then compare a reviewed shortlist against its own attention/FiLM
+baseline; crossing every profile with both policies would require 344 Runs. This economical
+screen may miss attention-only benefits, so its conclusions must remain scoped to MAX.
+The [V8 evidence review](docs/v9_execution_review.md) records the controls, uncertainty and costs.
+
+Every V9 training Study requests **2 GPUs, 36 CPUs and 96 GiB host RAM in total**. The YAMLs
+omit `execution`, allowing LambdaForge to admit concurrent Runs automatically instead of forcing
+one Run at a time. This does not guarantee every operator fits in VRAM or runs concurrently.
+The shared backbone explicitly disables V8 feedback, point-geometry conditioning and late vector
+augmentation; V9e's own vector encoders remain the factor being tested. Concurrent execution
+times measure shared hardware, not isolated encoder latency.
+
+| YAML | Atomic mechanism and controls | Candidates × seeds |
+|---|---|---|
+| `v9/wisdom_v9a.yaml` | Baseline/no attributes; structural and edge-conditioned GCN/SAGE; GIN; residual/canonical RGCN; canonical GCN | 10 × 4 |
+| `v9/wisdom_v9b.yaml` | Baseline; endpoint-and-edge MPNN mean/sum; GINE/without attributes; basis/full-matrix NNConv | 7 × 4 |
+| `v9/wisdom_v9c.yaml` | Baseline/no attributes; matched MPNN; PNA light/identity/full; GATv2 with 2/4 heads and without attributes | 9 × 4 |
+| `v9/wisdom_v9d.yaml` | Baseline/radial-only; SchNet/full and radial-only; DimeNet++/DimeNet | 6 × 4 |
+| `v9/wisdom_v9e.yaml` | Baseline; persistent GVP/PaiNN vectors; fixed/latent-coordinate EGNN | 5 × 4 |
+| `v9/wisdom_v9f.yaml` | Baseline/no attributes; sparse Transformer/full and without attributes; global structural/constant-code attention | 6 × 4 |
+
+These names select exact compositions, not interchangeable claims about an entire published
+architecture (see the primary formulations in bibliography entries 13–14 and 43–50).
+GCN normalizes neighbour contributions by fixed graph degrees; SAGE averages them;
+GIN sums node messages; GINE also transforms edge attributes. MPNN constructs messages from sender,
+receiver and edge attributes. NNConv uses the edge to produce a linear filter, either from four
+matrix bases or as a full matrix. PNA summarizes the **same MPNN messages** with several statistics:
+mean, maximum and standard deviation in `light`; `identity` also adds minimum; `full` adds degree
+amplification/attenuation. Its reference mean log(1+degree) is fitted only on the exact training view
+after the same neighbour filter and saved in the checkpoint. GATv2 and the sparse Transformer learn
+attention only along existing edges, with total scalar width fixed despite changing head count.
+The native sparse Transformer conditions **both keys and values** on edges; it is not the
+report's narrower additive-score-bias-only formulation. Its no-attribute control removes both
+routes. This difference is part of the declared public-LF adaptation, not a hidden equivalence.
+
+**Relations and gates.** A stored pair belonging to both relations contributes once to each branch;
+it is not silently collapsed into a third graph. A relation gate multiplies the complete branch
+contribution after aggregation, so closing it cannot resurrect messages through a bias. GIN, GINE,
+MPNN and PNA combine the two relation aggregates before one shared node update. Other residual LF
+blocks are combined through their increments. For scalar state h, LF branch F_r and relation gate
+z_r, the common residual input is `h + z_c(F_c(h)−h) + z_s(F_s(h)−h)`; c/s denote covalent/spatial.
+Declared normalization and activation follow. This preserves one root contribution, not two.
+Canonical GCN is deliberately separate: it uses one self-loop, no residual wrapper, and a shared
+weight across typed incidences. It therefore also changes weight sharing, **not only normalization**.
+Canonical RGCN uses a single learned root instead of the residual identity.
+
+Attribute-free profiles close their unavailable scalar edge gates permanently, including under
+`all_on`. Conditioned GCN/SAGE multiply messages by `1 + f(e) − f(0)`, where e is the gated edge
+attribute vector: removing attributes gives neutral modulation one. Graph degrees are not
+re-estimated from these signed factors. All candidates retain the baseline gate-cost denominator;
+absent inputs cost zero rather than silently changing the regularization scale. The gate summary
+marks `available_to_model`. New vector/directional geometry is an explicit architectural input,
+not a claim that a closed scalar-distance gate removes every angular cue.
+
+**Physical geometry and limits.** SchNet/PaiNN gate radial bases and their cutoff together: closing
+the distance source removes radial dependence, rather than evaluating a basis at artificial distance
+zero. DimeNet keeps typed covalent/spatial and mixed triplets, with gates on both incident messages;
+closing radial dependence does not remove angular information. It uses the public LF basis and
+interaction implementation, not a new WISDOM DimeNet. The fixed radial width is 16, with three
+spherical orders. Spatial support is 6 Å and directional covalent support is explicitly 64 Å;
+an existing edge outside support fails rather than being deleted. Typed triplets are bounded at
+1,000,000 and principal temporary tensors at 128 MiB; neither is a total VRAM estimate.
+
+GVP retains 16 polar-vector channels between blocks and produces invariant scalar output through
+a public GVP readout. PaiNN ties vector channels to scalar width 128. EGNN compares fixed coordinates
+with internal latent updates divided by total fixed incidence degree. Multiplying its coordinate
+input by distance gate z makes the squared-distance dependence proportional to z². EGNN blocks
+run in FP32 even under mixed precision, avoiding coordinate quantization and satisfying LF's
+matching feature/coordinate dtype contract. Their scalar output returns to the common dtype. Its physical
+NPZ positions, neighbours, surface and transfer geometry never change. Vector RMS, latent displacement
+RMS and typed-triplet diagnostics describe the **last training batch** when applicable, not an
+epoch-wide mean. The primary timing and trainable parameter counts are also logged; equal scalar
+width/layer count does not establish equal capacity, physical reach or FLOPs.
+
+Only V9f global profiles permit dense atom×atom attention. Both declare
+`atomic_allow_dense_global: true`; other campaigns keep it false. Attention is evaluated separately
+inside each explicitly identified protein, never across a disjoint batch. Public LF structural codes
+use graph degrees and tie-independent shortest-path distances. The constant-code control replaces
+these by zero codes; the constant embedding parameters remain. This is **not a complete original
+Graphormer reproduction** with shortest-path edge-attribute encodings. The 128 MiB byte guard covers
+principal path/score tensors, not all activations, gradients or optimizer state; an OOM is still
+possible. No node subsampling, graph truncation, silent batch reduction or sparse substitute is
+allowed. Public path encoding currently runs again per forward and relation; throughput must be
+measured, not assumed from the sparse encoders.
+
+**Execution and interpretation.** Install the current LF checkout and rerun `./install.sh`, or
+bootstrap the chosen cluster. The dependency floor is 0.19 with `graph-directional`; an early
+public-API check also detects stale editable checkouts whose version number has not changed.
+Inspect one campaign before submitting it yourself:
+
+```bash
+lf validate experiments/v9/wisdom_v9a.yaml
+lf explain experiments/v9/wisdom_v9a.yaml
+lf config resolve experiments/v9/wisdom_v9a.yaml --format json
+# Repeat the preflight for b–f; only the researcher launches actual studies.
+```
+
+Checkpoints remain selected by protein validation utility G. Compare operational positive-protein
+macro surface quality S at those G-selected checkpoints, along with original surface quality,
+G–S coupling/regret, negative-protein behaviour, support counts and resource cost. Local contact GT
+never enters gradients or epoch selection. The existing composite W is a descriptive development
+objective, not permission to open test or choose favourable seeds. Paired initial sweeps do not
+complete the report's later capacity-matched, equal-budget numerical retuning and independent-seed
+confirmation phases. Those require observed feasibility and an explicit researcher-reviewed
+shortlist. Synthetic forward/backward, invariance, isolation and strict checkpoint tests establish
+technical integration only. The former numerical-retuning V9 proposal is not part of the
+executable campaign.
 
 ### 5.6. Post-HPO sparse concept discovery
 
@@ -5309,6 +5680,31 @@ curation resources, not automatically explicit negative inventories.
 42. Krähenbühl, P. & Koltun, V. (2011). “Efficient Inference in Fully Connected CRFs with
     Gaussian Edge Potentials.” *NeurIPS 2011*.
     [Proceedings paper](https://papers.nips.cc/paper_files/paper/2011/hash/beda24c1e1b46055dff2c39c98fd6fc1-Abstract.html).
+
+43. “SchNet: A continuous-filter convolutional neural network for modeling quantum interactions.”
+    [Primary paper](https://arxiv.org/abs/1706.08566).
+44. “Directional Message Passing for Molecular Graphs” (DimeNet).
+    [Primary paper](https://arxiv.org/abs/2003.03123).
+45. “Fast and Uncertainty-Aware Directional Message Passing for Non-Equilibrium Molecules” (DimeNet++).
+    [Primary paper](https://arxiv.org/abs/2011.14115).
+46. “Principal Neighbourhood Aggregation for Graph Nets.”
+    [Primary paper](https://arxiv.org/abs/2004.05718).
+47. “Learning from Protein Structure with Geometric Vector Perceptrons.”
+    [Primary paper](https://arxiv.org/abs/2009.01411).
+48. “Equivariant Message Passing for the Prediction of Tensorial Properties and Molecular Spectra” (PaiNN).
+    [Primary paper](https://arxiv.org/abs/2102.03150).
+49. “E(n) Equivariant Graph Neural Networks.”
+    [Primary paper](https://arxiv.org/abs/2102.09844).
+50. “Do Transformers Really Perform Bad for Graph Representation?” (Graphormer).
+    [Primary paper](https://arxiv.org/abs/2106.05234).
+51. IUPAC–IUB (1974). “Abbreviations and symbols for description of conformation of polypeptide chains.”
+    [Nomenclature](https://publications.iupac.org/pac/40/3/0291/index.html).
+52. wwPDB. [Atomic-position fields](https://mmcif.wwpdb.org/docs/tutorials/content/atomic-description.html).
+53. Biopython. [Shrake–Rupley SASA API](https://biopython.org/docs/latest/api/Bio.PDB.SASA.html).
+    Investigated for optional future absolute-area descriptors, not integrated as WISDOM output.
+
+V9 composes public LambdaForge operators inspired by these papers; Section 5.5.4 states the
+adaptations. It does not reproduce their original molecular training recipes or benchmark results.
 
 WISDOM's surface implementations were written independently. The v3 encoders test compact versions
 of mechanisms motivated by dMaSIF, DeltaConv, PTv3, and PointMamba; WISDOM neither copies their code

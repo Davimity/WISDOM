@@ -20,6 +20,7 @@ class GatedAtomicEncoder(nn.Module):
         residue_scale     : float = 32.0,
         residual_initial_scale: float | None = None,
         neutral_edge_initialization: bool = False,
+        project_inputs: bool = True,
     ) -> None:
         """Build residual sparse message layers and small edge conditioners.
 
@@ -35,6 +36,8 @@ class GatedAtomicEncoder(nn.Module):
                 and covalent residual update. ``None`` preserves the historical path.
             neutral_edge_initialization: Zero the final edge-conditioner layers so epoch zero uses
                 attribute-free message passing before learning physical corrections.
+            project_inputs: False accepts already encoded [N,H] states without a new projection;
+                input_dim must then equal hidden_dim. True preserves all historical state keys.
 
         Raises:
             ValueError: If a dimension, layer count, or physical scale is invalid.
@@ -48,7 +51,11 @@ class GatedAtomicEncoder(nn.Module):
         ):
             raise ValueError("atomic encoder dimensions, layers, and scales must be positive")
 
-        self.input_projection = nn.Linear(input_dim, hidden_dim)
+        if not project_inputs and input_dim != hidden_dim:
+            raise ValueError("hidden-state propagation requires input_dim=hidden_dim")
+        self.input_projection = (
+            nn.Linear(input_dim, hidden_dim) if project_inputs else nn.Identity()
+        )
         self.spatial_messages = nn.ModuleList(
             nn.Linear(hidden_dim, hidden_dim, bias=False) for _ in range(layers)
         )
@@ -131,6 +138,41 @@ class GatedAtomicEncoder(nn.Module):
             Encoded atom features ``[N,H]``.
         """
         hidden = self.input_projection(atom_features)
+        return self.propagate(
+            hidden, edge_index, edge_is_spatial, edge_is_covalent, edge_distance,
+            edge_bond_order, edge_same_residue, edge_same_chain, edge_residue_separation, gates,
+        )
+
+    def propagate(
+        self,
+        hidden                 : Tensor,
+        edge_index             : Tensor,
+        edge_is_spatial        : Tensor,
+        edge_is_covalent       : Tensor,
+        edge_distance          : Tensor,
+        edge_bond_order        : Tensor,
+        edge_same_residue      : Tensor,
+        edge_same_chain        : Tensor,
+        edge_residue_separation: Tensor,
+        gates                  : Mapping[str, Tensor],
+    ) -> Tensor:
+        """Apply the original message blocks directly to constructed atomic states.
+
+        Args:
+            hidden: Scalar hidden states [N,H]; no embedding tables or input projection are used.
+            edge_index: Unique undirected pairs [2,E], shared without rebuilding topology.
+            edge_is_spatial: Spatial membership bool [E].
+            edge_is_covalent: Covalent membership bool [E]; overlaps retain both contributions.
+            edge_distance: Center distances [E], Å.
+            edge_bond_order: Numeric bond orders [E].
+            edge_same_residue: Same-residue flags [E].
+            edge_same_chain: Same-chain flags [E].
+            edge_residue_separation: Absolute sequence separations [E].
+            gates: One-forward shared semantic gate values, including relation availability.
+
+        Returns:
+            Propagated states [N,H] with the exact historical branch/update arithmetic.
+        """
         source, target = edge_index
 
         spatial_features = torch.stack(

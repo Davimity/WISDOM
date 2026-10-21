@@ -22,11 +22,13 @@ from wisdom.models.PoolingType import PoolingType
 from wisdom.data.WisdomDataset import WisdomDataset
 from wisdom.data.WisdomCollator import WisdomCollator
 from wisdom.models.DiffusionBlock import DiffusionBlock
+from wisdom.models.ProteinTaskLoss import ProteinTaskLoss
 from wisdom.models.WeakLossProfile import WeakLossProfile
 from wisdom.models.WeakSurfaceLoss import WeakSurfaceLoss
-from wisdom.models.ProteinTaskLoss import ProteinTaskLoss
 from wisdom.models.StabilityProfile import StabilityProfile
 from wisdom.models.ArchitectureSpike import ArchitectureSpike
+from wisdom.models.AtomicEncoderType import AtomicEncoderType
+from wisdom.models.AtomicGraphEncoder import AtomicGraphEncoder
 from wisdom.models.ModelWeightAverage import ModelWeightAverage
 from wisdom.evaluation.BinaryMetricSuite import BinaryMetricSuite
 from wisdom.models.OptimizationProfile import OptimizationProfile
@@ -34,10 +36,11 @@ from wisdom.models.WeightAveragingMode import WeightAveragingMode
 from wisdom.evaluation.SurfaceMetricSuite import SurfaceMetricSuite
 from wisdom.visualization.ProteinReportPage import ProteinReportPage
 from wisdom.evaluation.SubgroupMetricSuite import SubgroupMetricSuite
-from wisdom.models.InitializationProfile import InitializationProfile
 from wisdom.features.SurfaceFeatureSchema import SurfaceFeatureSchema
+from wisdom.models.InitializationProfile import InitializationProfile
 from wisdom.analysis.WisdomAnalysisProfile import WisdomAnalysisProfile
 from wisdom.models.DiffusionSurfaceEncoder import DiffusionSurfaceEncoder
+from wisdom.models.FeedbackPropagationMode import FeedbackPropagationMode
 from wisdom.evaluation.OptimizationDiagnostics import OptimizationDiagnostics
 from wisdom.evaluation.SurfacePredictionReport import SurfacePredictionReport
 from wisdom.models.SurfaceRepresentationMode import SurfaceRepresentationMode
@@ -117,8 +120,25 @@ class Training(lf.Work):
         surface_geometry_transfer: bool = False,
         surface_chunk_size   : int = 8192,
         atomic_message_chunk_size: int = 65536,
+        atomic_encoder_type: str = "baseline",
+        atomic_radial_count: int = 16,
+        atomic_vector_channels: int = 16,
+        atomic_basis_count: int = 4,
+        atomic_spatial_cutoff: float = 6.0,
+        atomic_covalent_cutoff: float = 64.0,
+        atomic_maximum_triplets: int = 1_000_000,
+        atomic_maximum_pairwise_bytes: int = 134_217_728,
+        atomic_allow_dense_global: bool = False,
+        feedback_propagation       : str = "none",
+        post_feedback_initial_scale: float = 0.1,
+        surface_stage_layers       : Sequence[int] | None = None,
+        checkpoint_surface         : bool = False,
+        checkpoint_post_feedback   : bool = False,
         vector_atomic_channels: int = 0,
         interaction_round     : str = "single",
+        architecture_implementation: str = "legacy",
+        feedback_weighting    : str = "point",
+        gate_cost_normalization: str = "historical_mean",
         atomic_edge_distance_scale: float = 6.0,
         dropout              : float = 0.2,
         surface_encoder_type : str = "diffusion",
@@ -268,8 +288,29 @@ class Training(lf.Work):
                 candidate atom when computing atom-to-surface attention scores.
             surface_chunk_size: Maximum surface points in one atom-transfer chunk.
             atomic_message_chunk_size: Maximum atomic messages materialized per RGCN chunk.
+            atomic_encoder_type: Exact V9 atomic operator/control; baseline keeps historical keys.
+            atomic_radial_count: Gaussian/sinusoidal/Bessel radial basis count, positive.
+            atomic_vector_channels: Positive GVP polar-channel count; PaiNN uses hidden_dim.
+            atomic_basis_count: Positive NNConv basis count, inactive for full filters.
+            atomic_spatial_cutoff: Spatial radial support in Å, without generating new neighbors.
+            atomic_covalent_cutoff: Finite DimeNet covalent support in Å; out-of-support edges fail.
+            atomic_maximum_triplets: Hard bound on explicit typed directional triplet count.
+            atomic_maximum_pairwise_bytes: Principal directional/path/attention tensor byte guard,
+                not a forecast of total backward or optimizer VRAM.
+            atomic_allow_dense_global: Explicit permission for the bounded global-only experiment.
+            feedback_propagation: none preserves old V8b; d0-d8 selects the finite V8d control.
+            post_feedback_initial_scale: Initial learned residual gamma; zero is exact identity.
+            surface_stage_layers: Optional positive [first,second] surface block budget for V8d;
+                None preserves surface_layers per stage, normally 4+4 in the frozen campaign.
+            checkpoint_surface: Recompute DiffusionNet blocks without severing gradients.
+            checkpoint_post_feedback: Recompute the post-feedback transform with identical RNG.
             vector_atomic_channels: Equivariant vector-state channels; zero disables spike C.
             interaction_round: ``single``, added-depth control, or bidirectional fusion spike B.
+            architecture_implementation: legacy restores archived RNG/vector/feedback behavior;
+                controlled enables audited V8 semantics and paired optional-module initialization.
+            feedback_weighting: point or represented-area-weighted distance mean (area).
+            gate_cost_normalization: historical_mean or baseline_count; the latter fixes each
+                baseline gate's individual L0 coefficient when optional gates are added.
             atomic_edge_distance_scale: Atomic distance normalization scale in ångströms.
             dropout: Dropout probability in ``[0,1)``.
             surface_encoder_type: V3 surface-propagation hypothesis; v1 requires ``diffusion``.
@@ -506,8 +547,25 @@ class Training(lf.Work):
             surface_geometry_transfer=surface_geometry_transfer,
             surface_chunk_size=surface_chunk_size,
             atomic_message_chunk_size=atomic_message_chunk_size,
+            atomic_encoder_type=atomic_encoder_type,
+            atomic_radial_count=atomic_radial_count,
+            atomic_vector_channels=atomic_vector_channels,
+            atomic_basis_count=atomic_basis_count,
+            atomic_spatial_cutoff=atomic_spatial_cutoff,
+            atomic_covalent_cutoff=atomic_covalent_cutoff,
+            atomic_maximum_triplets=atomic_maximum_triplets,
+            atomic_maximum_pairwise_bytes=atomic_maximum_pairwise_bytes,
+            atomic_allow_dense_global=atomic_allow_dense_global,
+            feedback_propagation=feedback_propagation,
+            post_feedback_initial_scale=post_feedback_initial_scale,
+            surface_stage_layers=surface_stage_layers,
+            checkpoint_surface=checkpoint_surface,
+            checkpoint_post_feedback=checkpoint_post_feedback,
             vector_atomic_channels=vector_atomic_channels,
             interaction_round=interaction_round,
+            architecture_implementation=architecture_implementation,
+            feedback_weighting=feedback_weighting,
+            gate_cost_normalization=gate_cost_normalization,
             atomic_edge_distance_scale=atomic_edge_distance_scale,
             dropout=dropout,
             surface_encoder_type=surface_encoder_type,
@@ -652,8 +710,25 @@ def _train_wisdom(
     surface_geometry_transfer: bool = False,
     surface_chunk_size   : int = 8192,
     atomic_message_chunk_size: int = 65536,
+    atomic_encoder_type: str = "baseline",
+    atomic_radial_count: int = 16,
+    atomic_vector_channels: int = 16,
+    atomic_basis_count: int = 4,
+    atomic_spatial_cutoff: float = 6.0,
+    atomic_covalent_cutoff: float = 64.0,
+    atomic_maximum_triplets: int = 1_000_000,
+    atomic_maximum_pairwise_bytes: int = 134_217_728,
+    atomic_allow_dense_global: bool = False,
+    feedback_propagation       : str = "none",
+    post_feedback_initial_scale: float = 0.1,
+    surface_stage_layers       : Sequence[int] | None = None,
+    checkpoint_surface         : bool = False,
+    checkpoint_post_feedback   : bool = False,
     vector_atomic_channels: int = 0,
     interaction_round     : str = "single",
+    architecture_implementation: str = "legacy",
+    feedback_weighting    : str = "point",
+    gate_cost_normalization: str = "historical_mean",
     atomic_edge_distance_scale: float = 6.0,
     dropout              : float = 0.2,
     surface_encoder_type : str = "diffusion",
@@ -803,8 +878,27 @@ def _train_wisdom(
             atom-to-surface candidate scores.
         surface_chunk_size: Maximum transfer points per activation chunk.
         atomic_message_chunk_size: Maximum RGCN messages per chunk.
+        atomic_encoder_type: Exact V9 atomic operator/control; baseline preserves historical keys.
+        atomic_radial_count: Gaussian/sinusoidal/Bessel radial basis count, positive.
+        atomic_vector_channels: Persistent GVP polar-channel count, positive; PaiNN uses hidden_dim.
+        atomic_basis_count: Positive NNConv basis count, inactive for full filters.
+        atomic_spatial_cutoff: Spatial radial support in Å, without generating new neighbors.
+        atomic_covalent_cutoff: Finite DimeNet covalent support in Å; out-of-support edges fail.
+        atomic_maximum_triplets: Hard bound on explicit typed directional triplet count.
+        atomic_maximum_pairwise_bytes: Principal directional/path/attention tensor byte guard,
+            not a forecast of total backward or optimizer VRAM.
+        atomic_allow_dense_global: Explicit permission for the bounded global-only experiment.
+        feedback_propagation: none preserves V8b; d0-d8 selects the bounded V8d mode.
+        post_feedback_initial_scale: Initial learned residual gamma; zero starts at identity.
+        surface_stage_layers: Optional positive [first,second] block counts, only for V8d.
+        checkpoint_surface: Recompute surface blocks during backward, preserving gradients/RNG.
+        checkpoint_post_feedback: Recompute post-feedback hidden-state propagation during backward.
         vector_atomic_channels: Equivariant atom-vector channel count; zero keeps scalar atoms.
         interaction_round: Single fusion, equal-depth control, or bidirectional feedback round.
+        architecture_implementation: legacy restores history; controlled isolates new-module RNG
+            and activates coverage/symmetry/AMP fixes, including the null-message matched control.
+        feedback_weighting: point or area times distance mean; no detach in the return path.
+        gate_cost_normalization: historical_mean or fixed baseline_count cost denominator.
         atomic_edge_distance_scale: Atomic distance normalization scale in ångströms.
         dropout: Dropout probability in ``[0,1)``.
         surface_encoder_type: V3 controlled surface encoder name.
@@ -973,10 +1067,19 @@ def _train_wisdom(
         architecture_overrides.get("vector_atomic_channels", vector_atomic_channels),
     )
 
+    feedback_mode = FeedbackPropagationMode(feedback_propagation)
+    if feedback_mode is not FeedbackPropagationMode.NONE:
+        if (architecture is not ArchitectureSpike.CUSTOM or model_version != 2
+                or surface_encoder_type != "diffusion"):
+            raise ValueError(
+                "V8d requires model_version=2, diffusion and architecture_spike=custom"
+            )
+        interaction_round = feedback_mode.interaction().value
+
     if weak_loss_profile.startswith("PENDING"):
         raise ValueError(
-            "V7 carry-forward ledger is pending: review V2-V6h decisions, replace every "
-            "REPLACE marker, then set weak_loss_profile=custom. No data have been loaded."
+            "V7/V8 carry-forward ledger is pending: review the upstream decisions, replace "
+            "every REPLACE marker, then set weak_loss_profile=custom. No data have been loaded."
         )
     loss_profile = WeakLossProfile(weak_loss_profile)
     protein_task_loss = ProteinTaskLoss(
@@ -1296,6 +1399,11 @@ def _train_wisdom(
         f"training_seed={effective_training_seed}"
     )
 
+    # Editable LF checkouts can share a version number while exposing different public APIs.
+    # Reject missing contracts before decoding any structure; never substitute another operator.
+
+    AtomicGraphEncoder.require_public_api(atomic_encoder_type)
+
     requested_splits = ("train", "val", "test") if evaluate_test else ("train", "val")
     work.log(f"[Training {run_label}] loading managed splits: {requested_splits}")
 
@@ -1310,7 +1418,10 @@ def _train_wisdom(
                 model_version == 3 or weak_surface_loss.needs_surface_neighbors
                 or surface_refiner_type not in {"none", "heat", "learned_heat"}
             ),
-            include_atom_geometry=vector_atomic_channels > 0,
+            include_atom_geometry=(
+                vector_atomic_channels > 0
+                or AtomicEncoderType(atomic_encoder_type).needs_positions()
+            ),
         )
         for split in requested_splits
     }
@@ -1332,7 +1443,10 @@ def _train_wisdom(
                 model_version == 3 or weak_surface_loss.needs_surface_neighbors
                 or surface_refiner_type not in {"none", "heat", "learned_heat"}
             ),
-            include_atom_geometry=vector_atomic_channels > 0,
+            include_atom_geometry=(
+                vector_atomic_channels > 0
+                or AtomicEncoderType(atomic_encoder_type).needs_positions()
+            ),
         )
         if evaluate_test:
             loader_datasets["test_surface"] = WisdomDataset(
@@ -1345,7 +1459,10 @@ def _train_wisdom(
                     model_version == 3 or weak_surface_loss.needs_surface_neighbors
                     or surface_refiner_type not in {"none", "heat", "learned_heat"}
                 ),
-                include_atom_geometry=vector_atomic_channels > 0,
+                include_atom_geometry=(
+                    vector_atomic_channels > 0
+                    or AtomicEncoderType(atomic_encoder_type).needs_positions()
+                ),
             )
 
     generator = torch.Generator().manual_seed(effective_training_seed)
@@ -1423,8 +1540,25 @@ def _train_wisdom(
         "surface_geometry_transfer": surface_geometry_transfer,
         "surface_chunk_size":   surface_chunk_size,
         "atomic_message_chunk_size": atomic_message_chunk_size,
+        "atomic_encoder_type": atomic_encoder_type,
+        "atomic_radial_count": atomic_radial_count,
+        "atomic_vector_channels": atomic_vector_channels,
+        "atomic_basis_count": atomic_basis_count,
+        "atomic_spatial_cutoff": atomic_spatial_cutoff,
+        "atomic_covalent_cutoff": atomic_covalent_cutoff,
+        "atomic_maximum_triplets": atomic_maximum_triplets,
+        "atomic_maximum_pairwise_bytes": atomic_maximum_pairwise_bytes,
+        "atomic_allow_dense_global": atomic_allow_dense_global,
+        "feedback_propagation":        feedback_propagation,
+        "post_feedback_initial_scale": post_feedback_initial_scale,
+        "surface_stage_layers":        surface_stage_layers,
+        "checkpoint_surface":          checkpoint_surface,
+        "checkpoint_post_feedback":    checkpoint_post_feedback,
         "vector_atomic_channels": vector_atomic_channels,
         "interaction_round": interaction_round,
+        "architecture_implementation": architecture_implementation,
+        "feedback_weighting": feedback_weighting,
+        "gate_cost_normalization": gate_cost_normalization,
         "atomic_edge_distance_scale": atomic_edge_distance_scale,
         "dropout":              dropout,
         "surface_encoder_type": surface_encoder_type,
@@ -1498,6 +1632,13 @@ def _train_wisdom(
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(effective_initialization_seed)
 
+    if AtomicEncoderType(atomic_encoder_type) is AtomicEncoderType.PNA_FULL:
+        work.log(f"[Training {run_label}] fitting training-only PNA relation degree statistics")
+        degree_statistics = AtomicGraphEncoder.training_degree_statistics(
+            (collator([datasets["train"][index]]) for index in range(len(datasets["train"]))),
+            atom_spatial_k,
+        )
+        available_parameters["atomic_degree_log_means"] = degree_statistics
     model, model_parameters = _create_model(model_version, available_parameters)
     architecture_name       = str(getattr(model, "ARCHITECTURE_NAME", type(model).__name__))
     model.to(device)
@@ -1585,6 +1726,7 @@ def _train_wisdom(
     preprocessing_bytes = sum(values["total"] for values in split_storage.values())
 
     parameter_count = sum(parameter.numel() for parameter in model.parameters())
+    trainable_parameter_count = sum(p.numel() for p in model.parameters() if p.requires_grad)
     gate_parameter_count = sum(parameter.numel() for parameter in gate_parameters)
     parameter_bytes = sum(
         parameter.numel() * parameter.element_size()
@@ -1601,6 +1743,15 @@ def _train_wisdom(
     evidence_input_width = int(getattr(model, "evidence_input_width", hidden_dim))
 
     work.metrics.log("parameter_count", float(parameter_count))
+    work.metrics.log("trainable_parameter_count", float(trainable_parameter_count))
+    work.metrics.log("atomic_encoder_parameter_count", float(sum(
+        p.numel() for p in model.atomic_encoder.parameters() if p.requires_grad
+    )))
+    post_feedback = getattr(model, "post_feedback_propagation", None)
+    if post_feedback is not None:
+        work.metrics.log("post_feedback_parameter_count", float(sum(
+            parameter.numel() for parameter in post_feedback.parameters()
+        )))
     work.metrics.log("gate_parameter_count", float(gate_parameter_count))
     work.metrics.log("semantic_gate_count", float(len(model.semantic_gates.names)))
     work.metrics.log("evidence_head_parameter_count", float(evidence_parameter_count))
@@ -1882,6 +2033,17 @@ def _train_wisdom(
         train_gate_regularization = float(gate_regularization_sum) / max(1, examples)
         train_total_loss = float(total_loss_sum) / max(1, examples)
 
+        # Read the last training batch before validation forwards overwrite encoder diagnostics.
+        # These scalars are snapshots, not sample-weighted summaries of the complete epoch.
+
+        for name, value in getattr(model.atomic_encoder, "diagnostics", {}).items():
+            work.metrics.log(
+                f"atomic_{name}", float(value.detach().cpu()), step=epoch, split="train"
+            )
+        if post_feedback is not None:
+            work.metrics.log("post_feedback_scale", float(post_feedback.scale.detach().cpu()),
+                             step=epoch, split="train")
+
         # Global validation is required every epoch for checkpoint selection, patience, and HPO.
         # Local diagnostics use the sidecar-enabled view only on explicitly scheduled epochs.
 
@@ -1966,7 +2128,7 @@ def _train_wisdom(
         if optimization_monitor is not None:
             for name, diagnostic_value in optimization_monitor.metrics().items():
                 work.metrics.log(name, diagnostic_value, step=epoch, split="train")
-        gate_expected = float(model.gate_regularization().detach().cpu())
+        gate_expected = float(model.semantic_gates.regularization().detach().cpu())
         gate_deterministic = sum(
             float(model.semantic_gates.deterministic_value(name).detach().cpu()) > 0.0
             for name in model.semantic_gates.names
@@ -2655,6 +2817,7 @@ def _train_wisdom(
         "test_surface":                  test_surface_metrics,
         "curvature_features":            curvature_features,
         "parameter_count":               parameter_count,
+        "trainable_parameter_count":     trainable_parameter_count,
         "gate_parameter_count":          gate_parameter_count,
         "semantic_gate_count":           len(model.semantic_gates.names),
         "evidence_head_parameter_count": evidence_parameter_count,
@@ -3508,6 +3671,8 @@ def _model_inputs(batch: Mapping[str, Any]) -> dict[str, Any]:
         Keyword mapping accepted by the active trainable model generation.
     """
     names = list(_MODEL_INPUT_NAMES)
+    if "atom_batch" in batch:
+        names.append("atom_batch")
     names.extend(name for name in _V3_INPUT_NAMES if name in batch)
     names.extend(name for name in _VECTOR_INPUT_NAMES if name in batch)
     if "surface_explicit_features" in batch:

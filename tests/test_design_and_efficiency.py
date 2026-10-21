@@ -265,7 +265,7 @@ def test_bilingual_readmes_have_parallel_sections_and_scientific_detail() -> Non
     # independent equations, compatibility contracts and substantial interpretation.
     for document in (english, spanish):
         assert re.findall(r"^#### (\d+(?:\.\d+)*)\. ", document, re.MULTILINE) == [
-            "5.3.1", "5.5.1", "5.5.2",
+            "5.3.1", "5.5.1", "5.5.2", "5.5.3", "5.5.4",
         ]
         assert not re.search(r"^#{5,6} ", document, re.MULTILINE)
     for number in (number for _, number in english_headings if number != "0"):
@@ -464,7 +464,11 @@ def test_preprocessing_configuration_reuses_complete_design() -> None:
     assert preprocess_values["with"]["dilutions"] == {"from": "select.dilutions"}
     assert preprocess_values["with"]["structures"] == {"from": "select.structures"}
     assert preprocess_values["with"]["dataset_name"] == "wisdom-dna-reduced"
-    assert preprocess_values["with"]["dataset_version"] == "7"
+    assert preprocess_values["with"]["dataset_version"] == "8"
+    assert preprocess_values["with"]["atomic_context"] is True
+    assert preprocess_values["with"]["extended_surface_atom"] is True
+    assert preprocess_values["with"]["extended_radius"] == 12.0
+    assert preprocess_values["with"]["extended_k_max"] == 96
     assert preprocess_values["with"]["include_full_train"] is False
     assert preprocess_values["with"]["train_dilutions"] == ["replicate-00/train-25"]
     assert preprocess_values["with"]["include_validation"] is True
@@ -766,7 +770,13 @@ def test_experiment_campaign_uses_ordered_names_and_traceability_headers() -> No
         "v8/wisdom_v8a.yaml",
         "v8/wisdom_v8b.yaml",
         "v8/wisdom_v8c.yaml",
-        "v9/wisdom_v9.yaml",
+        "v8/wisdom_v8d.yaml",
+        "v9/wisdom_v9a.yaml",
+        "v9/wisdom_v9b.yaml",
+        "v9/wisdom_v9c.yaml",
+        "v9/wisdom_v9d.yaml",
+        "v9/wisdom_v9e.yaml",
+        "v9/wisdom_v9f.yaml",
         "v10/wisdom_v10.yaml",
     )
     required_headers = ("OBJECTIVE:", "PREREQUISITES:", "VARIES:", "FIXED:", "DECISION:")

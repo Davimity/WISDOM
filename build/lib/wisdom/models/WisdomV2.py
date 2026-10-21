@@ -314,7 +314,7 @@ class WisdomV2(WisdomV1):
             and self.head_type in {HeadType.GLOBAL_CONTEXT, HeadType.FILM}
         )
         evidence_features, surface_logits = self.encode_surface(
-            **inputs, compute_logits=not replace_local,
+            **inputs, compute_logits=not replace_local, surface_area_weights=area_weights,
         )
         protein_count = len(surface_ptr) - 1
         head_output: dict[str, Tensor] = {}

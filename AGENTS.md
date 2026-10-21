@@ -92,7 +92,8 @@ project contract, not optional style suggestions.
 - Expose exactly the cohesive LambdaForge 0.15 Work classes required by public YAML actions:
   `Selection`, `Preprocessing`, `Visualization`, `DNAValidation`, `Training`, and the review Works
   `StudyReview` and `ModelSetReview`; `ModelValidation` is legacy portable-reader compatibility.
-  Optional physicochemical fields use `SurfaceFeatures`. The independent zinc benchmark uses
+  Optional physicochemical fields use `SurfaceFeatures`. Optional universal structural sidecars
+  and geometry-reuse publication use `StructuralEnrichment`. The independent zinc benchmark uses
   `ZincDiscovery`, `ZincSelection`, `ZincPreprocessing`, and `ZincValidation`; it reuses universal
   geometry and the DNA independence algorithms, never DNA-specific evidence or labels.
   Training studies must be single executable Works, never `steps` compositions. The
@@ -361,6 +362,11 @@ project contract, not optional style suggestions.
   filename and do not accept the old `#`/comma syntax.
 - Keep atom and surface graph construction sparse. Never materialize dense `N x N` or `M x M`
   distance matrices.
+  The researcher-approved V9f `structural_global` and `global_no_structure` atomic attention
+  profiles are the sole bounded dense-attention/path-code exception, not a dense-distance graph.
+  They require `atomic_allow_dense_global=true`, explicit per-protein ownership and hard byte
+  guards. Never extend this exception to another experiment or silently replace global attention
+  with a sparse approximation.
 - Persist each undirected graph pair once with `src < dst`. Preserve covalent edges outside spatial
   cutoffs and distinguish relation semantics with enums/bit masks.
 - Keep generated surfaces deterministic for identical structure and configuration.

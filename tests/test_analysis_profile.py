@@ -118,6 +118,19 @@ def test_profile_is_native_stable_and_immutable() -> None:
         first.document["metrics"]["val_auprc"]["priority"] = 0
 
 
+def test_v8d_capacity_and_scale_are_native_diagnostics_not_selection_metrics() -> None:
+    """Added transform size/gamma have explicit semantics without influencing HPO or selection."""
+    profile = AnalysisProfile.resolve(Training.analysis_profile)
+    capacity = profile.document["metrics"]["post_feedback_parameter_count"]
+    scale = profile.document["metrics"]["train_post_feedback_scale"]
+    assert capacity["category"] == "model/capacity"
+    assert capacity["aggregation"] == "terminal" and capacity["discovery"] is False
+    assert scale["category"] == "model/feedback" and scale["split"] == "train"
+    assert scale["aggregation"] == "latest" and scale["discovery"] is False
+    assert scale["visibility"] == "advanced" and scale["direction"] == "unknown"
+    assert "probability" in scale["description"]
+
+
 def test_actual_metric_producers_have_scientific_metadata() -> None:
     """All current evaluation outputs have explicit meaning, not a fallback name guess."""
     probability = torch.tensor([0.9, 0.1, 0.8, 0.2, 0.7, 0.3, 0.6, 0.4])

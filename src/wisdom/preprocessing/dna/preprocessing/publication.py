@@ -3,13 +3,16 @@
 import csv
 import json
 import shutil
+import hashlib
 import lambdaforge as lf
 
 from typing import Any
 from pathlib import Path
+from dataclasses import replace
 from collections.abc import Iterable, Mapping, Sequence
 from wisdom.preprocessing.dna.DNAValidation import DNAValidation
 from lambdaforge.data import DatasetAsset, DatasetIndex, DatasetMember
+from wisdom.preprocessing.common.structure.StructuralSidecars import StructuralSidecars
 
 
 def publish_dataset(
@@ -20,6 +23,8 @@ def publish_dataset(
     annotation_report  : Path,
     dataset_name       : str,
     dataset_version    : str,
+    structural_sidecars: StructuralSidecars | None = None,
+    workers            : int = 1,
 ) -> dict[str, Any]:
     """Create the portable root, run scientific validation, and publish one dataset.
 
@@ -31,6 +36,8 @@ def publish_dataset(
         annotation_report: Ordered DNA sidecar report.
         dataset_name: Stable LambdaForge Registry family.
         dataset_version: Immutable version selected by the researcher.
+        structural_sidecars: Optional common context/candidate families; None preserves legacy data.
+        workers: Native bounded sidecar concurrency, default one.
 
     Returns:
         Dataset record, member/group counts, and scientific validation verdict.
@@ -53,6 +60,26 @@ def publish_dataset(
         rows,
     )
     _write_index(final_root, rows, annotation_report)
+
+    # Enrichment reads only fixed universal atoms/points and (if still exact) deposited metadata.
+    # The native assets are joined before the independent DNA audit and never enter annotations.
+
+    if structural_sidecars is not None:
+        members_in = list(DatasetIndex(final_root / "members.jsonl"))
+        additions = structural_sidecars.generate(work, {member.member_id:
+            final_root / member.assets["universal_npz"].path for member in members_in}, workers)
+        enriched_members = []
+        for member in members_in:
+            assets = dict(member.assets)
+            for name, path in additions[member.member_id].items():
+                destination = final_root / "structural-sidecars" / name / f"{member.member_id}.npz"
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(path, destination)
+                assets[name] = DatasetAsset(path=destination.relative_to(final_root).as_posix(),
+                    sha256="sha256:" + hashlib.sha256(destination.read_bytes()).hexdigest(),
+                    size_bytes=destination.stat().st_size, media_type="application/x-npz")
+            enriched_members.append(replace(member, assets=assets))
+        DatasetIndex.write(final_root / "members.jsonl", enriched_members)
 
     work.log("Running final checksum, NPZ, sidecar, split, group, and dilution validation")
     validation = DNAValidation().audit(final_root, work.run_dir / "dna-validation")
@@ -81,7 +108,7 @@ def publish_dataset(
         output        = "dataset",
         metadata      = {
             "description":       "Leakage-safe DNA proteins with universal WISDOM surfaces",
-            "structural_schema": "2.1",
+            "structural_schema": "3.0",
             "annotation_schema": "1.3",
             "manifest_schema":   "1.0",
             "supervision":       "protein-level-only",

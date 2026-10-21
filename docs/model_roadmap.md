@@ -19,7 +19,7 @@ does **not** use the retired dense surface graph, a surface GCN, or area-weighte
 The construction campaign measures seed variance, separates initialization from later randomness,
 selects initialization and optimizer policies, restores a broad core HPO, checks pooling, evaluates
 weak-loss families separately and then jointly when justified, compares head relationships, tests
-isolated architectural spikes, retunes only sensitive numerical parameters, and finally confirms
+isolated architectural spikes, compares atomic encoders in V9a–V9f, and finally confirms
 the frozen ledger on fresh seeds.
 
 V1 is frozen only after `wisdom_v10.yaml` completes without unacceptable collapse,
@@ -28,12 +28,14 @@ itself evidence that the candidate belongs to V1.
 
 ### 1.1. Construction campaigns V8a, V8b and V8c
 
-These labels are construction experiments, not formal model generations. After reviewing V7,
-copy its identical selected pipeline/head ledger into all three pending YAMLs. V8a tests only
-existing point-geometry conditioning (8 Runs). V8b compares one-pass baseline, added surface
-depth, parameter-matched null-message update and real surface-to-atom feedback (16 Runs).
+These labels are construction experiments, not formal model generations. Each independently
+crosses its architectures with both reviewed V7 lines: MAX R Single and Attention NRK FiLM.
+The line includes its exact pooling, priors and head; no cross-line combinations are permitted.
+V8a tests existing point-geometry conditioning (16 Runs). V8b compares one-pass baseline, added
+surface depth, parameter-matched null-message update and real surface-to-atom feedback (32 Runs).
 V8c tests one scalar→equivariant-vector→invariant-norm atomic augmentation with 8/16 channels
-(12 Runs). Each uses paired seeds 151/157/163/167 and contemporary controls, without HPO/pruning.
+(24 Runs). Each uses paired seeds 151/157/163/167 and contemporary controls, without HPO/pruning.
+The complete design is 72 Runs; neither Study nor line waits for another to finish.
 
 The primary feedback contrast is bidirectional vs depth_control, not vs baseline. All two-stage
 variants share the second transfer/projection/encoder. The matched update never reads S1 and
@@ -42,10 +44,37 @@ There is no new atomic message-passing round, recurrent TTC, preprocessing or pe
 vector encoder. The combined former YAML/reviewer survive as non-executable .yaml.example
 snapshots; use the three separate validation-only checkpoint reviewers instead.
 
-PENDING_V7 prevents actual computation until review. The controlled behavior policy isolates new
+The reviewed coefficients now use custom weak losses; no pending-winner placeholder remains.
+Native references are unique, but scientific comparisons use the SAME line and SAME seed.
+The controlled behavior policy isolates new
 module RNG, fixes uncovered feedback atoms and undirected-vector symmetry, and keeps the
 baseline gate-cost denominator fixed. Historical checkpoints default to legacy behavior.
 See README section 5.5.2 for equations, defaults, limitations and the scientific comparisons.
+
+The V9 construction studies replace the former numerical-retuning template. Six independent fixed
+sweeps compare classical propagation, edge-conditioned messages, multi-statistic aggregation,
+radial/directional models, persistent equivariant states and sparse/global attention. They use
+public LambdaForge operators, one reviewed MAX R Single / Heat6 context and four new paired seeds
+per profile (172 Runs including contemporary controls). They add no preprocessing, surface
+supervision or implicit V8 winner. Only V9f permits bounded global dense attention through an
+explicit researcher-approved opt-in. Generic degree/path structural attention is not claimed to
+reproduce Graphormer's original path-edge recipe. See root README §5.5.4 for defaults, guards,
+checkpoint compatibility and the scientific follow-up phases that still require real evidence.
+The completed V8 audit review retains the one-pass MAX baseline for the initial V9 screen;
+attention/FiLM remains a possible small follow-up, not an automatic second policy axis.
+All six training Studies request 2 GPUs, 36 CPUs and 96 GiB total host RAM with native automatic
+concurrency. See [the evidence and execution decision](v9_execution_review.md).
+
+V8d separately implements the missing post-feedback atomic communication, without adopting V9
+operators or changing the V8b evidence. D0–D3 reuse the old routes; D4/D5 add one/two independent
+hidden-state graph layers; D6 is the matched null-feedback control; D7 skips the feedback MLP;
+D8 adds local capacity without edges. Its 32-Run main plan freezes the exact two-policy V8b
+ledger and 4+4 surface budget. Identity-start scaling, compact surface budgets and activation
+recomputation are explicit options. One feedback cycle is supported, not recurrent TTC or a
+second unverified cycle. Completed four-seed V8d results in the researcher's report improve MAX
+after added propagation, but the matched null route improves similarly; attention does not show
+the same benefit. This is not sufficient evidence to adopt feedback in V9. Fresh-seed confirmation
+remains pending. See README §5.5.3, the V8d implementation audit and the execution review above.
 
 ## 2. WISDOM V2 — multi-view signal audit
 

@@ -10,6 +10,7 @@ from wisdom.preprocessing.common.snapshots import validate_structure_snapshot
 from wisdom.preprocessing.dna.preprocessing.publication import publish_dataset
 from wisdom.preprocessing.dna.preprocessing.annotations import generate_annotations
 from wisdom.preprocessing.dna.preprocessing.DatasetManifests import DatasetManifests
+from wisdom.preprocessing.common.structure.StructuralSidecars import StructuralSidecars
 
 
 class Preprocessing(lf.Work):
@@ -60,6 +61,14 @@ class Preprocessing(lf.Work):
         positive_gap                 : float           = 1.4,
         negative_gap                 : float           = 3.0,
         sensitivity_gaps             : Sequence[float] = (1.0, 1.4, 2.0),
+
+        # Optional universal assets never change the base NPZ configuration or task targets.
+
+        atomic_context               : bool            = False,
+        source_quality               : bool            = True,
+        extended_surface_atom        : bool            = False,
+        extended_radius              : float           = 12.0,
+        extended_k_max               : int             = 96,
     ) -> dict[str, Any]:
         """Execute preprocessing as five explicit, resumable scientific stages.
 
@@ -93,6 +102,11 @@ class Preprocessing(lf.Work):
             positive_gap: Largest confidently DNA-contacting surface gap in ångströms.
             negative_gap: Smallest confidently non-contacting gap in ångströms.
             sensitivity_gaps: Additional evaluation-only positive cutoffs in ångströms.
+            atomic_context: Attach independently versioned atom/residue context, default false.
+            source_quality: Include observed source quality when available, default true.
+            extended_surface_atom: Attach expanded CSR candidates, default false.
+            extended_radius: Positive optional candidate radius in Å, default 12.
+            extended_k_max: Positive optional per-point storage cap, default 96.
 
         Returns:
             Published dataset identity, member count, leakage-group count, and verdict.
@@ -115,6 +129,10 @@ class Preprocessing(lf.Work):
             raise ValueError(
                 f"workers must be between 1 and the allocated {self.resources.cpu} CPUs"
             )
+
+        # Reject an occupied immutable release before spending time on geometry or enrichment.
+
+        self.outputs.dataset_preflight(name=dataset_name, version=dataset_version)
 
         if self.resuming:
             self.log(
@@ -260,4 +278,7 @@ class Preprocessing(lf.Work):
             annotation_report,
             dataset_name,
             dataset_version,
+            structural_sidecars = StructuralSidecars(atomic_context, source_quality,
+                extended_surface_atom, extended_radius, extended_k_max),
+            workers = workers,
         )

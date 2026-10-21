@@ -14,6 +14,7 @@ from torch.utils.data import DataLoader
 from collections.abc import Mapping, Sequence
 from wisdom.data.WisdomDataset import WisdomDataset
 from wisdom.data.WisdomCollator import WisdomCollator
+from wisdom.models.AtomicEncoderType import AtomicEncoderType
 from wisdom.Training import Training, _create_model, _evaluate
 from wisdom.visualization.ProteinReportPage import ProteinReportPage
 from wisdom.visualization.ValidationSelection import ValidationSelection
@@ -225,10 +226,12 @@ class ModelValidation(lf.Work):
                             or state["model_parameters"].get("surface_refiner_type", "none")
                             not in {"none", "heat", "learned_heat"}
                         ),
-                        include_atom_geometry=state["model_parameters"].get(
-                            "vector_atomic_channels", 0
-                        )
-                        > 0,
+                        include_atom_geometry=(
+                            state["model_parameters"].get("vector_atomic_channels", 0) > 0
+                            or AtomicEncoderType(
+                                state["model_parameters"].get("atomic_encoder_type", "baseline")
+                            ).needs_positions()
+                        ),
                     )
                     loader = DataLoader(
                         data,

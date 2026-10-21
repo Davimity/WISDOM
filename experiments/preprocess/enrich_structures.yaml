@@ -1,0 +1,20 @@
+# Enrich an existing immutable placement; no selection, surface build or Laplacian solve.
+run: wisdom.preprocessing.common.StructuralEnrichment.StructuralEnrichment  # Shared DNA/Zn Work.
+with:  # Parameters of StructuralEnrichment.run; data membership remains unchanged.
+  dataset: {dataset: wisdom-dna-reduced@6}  # Existing source placement; select wisdom-zinc@1 for Zn.
+  dataset_name: wisdom-dna-reduced  # Use wisdom-zinc when enriching that independent task.
+  dataset_version: "8"  # New destination; choose another unused version if already published.
+  atomic_context: true  # Compact canonical chemistry and masked residue torsions.
+  source_quality: true  # Observed metadata only when original source bytes can be verified.
+  extended_surface_atom: true  # Independent CSR candidate sidecar, not new model inputs.
+  extended_radius: 12.0  # Inclusive protein atom-center cutoff in Å.
+  extended_k_max: 96  # Positive cap; record all truncations and allow empty rows.
+  workers: 4  # Independent file workers; does not enter the scientific identity.
+# True Work defaults: atomic_context=true, source_quality=true, extended_surface_atom=true,
+# extended_radius=12 Å (>0 finite), extended_k_max=96 (>0 integer), workers=4 (>0).
+# dataset/name/version have no defaults. Original IDs, splits, targets and assets are retained.
+# Disabled families generate nothing; any already present source assets are preserved.
+# This publishes the same @8 destination as the full DNA recipe: choose ONE route per release.
+resources: {cpu: 4, memory: 16GiB}  # No GPU; surfaces and operators are read, never regenerated.
+# LF resource defaults: cpu=1 (>0), gpu=0 (>=0); memory/storage/time/processes optional.
+# This is a single Work with no search, sweep, seeds or objective: it never fits a predictor.

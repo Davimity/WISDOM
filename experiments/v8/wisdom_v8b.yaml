@@ -1,12 +1,12 @@
 # OBJECTIVE: test whether returning S1 information to atoms helps beyond depth and nominal capacity.
-# PREREQUISITES: finish V7 and freeze the SAME reviewed pipeline/head ledger in V8a/V8b/V8c.
-# VARIES: architecture_spike only; no combinations of geometry, feedback and vector channels.
-# FIXED: dataset, backbone, pooling, priors, refiner, head, optimizer and paired seeds.
+# PREREQUISITES: reviewed V7 lines A=MAX R Single and B=Attention NRK FiLM; no upstream Work dependency.
+# VARIES: the named architectural factor within EACH of the two frozen, inseparable V7 lines.
+# FIXED: dataset, backbone, per-line pooling/priors/head, Heat6, optimizer and paired seeds.
 # DECISION: compare S at G-selected checkpoints against the appropriate same-seed control.
 name: wisdom-v8b  # Explicit scientific Study identifier, independent of filename spelling.
 run: wisdom.Training.Training  # Single native Work, never steps or a nested runner.
 
-with:  # PENDING V7 winner: copy one exact pipeline/head ledger identically into V8a/V8b/V8c.
+with:  # Common frozen V7 ledger; each complete line is bound only in sweep.candidates below.
   dataset: {dataset: wisdom-dna-reduced@6}  # Same immutable reduced benchmark as V7.
   # Required content: sha256:ac1745504422cf60b84e57b90efc99206dea039dc36d0c1359782062cb10e202.
   # Verify native Registry identity on the execution target; never substitute another release.
@@ -28,18 +28,10 @@ with:  # PENDING V7 winner: copy one exact pipeline/head ledger identically into
   learning_rate: 0.001  # V7 AdamW rate.
   weight_decay: 0.0005  # V7 AdamW decay.
   gate_lambda: 0.04  # Same coefficient; baseline_count below fixes its per-shared-gate meaning.
-  pooling_type: max  # REPLACE with the reviewed V7 pipeline, not an assumed MAX winner.
-  pooling_area_mode: point  # REPLACE with that pipeline's point/area measure.
-  # If P3 wins, add log_sum_exp_mode: fixed and log_sum_exp_beta: 0.25.
-  # If P4 wins, add attention_variant: simple and attention_hidden_dim: 256.
-  # Do not retain active-looking settings for pooling families not selected in V7.
   surface_refiner_type: heat  # Explicit V7 refiner; never silently fall back to none.
-  surface_refiner_heat_length: 6.0  # Preserve Heat6 unless the reviewed upstream ledger differs.
-  weak_loss_profile: PENDING_V7  # Execution guard: replace with custom only after the ledger is reviewed.
-  negative_surface_lambda: 0.0  # REPLACE with the selected V7 pipeline's exact coefficient.
-  positive_existence_lambda: 0.0  # REPLACE with its point-existence coefficient.
-  regional_positive_lambda: 0.0  # REPLACE with its regional-existence coefficient.
-  regional_ranking_lambda: 0.0  # REPLACE with its between-class ranking coefficient.
+  surface_refiner_heat_length: 6.0  # Freeze the reviewed V7 Heat6 policy in both lines.
+  weak_loss_profile: custom  # Use the exact per-line coefficients below, without profile overrides.
+  positive_existence_lambda: 0.0  # Neither retained V7 line uses point-existence supervision.
   cardinality_lambda: 0.0  # V7 freezes this prior off.
   total_variation_lambda: 0.0  # V7 freezes this prior off.
   dirichlet_lambda: 0.0  # V7 freezes this prior off.
@@ -47,14 +39,7 @@ with:  # PENDING V7 winner: copy one exact pipeline/head ledger identically into
   regional_ranking_margin: 0.5  # Frozen positive-minus-negative logit margin.
   minimum_positive_area: 0.0  # V7 disables cardinality.
   maximum_positive_area: null  # No upper cardinality bound.
-  head_type: single  # REPLACE with the selected V7 head; do not compare heads again.
   head_implementation: controlled  # Preserve the corrected V7 active-head/RNG contract.
-  head_loss_balance: normalized  # Multi-head: .5 direct BCE + .5 pooled-surface BCE, applied once.
-  surface_loss_fraction: 0.5  # Single still retains its exact original BCE.
-  # For a multi-head winner add head_dropout: 0.0 and global_reduction: area_mean.
-  # For global_context/film also add global_context_dim: 16, detach_global_context: true,
-  # and local_head_initialization: copy. For film additionally add film_modulation_scale: 1.0.
-  # Copy the SAME applicable head parameters into all three campaigns; no head search here.
   architecture_implementation: controlled  # Paired shared initialization; audited coverage/vector semantics.
   feedback_weighting: area  # Freeze area-times-distance integration; inactive without a feedback update.
   gate_cost_normalization: baseline_count  # Same shared-gate coefficient in every architecture.
@@ -88,9 +73,9 @@ with:  # PENDING V7 winner: copy one exact pipeline/head ledger identically into
 # the expected path-cost sum by the unchanged baseline gate count, not the expanded count.
 # This fixes common-gate coefficients but charges the added point gate; cost may exceed one.
 # Pooling defaults: max, area_mode=legacy (point/area/legacy), LSE fixed/beta=5 (>0),
-# attention simple/width=32 (>0). The reviewed V7 winner must replace these provisional controls.
+# attention simple/width=32 (>0); the two complete reviewed lines override these below.
 # Weak defaults: all seven lambdas=0 (>=0), regional length=2.5 Å, ranking margin=.5,
-# minimum_positive_area=0, maximum_positive_area=null. PENDING_V7 intentionally fails before data I/O.
+# minimum_positive_area=0, maximum_positive_area=null. R denotes regional existence, K ranking.
 # Head defaults: single, implementation=legacy; loss_balance=legacy_sum; historical weights=1/1.
 # normalized uses rho=surface_loss_fraction=.5 in [0,1), forbids overriding historical weights;
 # single BCE is unchanged. Direct-head dropout=null inherits backbone dropout; valid in [0,1).
@@ -108,22 +93,108 @@ seeds: [151, 157, 163, 167]  # Four complete paired replications, fresh relative
 # Explicit seeds disable automatic shared-block growth; no racing, HPO or competitive pruning.
 # Replications across campaigns are descriptive pairs, not interchangeable historical controls.
 
-sweep:  # 4 candidates x four seeds = 16 mandatory Runs.
-  space:  # One architectural factor; all other scientific settings stay frozen.
-    architecture_spike:  # Native closed profile overrides, never a Cartesian product of booleans.
-      values:  # Each candidate is required under each of the four seeds.
-        - baseline  # A -> S, contemporary one-pass control.
-        - depth_control  # A -> S1 -> S2 with unchanged atom states.
-        - depth_control_parameter_matched  # Same atom update as feedback but with a zero message and matched coverage.
-        - bidirectional  # A -> S1 -> A-prime -> S2; no additional atom-to-atom message pass.
-  reference: {architecture_spike: depth_control}  # Primary feedback-vs-depth contrast; baseline remains a required candidate.
+sweep:  # 8 exact candidates x four paired seeds = 32 mandatory Runs.
+  space:  # Domains validate candidates only; do NOT enumerate their Cartesian product.
+    architecture_spike:  # One closed profile; geometry/feedback/vectors are never combined.
+      values: [baseline, depth_control, depth_control_parameter_matched, bidirectional]  # Closed reviewed values, not an additional hyperparameter search.
+    pooling_type:  # Line A=MAX; line B=Attention, never a pooling-only causal contrast.
+      values: [max, attention]  # Closed reviewed values, not an additional hyperparameter search.
+    pooling_area_mode:  # Line A counts points; line B uses represented areas.
+      values: [point, area]  # Closed reviewed values, not an additional hyperparameter search.
+    attention_variant:  # Frozen V7 attention scoring.
+      values: [simple]  # Closed reviewed values, not an additional hyperparameter search.
+      when: {pooling_type: attention}  # Omit this coordinate entirely from inactive candidates.
+    attention_hidden_dim:  # Frozen V7 attention capacity.
+      values: [256]  # Closed reviewed values, not an additional hyperparameter search.
+      when: {pooling_type: attention}  # Omit this coordinate entirely from inactive candidates.
+    negative_surface_lambda:  # Line A=0; line B=.03 negative suppression.
+      values: [0.0, 0.03]  # Closed reviewed values, not an additional hyperparameter search.
+    regional_positive_lambda:  # R is regional existence: line A=.3; line B=.03.
+      values: [0.3, 0.03]  # Closed reviewed values, not an additional hyperparameter search.
+    regional_ranking_lambda:  # K is regional ranking: line A=0; line B=.03.
+      values: [0.0, 0.03]  # Closed reviewed values, not an additional hyperparameter search.
+    head_type:  # Only MAX Single and Attention FiLM are measured.
+      values: [single, film]  # Closed reviewed values, not an additional hyperparameter search.
+    head_loss_balance:  # One normalized sum of the two protein BCEs.
+      values: [normalized]  # Closed reviewed values, not an additional hyperparameter search.
+      when: {head_type: film}  # Omit this coordinate entirely from inactive candidates.
+    surface_loss_fraction:  # FiLM uses .5 direct BCE + .5 surface BCE exactly once.
+      values: [0.5]  # Closed reviewed values, not an additional hyperparameter search.
+      when: {head_type: film}  # Omit this coordinate entirely from inactive candidates.
+    head_dropout:  # Frozen V7 direct-head dropout.
+      values: [0.0]  # Closed reviewed values, not an additional hyperparameter search.
+      when: {head_type: film}  # Omit this coordinate entirely from inactive candidates.
+    global_reduction:  # Area-weighted reduction of surface embeddings.
+      values: [area_mean]  # Closed reviewed values, not an additional hyperparameter search.
+      when: {head_type: film}  # Omit this coordinate entirely from inactive candidates.
+    global_context_dim:  # Frozen context projection width.
+      values: [16]  # Closed reviewed values, not an additional hyperparameter search.
+      when: {head_type: film}  # Omit this coordinate entirely from inactive candidates.
+    detach_global_context:  # Preserve V7's detached local-context path.
+      values: [true]  # Closed reviewed values, not an additional hyperparameter search.
+      when: {head_type: film}  # Omit this coordinate entirely from inactive candidates.
+    local_head_initialization:  # Copy the original local classifier under controlled initialization.
+      values: [copy]  # Closed reviewed values, not an additional hyperparameter search.
+      when: {head_type: film}  # Omit this coordinate entirely from inactive candidates.
+    film_modulation_scale:  # Frozen identity-start FiLM correction multiplier.
+      values: [1.0]  # Closed reviewed values, not an additional hyperparameter search.
+      when: {head_type: film}  # Omit this coordinate entirely from inactive candidates.
 
-# sweep.space is required; reference is optional and must identify exactly one candidate.
-# No search/include/candidates or extra head/pooling domain is authored.
-# Feedback must beat depth_control; also compare bidirectional vs matched within each seed.
-# Matched has equal nominal trainable parameters and identical update FLOPs, not identical
-# effective capacity: zero-message input columns receive zero data gradient; aggregation is cheaper.
-# All second rounds have the same second transfer/projection/encoder initialization.
+  candidates:  # Two complete lines crossed ONLY with this Study's architectural variants.
+    - &max_r_single  # MAX R Single: complete baseline candidate and reusable line anchor.
+      pooling_type: max  # Line A: MAX R Single.
+      pooling_area_mode: point  # Exact V7 MAX measure.
+      negative_surface_lambda: 0.0  # No negative suppression.
+      regional_positive_lambda: 0.3  # R: regional existence, not ranking.
+      regional_ranking_lambda: 0.0  # K: regional ranking is disabled.
+      head_type: single  # Original single-head BCE; no inactive FiLM coordinates.
+      architecture_spike: baseline  # Contemporary line-A baseline.
+    - <<: *max_r_single  # Preserve EVERY MAX R Single setting; change only the architecture.
+      architecture_spike: depth_control  # Same-line paired architectural contrast.
+    - <<: *max_r_single  # Preserve EVERY MAX R Single setting; change only the architecture.
+      architecture_spike: depth_control_parameter_matched  # Same-line paired architectural contrast.
+    - <<: *max_r_single  # Preserve EVERY MAX R Single setting; change only the architecture.
+      architecture_spike: bidirectional  # Same-line paired architectural contrast.
+
+    - &attention_nrk_film  # Attention NRK FiLM: complete baseline candidate and reusable line anchor.
+      pooling_type: attention  # Line B: Attention NRK FiLM.
+      pooling_area_mode: area  # Exact V7 represented-area measure.
+      attention_variant: simple  # Original embedding-based attention scorer.
+      attention_hidden_dim: 256  # Exact V7 attention width.
+      negative_surface_lambda: 0.03  # N: negative suppression.
+      regional_positive_lambda: 0.03  # R: regional existence.
+      regional_ranking_lambda: 0.03  # K: regional ranking.
+      head_type: film  # Direct/global and surface-derived predictions remain distinct.
+      head_loss_balance: normalized  # Apply the .5/.5 BCE mixture once.
+      surface_loss_fraction: 0.5  # Equal direct/surface protein BCE contributions.
+      head_dropout: 0.0  # No head dropout.
+      global_reduction: area_mean  # Area-weighted embedding reduction.
+      global_context_dim: 16  # Frozen context projection width.
+      detach_global_context: true  # Keep the V7 context-gradient contract.
+      local_head_initialization: copy  # Initialize from the original local classifier.
+      film_modulation_scale: 1.0  # Frozen FiLM modulation multiplier.
+      architecture_spike: baseline  # Contemporary line-B baseline.
+    - <<: *attention_nrk_film  # Preserve EVERY Attention NRK FiLM setting; change only the architecture.
+      architecture_spike: depth_control  # Same-line paired architectural contrast.
+    - <<: *attention_nrk_film  # Preserve EVERY Attention NRK FiLM setting; change only the architecture.
+      architecture_spike: depth_control_parameter_matched  # Same-line paired architectural contrast.
+    - <<: *attention_nrk_film  # Preserve EVERY Attention NRK FiLM setting; change only the architecture.
+      architecture_spike: bidirectional  # Same-line paired architectural contrast.
+
+  reference:  # Unique native reference; scientific contrasts still require each line's own control.
+    pooling_type: max  # Select MAX R Single, never the Attention line.
+    head_type: single  # Exclude FiLM explicitly.
+    architecture_spike: depth_control  # Primary feedback-versus-depth control.
+
+# sweep.space is required; candidates selects only these complete active-coordinate mappings.
+# when uses native equality; inactive Attention/FiLM children are absent from MAX Single.
+# include/candidates are mutually exclusive. No search, pruning, pipeline_id or steps is authored.
+# The LF reference must match one candidate. It does not replace SAME-line, SAME-seed controls:
+# delta S(line,architecture,seed)=S(line,architecture,seed)-S(line,control,seed), likewise G.
+# Aggregate paired differences within each line; do not treat cross-line changes as pooling effects.
+# Primary: bidirectional vs depth_control in EACH line. Complement: bidirectional vs matched.
+# All two-stage variants share second-stage initialization. Matched receives a null message,
+# not detached S1; nominal parameters match, not all effective capacity or aggregation FLOPs.
 
 objective:  # Native descriptive W indexing; prioritize S and paired G-S trade-offs scientifically.
   metric: val_wisdom_hpo_score  # Existing joint global/surface/coupling utility, no new selector.
@@ -134,14 +205,20 @@ objective:  # Native descriptive W indexing; prioritize S and paired G-S trade-o
 # Objective requires metric; mode=max by default; bounds/margin are optional.
 # Checkpoint epochs remain selected only by G=.70*protein_AP+.30*protein_AUROC.
 # Local S, raw S, negative mass/peak, top-k enrichment/recall and regret/coupling are diagnostics.
-# Keep direct/surface-derived protein metrics for a multi-head V7 winner; never train on local GT.
+# Keep FiLM direct and surface-derived protein metrics distinct; never train on local GT.
 
-resources:  # Operational allocation only; no architectural factor or per-GPU packing override.
-  gpu: 2  # Preserve the two-GPU capacity used for the V7 campaign.
-  cpu: 36  # Shared decoding and orchestration budget.
-  memory: 96GiB  # Shared host-memory ceiling.
-  time: 168h  # Scheduler ceiling may leave the mandatory design incomplete; resume missing cells.
+# Defaults: max_parallel/runs_per_gpu=null select automatic native admission; positive integers
+# impose hard caps. max_time/max_runs=null leave all mandatory cells eligible; failure_retries=1.
+# GPU/CPU/RAM leases are owned by LF. The three Studies have no dependencies and may overlap.
+
+resources:  # Fixed outer allocation for this Study, NOT resources multiplied by each seed.
+  gpu: 2  # Target citius-ctgpgpu16; leave another granted device for the other V8 Study.
+  cpu: 36  # Observed host: 96 CPUs; V8b+V8c request 32 in total.
+  memory: 96GiB  # Host RAM, not VRAM; observed total approximately 755 GiB.
+  time: 168h  # Safety ceiling; resume missing cells if interrupted, never discard required seeds.
 
 # Resource defaults: cpu=1, gpu=0, processes=1; memory/gpu_memory/storage=0, time=null.
-# CPU/processes>=1, GPU>=0, processes<=CPU. execution defaults have no logical time/run/packing cap;
-# failure_retries=1. Do not aggregate an incomplete mandatory design as if all seeds had finished.
+# CPU/processes>=1, GPU>=0, processes<=CPU. time accepts native duration units.
+# Hardware inventory is not a site grant. Native preflight must verify current visibility and
+# allocation; real FiLM/feedback/vector peak VRAM is NOT established by config validation.
+# No scientific width, batch, dataset or seed was reduced to fit the target.

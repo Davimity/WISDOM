@@ -13,10 +13,20 @@ class Atom:
         atomic_number: Chemical element atomic number supplied by Gemmi.
         position: Cartesian coordinates ``(x, y, z)`` in ångströms.
         formal_charge: Integral formal charge read from the source structure.
+        occupancy: Observed mmCIF selected occupancy, or None when not explicitly available.
+        b_iso: Explicit isotropic displacement in Å² with an eligible experimental mmCIF method;
+            None when unavailable, including predicted-model confidence stored in B's column.
+        altloc: Selected alternate-conformation code, empty for a blank code.
+        alternate_count: Number of retained source alternatives sharing this atom name.
     """
 
-    index         : int
-    name          : str
-    atomic_number : int
-    position      : tuple[float, float, float]
-    formal_charge : int                        = 0
+    index          : int
+    name           : str
+    atomic_number  : int
+    position       : tuple[float, float, float]
+    formal_charge  : int = 0
+
+    occupancy      : float | None = None
+    b_iso          : float | None = None
+    altloc         : str          = ""
+    alternate_count: int          = 1

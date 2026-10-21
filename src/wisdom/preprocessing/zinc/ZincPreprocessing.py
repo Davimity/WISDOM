@@ -12,6 +12,7 @@ from wisdom.preprocessing.common.geometry import generate_geometry
 from wisdom.preprocessing.zinc.ZincAnnotation import ZincAnnotation
 from wisdom.preprocessing.zinc.ZincValidation import ZincValidation
 from wisdom.preprocessing.common.snapshots import validate_structure_snapshot
+from wisdom.preprocessing.common.structure.StructuralSidecars import StructuralSidecars
 
 
 class ZincPreprocessing(lf.Work):
@@ -28,6 +29,9 @@ class ZincPreprocessing(lf.Work):
         curvature_scales: Sequence[float] = (2.5, 5.0), positive_gap: float = 1.4,
         negative_gap: float = 3.0, sensitivity_gaps: Sequence[float] = (1.0, 1.4, 2.0),
         progress_log_seconds: float = 120.0, verbose: bool = False,
+        atomic_context: bool = False, source_quality: bool = True,
+        extended_surface_atom: bool = False, extended_radius: float = 12.0,
+        extended_k_max: int = 96,
     ) -> dict[str, Any]:
         """Verify exact snapshot, resume universal geometry, annotate and atomically publish.
 
@@ -52,6 +56,11 @@ class ZincPreprocessing(lf.Work):
             sensitivity_gaps: Alternative local positive cutoffs in ångströms, default 1/1.4/2.
             progress_log_seconds: Parent liveness log interval in seconds, default 120.
             verbose: Enable per-protein diagnostic logs, default false.
+            atomic_context: Attach optional common atom/residue context, default false.
+            source_quality: Preserve observed source quality when available, default true.
+            extended_surface_atom: Attach optional expanded CSR candidates, default false.
+            extended_radius: Positive expanded candidate cutoff in Å, default 12.
+            extended_k_max: Positive per-point expanded storage cap, default 96.
 
         Returns:
             Native DatasetVersion publication record; no new scientific membership is selected.
@@ -116,6 +125,12 @@ class ZincPreprocessing(lf.Work):
         paths = self.resume_map(rows, annotate, key="identifier", workers=workers,
                                 executor="thread", name="zinc-annotation")
 
+        # Common optional context sees protein-only NPZs, never Zn coordinates or labels.
+
+        additions = StructuralSidecars(atomic_context, source_quality, extended_surface_atom,
+            extended_radius, extended_k_max).generate(self, {row["identifier"]:
+                processed / mapping[row["identifier"]]["output"] for row in rows}, workers)
+
         # 4. Audit logical members before publication. Native LF publication then checks the
         # bytes and installs a permanent placement; no project registry/caching shim is used.
 
@@ -138,7 +153,8 @@ class ZincPreprocessing(lf.Work):
                                                  "local_annotation_asset": "zinc_annotation"},
                           "zinc_evidence": row, "dilutions": views},
                 "assets": {"universal_npz": base, "zinc_annotation": Path(sidecar),
-                           "source_structure": snapshot / f"{row['pdb_id']}.cif.gz"},
+                           "source_structure": snapshot / f"{row['pdb_id']}.cif.gz",
+                           **additions[row["identifier"]]},
             })
         verdict = ZincValidation().audit_members(members, root / "validation")
         if verdict["verdict"] != "PASS":
@@ -158,6 +174,8 @@ class ZincPreprocessing(lf.Work):
             assets["zinc_annotation"] = self.outputs.artifact(
                 f"zinc-sidecar-{member['id']}", assets["zinc_annotation"],
             )
+            for name in additions[member["id"]]:
+                assets[name] = self.outputs.artifact(f"{name}-{member['id']}", assets[name])
         members[0]["assets"].update(
             selection_evidence=self.outputs.artifact("selection-evidence", design),
         )

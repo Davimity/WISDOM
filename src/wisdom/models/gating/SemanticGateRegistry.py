@@ -15,12 +15,15 @@ class SemanticGateRegistry(nn.Module):
         self,
         definitions   : Sequence[tuple[str, str | None]],
         initial_active: float = HardConcreteGate.INITIAL_ACTIVE,
+        inactive_names: Sequence[str] = (),
     ) -> None:
         """Create gates in a stable declared order.
 
         Args:
             definitions: Ordered ``(name, parent)`` pairs. A parent must precede its child.
             initial_active: Initial analytic activity probability shared by every gate.
+            inactive_names: Sources structurally absent from a controlled architecture. Their
+                gates stay closed under all overrides, are frozen, and contribute zero L0 cost.
 
         Raises:
             ValueError: If names repeat or a parent is missing.
@@ -43,6 +46,11 @@ class SemanticGateRegistry(nn.Module):
         self.names       = tuple(names)
         self.parents     = {name: parent for name, parent in definitions}
         self._indices    = {name: index for index, name in enumerate(self.names)}
+        self.inactive_names = frozenset(inactive_names)
+        if not self.inactive_names <= set(self.names):
+            raise ValueError("inactive gate names must belong to the declared registry")
+        for name in self.inactive_names:
+            self.gates[self._indices[name]].requires_grad_(False)
         self._override   = "learned"
         self._forced     : dict[str, float] = {}
         self._last_sample: dict[str, Tensor] = {}
@@ -59,7 +67,9 @@ class SemanticGateRegistry(nn.Module):
         values: dict[str, Tensor] = {}
         for name, raw_gate in zip(self.names, self.gates, strict=True):
             gate = cast(HardConcreteGate, raw_gate)
-            if name in self._forced:
+            if name in self.inactive_names:
+                values[name] = gate.log_alpha.new_zeros((), dtype=torch.float32)
+            elif name in self._forced:
                 values[name] = gate.log_alpha.new_tensor(self._forced[name], dtype=torch.float32)
             elif self._override == "all_on":
                 values[name] = gate.log_alpha.new_ones((), dtype=torch.float32)
@@ -111,6 +121,8 @@ class SemanticGateRegistry(nn.Module):
             return
         if value not in {0, 1}:
             raise ValueError("a forced semantic gate must be zero or one")
+        if name in self.inactive_names and value == 1:
+            raise ValueError("a structurally absent source cannot be enabled by a gate override")
         self._forced[name] = float(value)
 
     def probability_active(self, name: str) -> Tensor:
@@ -123,6 +135,8 @@ class SemanticGateRegistry(nn.Module):
             Scalar float32 probability.
         """
         gate = cast(HardConcreteGate, self.gates[self._indices[name]])
+        if name in self.inactive_names:
+            return gate.log_alpha.new_zeros((), dtype=torch.float32)
         return gate.probability_active()
 
     def deterministic_value(self, name: str) -> Tensor:
@@ -134,6 +148,8 @@ class SemanticGateRegistry(nn.Module):
         Returns:
             Scalar float32 value in ``[0,1]``.
         """
+        if name in self.inactive_names:
+            return self.probability_active(name)
         if name in self._forced:
             gate = cast(HardConcreteGate, self.gates[0])
             return gate.log_alpha.new_tensor(self._forced[name], dtype=torch.float32)
@@ -174,8 +190,11 @@ class SemanticGateRegistry(nn.Module):
         families: dict[str, list[float]] = {}
         for name, raw_gate in zip(self.names, self.gates, strict=True):
             gate = cast(HardConcreteGate, raw_gate)
-            probability = float(gate.probability_active().detach().cpu())
-            deterministic = float(gate.deterministic_value().detach().cpu())
+            probability = float(self.probability_active(name).detach().cpu())
+            deterministic = (
+                0.0 if name in self.inactive_names
+                else float(gate.deterministic_value().detach().cpu())
+            )
             effective = float(self.effective_probability(name).detach().cpu())
             family = (
                 "surface_curvature"
@@ -191,6 +210,7 @@ class SemanticGateRegistry(nn.Module):
                     "probability_active":          probability,
                     "deterministic_value":         deterministic,
                     "effective_path_probability": effective,
+                    "available_to_model":          name not in self.inactive_names,
                 }
             )
 
