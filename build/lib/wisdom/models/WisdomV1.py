@@ -9,25 +9,31 @@ from typing import Any, ClassVar
 from lambdaforge.nn.models import MLP, Model
 from collections.abc import Mapping, Sequence
 from lambdaforge.nn.pooling import SparseMaxPooling
-from wisdom.models.InteractionRound import InteractionRound
-from wisdom.models.AtomicEncoderType import AtomicEncoderType
-from wisdom.models.VectorAtomicState import VectorAtomicState
-from wisdom.models.AtomicGraphEncoder import AtomicGraphEncoder
-from wisdom.models.GatedAtomicEncoder import GatedAtomicEncoder
-from wisdom.models.SurfaceAtomFeedback import SurfaceAtomFeedback
-from wisdom.models.SurfaceAtomTransfer import SurfaceAtomTransfer
-from wisdom.models.LinearInitialization import LinearInitialization
-from wisdom.models.ResidualInitialization import ResidualInitialization
-from wisdom.models.DiffusionSurfaceEncoder import DiffusionSurfaceEncoder
-from wisdom.models.EmbeddingInitialization import EmbeddingInitialization
-from wisdom.models.FeedbackPropagationMode import FeedbackPropagationMode
-from wisdom.models.PostFeedbackPropagation import PostFeedbackPropagation
-from wisdom.models.ArchitectureImplementation import GateCostNormalization
+from wisdom.models.gating.GatePolicy import GatePolicy
+from wisdom.models.physics.FieldDecoder import FieldDecoder
+from wisdom.models.atomic.AtomicEncoderType import AtomicEncoderType
+from wisdom.models.atomic.VectorAtomicState import VectorAtomicState
+from wisdom.models.atomic.AtomicGraphEncoder import AtomicGraphEncoder
+from wisdom.models.atomic.GatedAtomicEncoder import GatedAtomicEncoder
+from wisdom.models.architecture.InteractionRound import InteractionRound
+from wisdom.models.architecture.FeedbackWeighting import FeedbackWeighting
 from wisdom.models.gating.SemanticGateRegistry import SemanticGateRegistry
-from wisdom.models.SurfaceRepresentationMode import SurfaceRepresentationMode
-from wisdom.models.DiffusionTimeInitialization import DiffusionTimeInitialization
-from wisdom.models.PhysicalEmbeddingInitializer import PhysicalEmbeddingInitializer
-from wisdom.models.ArchitectureImplementation import ArchitectureImplementation, FeedbackWeighting
+from wisdom.models.communication.TransferExperiment import TransferExperiment
+from wisdom.models.communication.SurfaceAtomFeedback import SurfaceAtomFeedback
+from wisdom.models.communication.SurfaceAtomTransfer import SurfaceAtomTransfer
+from wisdom.models.surface.DiffusionSurfaceEncoder import DiffusionSurfaceEncoder
+from wisdom.models.surface.SurfaceEnvironmentInput import SurfaceEnvironmentInput
+from wisdom.models.architecture.GateCostNormalization import GateCostNormalization
+from wisdom.models.initialization.LinearInitialization import LinearInitialization
+from wisdom.models.surface.SurfaceRepresentationMode import SurfaceRepresentationMode
+from wisdom.models.architecture.FeedbackPropagationMode import FeedbackPropagationMode
+from wisdom.models.architecture.PostFeedbackPropagation import PostFeedbackPropagation
+from wisdom.models.initialization.ResidualInitialization import ResidualInitialization
+from wisdom.models.initialization.EmbeddingInitialization import EmbeddingInitialization
+from wisdom.models.atomic.representation.AtomicRepresentation import AtomicRepresentation
+from wisdom.models.architecture.ArchitectureImplementation import ArchitectureImplementation
+from wisdom.models.initialization.DiffusionTimeInitialization import DiffusionTimeInitialization
+from wisdom.models.initialization.PhysicalEmbeddingInitializer import PhysicalEmbeddingInitializer
 
 
 class WisdomV1(Model):
@@ -63,6 +69,9 @@ class WisdomV1(Model):
         atomic_message_chunk_size  : int = 65536,
         atomic_encoder_type: str = "baseline",
         atomic_radial_count: int = 16,
+        atomic_radial_encoding: str = "gaussian",
+        atomic_hidden_dim: int | None = None,
+        atomic_output_dim: int | None = None,
         atomic_vector_channels: int = 16,
         atomic_basis_count: int = 4,
         atomic_spatial_cutoff: float = 6.0,
@@ -84,6 +93,7 @@ class WisdomV1(Model):
         atomic_edge_distance_scale : float = 6.0,
         embedding_initialization    : str = "current",
         gate_initial_active         : float = 0.95,
+        gate_policy                 : Mapping[str, Any] | None = None,
         diffusion_time_initialization: str = "current",
         diffusion_residual_initialization: str = "current",
         atomic_residual_initialization: str = "current",
@@ -94,6 +104,10 @@ class WisdomV1(Model):
         linear_initialization       : str = "current",
         surface_representation_mode : str = "learned",
         explicit_feature_dim        : int = 0,
+        atomic_representation       : Mapping[str, Any] | None = None,
+        transfer_options            : Mapping[str, Any] | None = None,
+        surface_options             : Mapping[str, Any] | None = None,
+        physics_options             : Mapping[str, Any] | None = None,
     ) -> None:
         """Build the complete semantic input superset and fixed v1 hypothesis.
 
@@ -124,6 +138,11 @@ class WisdomV1(Model):
             atomic_message_chunk_size: Recorded edge-work budget for reproducibility.
             atomic_encoder_type: Exact V9 atomic operator/control; baseline keeps historical keys.
             atomic_radial_count: Gaussian/sinusoidal/Bessel radial basis count, positive.
+            atomic_radial_encoding: SchNet gaussian (historical) or direct (one d/r input).
+            atomic_hidden_dim: SchNet internal channels; None uses hidden_dim, without changing
+                chemical input features or any surface module.
+            atomic_output_dim: None uses hidden_dim; an explicit value must equal hidden_dim
+                so transfer, DiffusionNet and prediction heads remain unchanged.
             atomic_vector_channels: Positive GVP polar-channel count; PaiNN uses hidden_dim.
             atomic_basis_count: Positive NNConv basis count, inactive for full filters.
             atomic_spatial_cutoff: Spatial radial support in Å, without generating new neighbors.
@@ -155,9 +174,11 @@ class WisdomV1(Model):
                 baseline_count divides by the scalar baseline count, preserving the per-gate
                 coefficient when point_geometry adds a gate. The latter cost may exceed one.
             atomic_edge_distance_scale: Atomic edge-distance normalization scale in ångströms.
-            embedding_initialization: ``current``, ``fan_scaled``, ``small_normal``, or
-                task-independent ``physical`` categorical table initialization.
+            embedding_initialization: current/fan_scaled/small_normal/physical, or V10
+                physical_norm/physical_random with matched known-row norm and paired RNG.
             gate_initial_active: Initial analytic probability ``P(z>0)`` for every semantic gate.
+            gate_policy: Optional grouped S/C/O coefficients, initial activity and S/C-only
+                schedule. None preserves historical parameter names, weights and regularization.
             diffusion_time_initialization: ``current``, ``broader_lengths``, or ``same_scale``
                 initial DiffusionNet time schedule.
             diffusion_residual_initialization: ``current``, ``rezero``, or ``layerscale`` for
@@ -170,6 +191,14 @@ class WisdomV1(Model):
             linear_initialization: ``current``, ``activation_aware``, or ``orthogonal`` policy.
             surface_representation_mode: ``learned`` (default), ``explicit`` or late ``hybrid``.
             explicit_feature_dim: Number K of selected fixed fields; positive outside learned mode.
+            atomic_representation: Opt-in AtomicRepresentation constructor mapping for V10;
+                None preserves historical parameter keys, random streams and inputs exactly.
+            transfer_options: Optional V11 TransferExperiment mapping; candidates=base/extended
+                selects data, not a fallback. Existing point geometry is used only by point_pair.
+            surface_options: Optional V13 DiffusionSurfaceEncoder.configure mapping; None leaves
+                historical spectrum/gradient/readout behavior and all state keys unchanged.
+            physics_options: Optional FieldDecoder options; None adds no physical head or state.
+                Enabled heads read atomic states and query geometry, never physical targets.
 
         Raises:
             ValueError: If a dimension is invalid or curvature width is not ``3*S``.
@@ -240,6 +269,15 @@ class WisdomV1(Model):
         residue_width = embedding_dim if residue_embedding_dim is None else residue_embedding_dim
         if residue_width < 1:
             raise ValueError("residue_embedding_dim must be positive")
+
+        atomic_width = hidden_dim if atomic_hidden_dim is None else atomic_hidden_dim
+        output_width = hidden_dim if atomic_output_dim is None else atomic_output_dim
+        if output_width != hidden_dim:
+            raise ValueError("atomic_output_dim must equal hidden_dim to preserve surface modules")
+        if atomic_encoder_type not in {"schnet", "schnet_radial"} and (
+            atomic_width != hidden_dim or atomic_radial_encoding != "gaussian"
+        ):
+            raise ValueError("radial encoding and independent atomic width require SchNet")
 
         self.atomic_encoder_type = AtomicEncoderType(atomic_encoder_type)
         if self.atomic_encoder_type is not AtomicEncoderType.BASELINE and (
@@ -425,11 +463,12 @@ class WisdomV1(Model):
                     maximum_triplets=atomic_maximum_triplets,
                     maximum_pairwise_bytes=atomic_maximum_pairwise_bytes,
                     allow_dense_global=atomic_allow_dense_global,
+                    internal_dim=atomic_width, radial_encoding=atomic_radial_encoding,
                 )
                 self._initialize_linears(linear_mode, root=alternative)
             if alternative.reference is not None:
                 alternative.reference.load_state_dict(reference_encoder.state_dict(), strict=True)
-            else:
+            elif atomic_width == hidden_dim:
                 alternative.input_projection.load_state_dict(reference_encoder.input_projection.state_dict())
             self.atomic_encoder = alternative
 
@@ -456,6 +495,111 @@ class WisdomV1(Model):
             self.surface_encoder.activation_checkpointing = True
             if isinstance(self.second_surface_encoder, DiffusionSurfaceEncoder):
                 self.second_surface_encoder.activation_checkpointing = True
+
+        self.surface_environment: SurfaceEnvironmentInput | None = None
+        if surface_options:
+            if not controlled or interaction_mode is not InteractionRound.SINGLE:
+                raise ValueError("V13 requires a controlled one-pass surface comparison")
+            with torch.random.fork_rng(devices=[]):
+                stream = torch.Generator().manual_seed(torch.initial_seed() ^ 0x563133)
+                torch.set_rng_state(stream.get_state())
+                assert isinstance(self.surface_encoder, DiffusionSurfaceEncoder)
+                surface_configuration = dict(surface_options)
+                environment = surface_configuration.pop("environment", None)
+                self.surface_encoder.configure(**surface_configuration)
+                if environment:
+                    self.surface_environment = SurfaceEnvironmentInput(hidden_dim, **environment)
+
+        self.transfer_options = dict(transfer_options or {})
+        if transfer_options:
+            if not controlled or interaction_mode is not InteractionRound.SINGLE:
+                raise ValueError("V11 requires a controlled one-pass comparison, not feedback")
+            transfer_parameters = dict(transfer_options)
+            candidate_source = transfer_parameters.pop("candidates", "base")
+            if candidate_source not in {"base", "extended"}:
+                raise ValueError("V11 candidate source must be base or extended")
+            with torch.random.fork_rng(devices=[]):
+                stream = torch.Generator().manual_seed(torch.initial_seed() ^ 0x563131)
+                torch.set_rng_state(stream.get_state())
+                experiment = TransferExperiment(hidden_dim, 4 * self.curvature_scale_count,
+                                                **transfer_parameters)
+            if experiment.radius is not None and experiment.radius_bounds[1] > surface_atom_radius:
+                raise ValueError("learned radius upper bound exceeds active cached support")
+            if (experiment.active_radius is not None and not
+                0 < experiment.active_radius <= surface_atom_radius) or (
+                experiment.active_k is not None and not 0 < experiment.active_k <= surface_atom_k
+            ):
+                raise ValueError("transfer active radius/K must fit the declared consumer support")
+            self.surface_atom_transfer.experiment = experiment
+
+        self.atomic_representation: AtomicRepresentation | None = None
+        if atomic_representation:
+            if not controlled or (
+                self.surface_representation_mode is not SurfaceRepresentationMode.LEARNED
+            ):
+                raise ValueError("V10 inputs require the controlled learned-surface backbone")
+            with torch.random.fork_rng(devices=[]):
+                stream = torch.Generator().manual_seed(torch.initial_seed() ^ 0x563130)
+                torch.set_rng_state(stream.get_state())
+                representation = AtomicRepresentation(**atomic_representation)
+                definitions = tuple((name, self.semantic_gates.parents[name])
+                                    for name in self.semantic_gates.names)
+                inactive = set(self.semantic_gates.inactive_names)
+                remove_residue = representation.external_mode.value == "replace"
+                if remove_residue:
+                    inactive.add("atom.residue_type")
+                inactive.update("atom." + name for name in representation.drop_sources
+                                if "atom." + name in dict(definitions +
+                                    representation.gate_definitions))
+                fixed_sources = ({name: int(representation.force_sources == "open")
+                    for name, _ in representation.gate_definitions}
+                    if representation.force_sources != "learned" else {})
+                registry = SemanticGateRegistry((*definitions, *representation.gate_definitions),
+                    initial_active=gate_initial_active, inactive_names=tuple(inactive),
+                    fixed_values=fixed_sources)
+                for old, new in zip(self.semantic_gates.gates, registry.gates, strict=False):
+                    new.load_state_dict(old.state_dict())
+                encoder = self.atomic_encoder
+                if isinstance(encoder, AtomicGraphEncoder) and encoder.reference is not None:
+                    encoder = encoder.reference
+                old_projection = encoder.input_projection
+                retained = list(range(atomic_input_width))
+                if remove_residue:
+                    retained = [i for i in retained
+                                if not embedding_dim <= i < embedding_dim + residue_width]
+                # Additional chemical inputs must enter the encoder's actual latent width.
+                # A reduced SchNet projects to the shared surface width only at its output.
+
+                projection = nn.Linear(
+                    len(retained) + representation.width, old_projection.out_features)
+                with torch.no_grad():
+                    projection.weight[:, :len(retained)].copy_(old_projection.weight[:, retained])
+                    projection.bias.copy_(old_projection.bias)
+                encoder.input_projection = projection
+                self.atomic_input_width = projection.in_features
+                if remove_residue:
+                    # Retain the historical checkpoint key but never execute this empty route.
+
+                    self.residue_type_embedding = nn.Embedding(residue_type_count, 0)
+                self.atomic_representation = representation
+                self.semantic_gates = registry
+
+        # Group initialization consumes no RNG and runs only after optional sources are declared.
+
+        self.gate_policy = GatePolicy(**gate_policy) if gate_policy is not None else None
+        if self.gate_policy is not None:
+            if self.gate_cost_normalization is not GateCostNormalization.BASELINE_COUNT:
+                raise ValueError("grouped gates require baseline_count normalization")
+            self.gate_policy.initialize(self.semantic_gates, self.baseline_gate_count)
+
+        # The auxiliary head owns an isolated initialization stream; enabling it must not alter
+        # the functional backbone/head initialization used by a matched no-physics control.
+
+        self.physics_decoder: FieldDecoder | None = None
+        if physics_options is not None:
+            with torch.random.fork_rng(devices=[]):
+                torch.manual_seed(torch.initial_seed() ^ 0x564631)
+                self.physics_decoder = FieldDecoder(hidden_dim, **physics_options)
 
         # Explicit mode skips the learned branch, not just its output. Freeze unused tensors
         # so optimizers and trainable-parameter accounting reflect that experimental control.
@@ -543,6 +687,7 @@ class WisdomV1(Model):
                 if physics_distance:
                     self.second_surface_transfer.initialize_physics_distance()
 
+
     @staticmethod
     def _residual_scale(mode: ResidualInitialization) -> float | None:
         """Translate a named residual policy into its initial learnable branch scale.
@@ -585,9 +730,19 @@ class WisdomV1(Model):
         """Apply one shared scale policy to every categorical lookup table.
 
         Args:
-            mode: PyTorch defaults, width-scaled normal, or the small-normal control.
+            mode: Historical policies, or physical_norm/physical_random with matched scale.
         """
         if mode is EmbeddingInitialization.CURRENT:
+            return
+        if mode in {EmbeddingInitialization.PHYSICAL_NORM, EmbeddingInitialization.PHYSICAL_RANDOM}:
+            # Keep subsequent V2 head draws paired: descriptor controls own an isolated stream.
+
+            with torch.random.fork_rng(devices=[]):
+                stream = torch.Generator().manual_seed(torch.initial_seed() ^ 0x563146)
+                torch.set_rng_state(stream.get_state())
+                PhysicalEmbeddingInitializer().initialize(
+                    self.atomic_number_embedding, self.residue_type_embedding,
+                    match_norm=True, randomize=mode is EmbeddingInitialization.PHYSICAL_RANDOM)
             return
         if mode is EmbeddingInitialization.PHYSICAL:
             PhysicalEmbeddingInitializer().initialize(
@@ -720,6 +875,124 @@ class WisdomV1(Model):
             "baseline_gate_count": self.baseline_gate_count,
         }
 
+    def encode_atoms(
+        self, inputs: Mapping[str, Any], gates: Mapping[str, Tensor] | None = None,
+    ) -> tuple[Tensor, tuple[Any, ...]]:
+        """Encode the retained atomic graph without consulting functional or physical targets.
+
+        Args:
+            inputs: Named collator atom tensors: atomic_numbers/residue_type_ids [N], scalar
+                chemistry [N], atom_edge_index [2,E], relation/distance fields [E], optional
+                atom_positions [N,3] in Å, protein ownership atom_batch [N], and explicitly
+                enabled structural input assets. No query targets, partial charges, LJ parameters
+                or surface labels are read. Index domains are the existing disjoint atomic graph.
+                Optional atomic_feature_mask [N] hides the entire assembled input row for the
+                explicit masked-element pretraining control, including sidecar-derived identities.
+            gates: Optional already sampled semantic gates shared with the surface forward;
+                None samples the usual registry gates for a physical-only encoder forward.
+
+        Returns:
+            Atomic embeddings [N,H] and the existing encoder argument tuple required by optional
+            later graph propagation. No tensor is retained as mutable model state.
+
+        Raises:
+            ValueError: A selected encoder or input representation lacks its required geometry.
+        """
+        if gates is None:
+            gates = self.semantic_gates.sample(training=self.training)
+
+        # A frozen physical encoder must produce fixed states, not fresh dropout/atomic-gate
+        # samples each epoch. Other surface/communication gates retain their usual policy.
+
+        if getattr(self, "freeze_physical_encoder", False):
+            self.atomic_encoder.eval()
+            gates = {name: (self.semantic_gates.deterministic_value(name)
+                     if name.startswith(("atom.", "atomic_graph.", "edge.")) else value)
+                     for name, value in gates.items()}
+
+        atomic_numbers = inputs["atomic_numbers"]
+        residue_type_ids = inputs["residue_type_ids"]
+        atom_edge_index = inputs["atom_edge_index"]
+        atom_edge_is_spatial = inputs["atom_edge_is_spatial"]
+        atom_edge_is_covalent = inputs["atom_edge_is_covalent"]
+        atom_edge_distance = inputs["atom_edge_distance"]
+        atom_edge_bond_order = inputs["atom_edge_bond_order"]
+        atom_edge_same_residue = inputs["atom_edge_same_residue"]
+        atom_edge_same_chain = inputs["atom_edge_same_chain"]
+        atom_edge_residue_separation = inputs["atom_edge_residue_separation"]
+        atom_role_ids = inputs["atom_role_ids"]
+        atom_hybridization_ids = inputs["atom_hybridization_ids"]
+        formal_charges = inputs["formal_charges"]
+        atom_aromaticity = inputs["atom_aromaticity"]
+        atom_hbond_donor = inputs["atom_hbond_donor"]
+        atom_hbond_acceptor = inputs["atom_hbond_acceptor"]
+        residue_hydropathy = inputs["residue_hydropathy"]
+        residue_polarity = inputs["residue_polarity"]
+        atom_positions = inputs.get("atom_positions")
+        atom_batch = inputs.get("atom_batch")
+        structural_assets = inputs.get("structural_assets")
+        atom_residue_indices = inputs.get("atom_residue_indices")
+        atomic_operators = inputs.get("atomic_operators")
+
+        atom_features = torch.cat(
+            (
+                self.atomic_number_embedding(atomic_numbers) * (0.0 if
+                    self.atomic_representation is not None and
+                    "element" in self.atomic_representation.drop_sources else 1.0),
+                (self.residue_type_embedding(residue_type_ids) * gates["atom.residue_type"]
+                 if self.residue_type_embedding is not None
+                 and self.residue_type_embedding.embedding_dim > 0
+                 else formal_charges.new_empty((len(atomic_numbers), 0))),
+                self.atom_role_embedding(atom_role_ids) * gates["atom.atom_role"],
+                self.hybridization_embedding(atom_hybridization_ids)
+                * gates["atom.hybridization"],
+                formal_charges.float().unsqueeze(1) * gates["atom.formal_charge"],
+                atom_aromaticity.float().unsqueeze(1) * gates["atom.aromaticity"],
+                atom_hbond_donor.float().unsqueeze(1) * gates["atom.hbond_donor"],
+                atom_hbond_acceptor.float().unsqueeze(1) * gates["atom.hbond_acceptor"],
+                residue_hydropathy.float().unsqueeze(1) * gates["atom.residue_hydropathy"],
+                residue_polarity.float().unsqueeze(1) * gates["atom.residue_polarity"],
+            ),
+            dim=1,
+        )
+        if self.atomic_representation is not None and self.atomic_representation.width:
+            extra = self.atomic_representation({
+                "structural_assets": structural_assets,
+                "atom_residue_indices": atom_residue_indices,
+                "atom_batch": atom_batch, "atomic_numbers": atomic_numbers,
+                "atom_edge_index": atom_edge_index, "atom_edge_is_covalent": atom_edge_is_covalent,
+                "atom_edge_bond_order": atom_edge_bond_order,
+            }, gates)
+            atom_features = torch.cat((atom_features, extra), dim=1)
+        if "atomic_feature_mask" in inputs:
+            # Mask AFTER assembling all sources: hiding only atomic_numbers would leave the
+            # queried element recoverable from its atom-name/residue-atom embedding sidecars.
+
+            atom_features = atom_features.masked_fill(inputs["atomic_feature_mask"][:, None], 0)
+        encoder_arguments = (
+            atom_features,
+            atom_edge_index,
+            (torch.zeros_like(atom_edge_is_spatial) if self.atomic_representation is not None
+             and self.atomic_representation.atomic_message_control else atom_edge_is_spatial),
+            (torch.zeros_like(atom_edge_is_covalent) if self.atomic_representation is not None
+             and self.atomic_representation.atomic_message_control else atom_edge_is_covalent),
+            atom_edge_distance,
+            atom_edge_bond_order,
+            atom_edge_same_residue,
+            atom_edge_same_chain,
+            atom_edge_residue_separation,
+            gates,
+        )
+        atom_embeddings = (
+            self.atomic_encoder(
+                *encoder_arguments, positions=atom_positions, atom_batch=atom_batch,
+                atomic_operators=atomic_operators,
+            )
+            if isinstance(self.atomic_encoder, AtomicGraphEncoder)
+            else self.atomic_encoder(*encoder_arguments)
+        )
+        return atom_embeddings, encoder_arguments
+
     def encode_surface(
         self,
         atomic_numbers                    : Tensor,
@@ -757,6 +1030,11 @@ class WisdomV1(Model):
         compute_logits                    : bool = True,
         surface_area_weights              : Tensor | None = None,
         atom_batch                        : Tensor | None = None,
+        structural_assets                 : Mapping[str, Any] | None = None,
+        atom_residue_indices              : Tensor | None = None,
+        atomic_operators                  : Sequence[Mapping[str, Tensor]] | None = None,
+        physics_queries                   : Mapping[str, Tensor] | None = None,
+        atomic_outputs                    : dict[str, Tensor] | None = None,
     ) -> tuple[Tensor, Tensor | None]:
         """Encode atoms, transfer context, gate curvature channels, and propagate on the surface.
 
@@ -792,6 +1070,9 @@ class WisdomV1(Model):
             surface_neighbors: Optional V3 neighbours ``[M,K]``.
             surface_neighbor_mask: Optional V3 validity ``[M,K]``.
             atom_batch: Explicit protein ownership [N], required for bounded global attention.
+            structural_assets: Validated protein-local immutable assets for opted-in V10 inputs.
+            atom_residue_indices: Protein-local physical residue addresses [N], not residue types.
+            atomic_operators: Prepared global atomic path/degree packs, or None for local encoders.
             atom_positions: Optional centered coordinates ``[N,3]``, Å; required by spike C
                 and V9 directional, persistent-vector and EGNN encoders.
             surface_explicit_features: Selected train-normalized fixed fields ``[M,K]``;
@@ -800,6 +1081,9 @@ class WisdomV1(Model):
                 the returned logit is None. True preserves all historical V1/V2 calls.
             surface_area_weights: Positive represented areas [M] in Å²; needed only when
                 feedback_weighting=area and a feedback or null-control round is active.
+            physics_queries: Optional sampled query geometry and sparse ownership, never targets.
+            atomic_outputs: Optional per-call output mapping receiving VF predictions [Q,3];
+                no tensors are cached on the model and ordinary forwards allocate no VF output.
 
         Returns:
             Surface evidence Z ``[M,D]`` and optional local logits ``[M]``. D is H, K or H+K
@@ -820,39 +1104,50 @@ class WisdomV1(Model):
 
         gates = self.semantic_gates.sample(training=self.training)
 
-        atom_features = torch.cat(
-            (
-                self.atomic_number_embedding(atomic_numbers),
-                self.residue_type_embedding(residue_type_ids) * gates["atom.residue_type"],
-                self.atom_role_embedding(atom_role_ids) * gates["atom.atom_role"],
-                self.hybridization_embedding(atom_hybridization_ids)
-                * gates["atom.hybridization"],
-                formal_charges.float().unsqueeze(1) * gates["atom.formal_charge"],
-                atom_aromaticity.float().unsqueeze(1) * gates["atom.aromaticity"],
-                atom_hbond_donor.float().unsqueeze(1) * gates["atom.hbond_donor"],
-                atom_hbond_acceptor.float().unsqueeze(1) * gates["atom.hbond_acceptor"],
-                residue_hydropathy.float().unsqueeze(1) * gates["atom.residue_hydropathy"],
-                residue_polarity.float().unsqueeze(1) * gates["atom.residue_polarity"],
-            ),
-            dim=1,
-        )
-        encoder_arguments = (
-            atom_features,
-            atom_edge_index,
-            atom_edge_is_spatial,
-            atom_edge_is_covalent,
-            atom_edge_distance,
-            atom_edge_bond_order,
-            atom_edge_same_residue,
-            atom_edge_same_chain,
-            atom_edge_residue_separation,
-            gates,
-        )
-        atom_embeddings = (
-            self.atomic_encoder(*encoder_arguments, positions=atom_positions, atom_batch=atom_batch)
-            if isinstance(self.atomic_encoder, AtomicGraphEncoder)
-            else self.atomic_encoder(*encoder_arguments)
-        )
+        atom_embeddings, encoder_arguments = self.encode_atoms({
+            "atomic_numbers": atomic_numbers,
+            "residue_type_ids": residue_type_ids,
+            "atom_edge_index": atom_edge_index,
+            "atom_edge_is_spatial": atom_edge_is_spatial,
+            "atom_edge_is_covalent": atom_edge_is_covalent,
+            "atom_edge_distance": atom_edge_distance,
+            "atom_edge_bond_order": atom_edge_bond_order,
+            "atom_edge_same_residue": atom_edge_same_residue,
+            "atom_edge_same_chain": atom_edge_same_chain,
+            "atom_edge_residue_separation": atom_edge_residue_separation,
+            "atom_role_ids": atom_role_ids,
+            "atom_hybridization_ids": atom_hybridization_ids,
+            "formal_charges": formal_charges,
+            "atom_aromaticity": atom_aromaticity,
+            "atom_hbond_donor": atom_hbond_donor,
+            "atom_hbond_acceptor": atom_hbond_acceptor,
+            "residue_hydropathy": residue_hydropathy,
+            "residue_polarity": residue_polarity,
+            "atom_positions": atom_positions,
+            "atom_batch": atom_batch,
+            "structural_assets": structural_assets,
+            "atom_residue_indices": atom_residue_indices,
+            "atomic_operators": atomic_operators,
+        }, gates)
+
+        if physics_queries is not None:
+            if self.physics_decoder is None or atomic_outputs is None or (
+                atom_positions is None or atom_batch is None
+            ):
+                raise ValueError("VF queries require a decoder, atomic geometry and output mapping")
+            atomic_outputs["physics_predictions"] = self.physics_decoder(
+                atom_embeddings, atom_positions, atom_batch, physics_queries)
+        residue_surface = None
+        if self.atomic_representation is not None and (
+            self.atomic_representation.residue_encoder is not None
+        ):
+            atom_embeddings, residue_surface = self.atomic_representation.communicate({
+                "structural_assets": structural_assets,
+                "atom_residue_indices": atom_residue_indices, "atom_batch": atom_batch,
+                "atomic_numbers": atomic_numbers, "atom_edge_index": atom_edge_index,
+                "atom_edge_is_covalent": atom_edge_is_covalent,
+                "atom_edge_bond_order": atom_edge_bond_order,
+            }, atom_embeddings, surface_ptr)
         if self.vector_atomic_state is not None:
             if atom_positions is None:
                 raise ValueError("vector atomic state requires atom_positions")
@@ -876,8 +1171,11 @@ class WisdomV1(Model):
             surface_atom_tangential_distances,
             surface_atom_mask,
             gates,
-            point_features=(curvature if self.surface_geometry_transfer else None),
+            point_features=(curvature if self.surface_geometry_transfer or
+                self.transfer_options.get("message") == "point_pair" else None),
         ) * gates["surface.atom_context"]
+        if residue_surface is not None:
+            atom_context = atom_context + residue_surface
 
         # All V8d stages reference the same physical data and one derived sparse gradient tensor
         # per protein. Only this forward owns the derived container; no learned state is cached.
@@ -892,6 +1190,11 @@ class WisdomV1(Model):
             )
 
         initial   = self.surface_projection(torch.cat((atom_context, curvature), dim=1))
+        if self.surface_environment is not None:
+            if structural_assets is None:
+                raise ValueError("environmental inputs require point-bound structural sidecars")
+            initial = initial + self.surface_environment(
+                structural_assets["surface_environment"]["members"], curvature)
         encoded   = self.encode_surface_features(
             initial,
             surface_operators,
@@ -1064,6 +1367,10 @@ class WisdomV1(Model):
         atom_positions                    : Tensor | None = None,
         surface_explicit_features         : Tensor | None = None,
         atom_batch                        : Tensor | None = None,
+        structural_assets                 : Mapping[str, Any] | None = None,
+        atom_residue_indices              : Tensor | None = None,
+        atomic_operators                  : Sequence[Mapping[str, Tensor]] | None = None,
+        physics_queries                   : Mapping[str, Tensor] | None = None,
     ) -> dict[str, Tensor]:
         """Predict local surface evidence and one MAX-pooled protein logit.
 
@@ -1105,10 +1412,15 @@ class WisdomV1(Model):
             surface_explicit_features: Optional frozen train-normalized fields ``[M,K]``;
                 mandatory in explicit/hybrid mode, never a surface reference target.
             atom_batch: Explicit protein ownership [N], required for bounded global attention.
+            structural_assets: Immutable protein-local V10 assets, None for historical models.
+            atom_residue_indices: Physical local residue addresses [N] when V10 is enabled.
+            atomic_operators: Optional fixed global atomic path/degree packs shared across layers.
+            physics_queries: Optional VF sampled query geometry, never physical target values.
 
         Returns:
             Essential ``surface_logits[M]`` and ``logits[B]`` outputs.
         """
+        atomic_outputs: dict[str, Tensor] = {}
         surface_evidence_features, surface_logits = self.encode_surface(
             atomic_numbers,
             residue_type_ids,
@@ -1144,6 +1456,11 @@ class WisdomV1(Model):
             surface_explicit_features,
             surface_area_weights=surface_area_weights,
             atom_batch=atom_batch,
+            structural_assets=structural_assets,
+            atom_residue_indices=atom_residue_indices,
+            atomic_operators=atomic_operators,
+            physics_queries=physics_queries,
+            atomic_outputs=atomic_outputs,
         )
         protein_count = len(surface_ptr) - 1
         assert surface_logits is not None
@@ -1151,6 +1468,7 @@ class WisdomV1(Model):
             surface_logits.unsqueeze(-1), surface_batch, protein_count
         ).squeeze(-1)
         return {
+            **atomic_outputs,
             "logits":             protein_logits,
             "surface_logits":     surface_logits,
             **self.surface_representation_outputs(

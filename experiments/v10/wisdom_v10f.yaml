@@ -1,0 +1,352 @@
+# OBJECTIVE: Separate feature selection from predictive quality using original Hard-Concrete gates.
+# PREREQUISITES: Exact V10e @8 content and all seven structural chemical input sources.
+# VARIES: Closed scalar profiles for S/C/O coefficients, initial activity, schedule and chemical controls.
+# FIXED: Executed V10e SchNet RBF-16/64->128, MAX Heat6, weak R=.3, optimizer and G selection.
+# DECISION: Compare learned selection and predictive S/G separately across paired seeds and costs.
+# SOURCE: Executed V10e execution-fb5d3b83bc625f62; its fixed ledger matches the local V10e YAML.
+# DESIGN: 20 complete profiles x 4 NEW paired seeds = 80 mandatory Runs; no HPO or test access.
+# PRIMARY: Operational S at the checkpoint chosen ONLY by validation protein G.
+name: wisdom-v10f  # New contemporary Study; never relabel or resume a historical execution.
+run: wisdom.Training.Training  # One Work, with native LF finite sweep and result analysis.
+
+with:  # Reviewed MAX R Single / Heat6 ledger; change upstream choices explicitly here.
+  dataset: {dataset: wisdom-dna-reduced@8}  # Enriched publication must preserve reviewed members, splits, base geometry and GT.
+  dataset_content_id: sha256:0e09a1148d09f7912fdf249343db1e3348cf39dc9e493797db1f179df0469af0  # Exact executed V10e dataset; fail before loading another release.
+  model_version: 2  # Existing scalar surface/model capabilities, not a new model generation.
+  subset: full  # Complete reduced train population; validation stays fixed.
+  surface_representation_mode: learned  # Preserve the learned surface route; new sources are declared below.
+  surface_encoder_type: diffusion  # Keep DiffusionNet fixed while comparing atomic encoders.
+  initialization_profile: baseline  # Same historical numerical initialization policy.
+  optimization_profile: baseline  # Fixed AdamW policy; do not reopen HPO.
+  hidden_dim: 128  # Common scalar atom output and surface width D.
+  embedding_dim: 32  # Original element embedding width.
+  residue_embedding_dim: 64  # Original residue embedding width.
+  atomic_layers: 2  # Two interactions; triplet/global reach is explicitly not equal to two local hops.
+  projection_depth: 3  # Freeze atom-to-surface projection depth.
+  surface_layers: 4  # Freeze DiffusionNet.
+  atom_spatial_k: 8  # Same nested spatial topology; never generate new neighbors.
+  surface_atom_k: 16  # Same atom-to-surface candidates.
+  diffusion_spectral_modes: 32  # Same surface spectral budget.
+  surface_atom_radius: 4.0  # Same transfer radius, in angstroms.
+  atomic_edge_distance_scale: 6.0  # Baseline scalar edge normalization in angstroms.
+  dropout: 0.2  # Fixed common dropout.
+  learning_rate: 0.001  # Fixed V7 AdamW rate.
+  weight_decay: 0.0005  # Fixed V7 decay.
+  gate_lambda: 0.04  # Legacy reference only; grouped costs already include their coefficients.
+  pooling_type: max  # MAX R Single is the declared context, not another search axis.
+  pooling_area_mode: point  # Same point-based MAX pipeline.
+  surface_refiner_type: heat  # Same operational evidence refiner.
+  surface_refiner_heat_length: 6.0  # Heat6, in angstroms.
+  weak_loss_profile: custom  # Apply the exact reviewed weak coefficients.
+  negative_surface_lambda: 0.0  # No negative suppression in line A.
+  positive_existence_lambda: 0.0  # No point-existence term.
+  regional_positive_lambda: 0.3  # R is regional existence, not ranking.
+  regional_ranking_lambda: 0.0  # K remains disabled.
+  regional_loss_length: 2.5  # Existing auxiliary regional scale, angstroms.
+  regional_ranking_margin: 0.5  # Frozen, inactive ranking margin.
+  cardinality_lambda: 0.0  # Disabled.
+  total_variation_lambda: 0.0  # Disabled.
+  dirichlet_lambda: 0.0  # Disabled.
+  head_type: single  # Exact original single-head protein BCE; no FiLM parameters.
+  head_implementation: controlled  # Preserve the corrected V7 contract.
+  architecture_spike: baseline  # No geometry-conditioned transfer, feedback or post-hoc V8 vectors.
+  surface_geometry_transfer: false  # V8a is not adopted; keep the reviewed transfer scorer.
+  interaction_round: single  # No second DiffusionNet pass or surface-to-atom return.
+  vector_atomic_channels: 0  # No V8c augmentation; V9e's own vector encoders remain the tested factor.
+  feedback_propagation: none  # No V8d post-feedback GNN/MLP or extra surface stage.
+  architecture_implementation: controlled  # Paired initialization of the common surface route.
+  gate_cost_normalization: baseline_count  # No dilution when a family omits attributes.
+  atomic_encoder_type: schnet  # Provisional V9f cell 08: full edge metadata, not schnet_radial.
+  atomic_radial_encoding: gaussian  # Preserve RBF-16, with centers on [0,6] angstroms.
+  atomic_radial_count: 16  # Radial filter inputs, independent of the latent state width.
+  atomic_hidden_dim: 64  # Narrow all atomic interactions; do not shrink chemical input embeddings.
+  atomic_output_dim: 128  # Learned 64->128 output projection; shared surface modules remain 128.
+  atomic_spatial_cutoff: 6.0  # Fixed atomic radial support, not the 4-Angstrom transfer radius.
+  batch_size: 16  # Unchanged optimization batch; do not shrink silently for expensive variants.
+  epochs: 500  # Existing safety ceiling.
+  patience: 30  # G-based within-Run stopping; no competitive pruning.
+  minimum_delta: 0.001  # Existing checkpoint improvement tolerance.
+  precision: auto  # Hardware-safe mixed precision with invariant numerical checks.
+  surface_metrics: true  # Evaluation-only local GT; never a gradient input.
+  surface_metrics_interval: 1  # Retain original/operational S and temporal G-S coupling/regret.
+  visualization:  # Saved checkpoints can be reviewed after the fixed comparison.
+    mode: none  # No per-seed gallery generation during training.
+  faithfulness_audit: false  # Vertex-deletion interventions are incompatible with fixed Heat6 operators.
+  evaluate_test: false  # Held-out test remains sealed.
+  optimization_diagnostics: true  # Retain optimization, activation and gate diagnostics.
+  data_workers: 4  # Persistent training decoding, not a scientific factor.
+
+
+# Defaults: dataset_content_id=null adds no identity pin; an explicit ID must match before loading.
+# gate_policy=null preserves historical gate_lambda and global warm-up behavior.
+# GatePolicy defaults: lambda_surface=lambda_chemical=lambda_other=0.04 (finite >=0);
+# initial_active_surface=initial_active_chemical=initial_active_other=0.95 (strictly inside 0,1);
+# warmup_fraction=ramp_fraction=0, each in [0,1] and sum<=1. t=(epoch-1)/epochs.
+# Grouped costs are ALREADY weighted: sum_g lambda_g * sum_i P(path_i active)/41, no extra lambda.
+# S=20 curvature gates, C=7 added source gates, O=21 historical gates; atom_context belongs to O.
+# Fixed chemical gates have zero direct penalty. Compact has 43 gates, not equal full capacity.
+# During S/C warm-up only those groups are forced open and unpenalized; O always stays learned.
+# In ramp S/C become stochastic and their coefficients rise linearly; no horizon rescaling.
+# Inference restores the selected checkpoint's exact overrides, including an unfinished warm-up.
+# atomic_representation defaults: sources=[], identity_dim=8, force_sources=learned;
+# force_sources accepts learned/open/closed; masks and values are gated together after projection.
+# external_model=null, external_mode=none; context_dim=32 and standard_deviation_floor=1e-6.
+# No changes to the seven source representations or additional preprocessing are introduced.
+# Remaining fixed constructor defaults/reference are documented in the unchanged V10e ledger.
+
+seeds: [269, 271, 277, 281]  # Fresh paired seeds; checked against local campaign configurations/exports.
+# Explicit seeds require every profile to complete all four replications; no adaptive seed racing.
+sweep:  # Exactly 20 closed profiles, not a Cartesian expansion or adaptive search.
+  reference:  # Unique contemporary full-source 0.04/0.04 immediate condition.
+    gate_lambda_surface: 0.04  # S direct-cost coefficient; denominator remains 41.
+    gate_lambda_chemical: 0.04  # C direct-cost coefficient; no second gate_lambda multiplier.
+    gate_lambda_other: 0.04  # O historical direct-cost coefficient; global controls alone increase it.
+    gate_initial_active_surface: 0.95  # Initial analytic S activity P(z>0), not inference opening.
+    gate_initial_active_chemical: 0.95  # Initial analytic C activity P(z>0); O stays at 0.95.
+    gate_group_warmup_fraction: 0.0  # Nominal S/C all-on/no-cost fraction; O stays learned.
+    gate_group_ramp_fraction: 0.0  # Following nominal S/C cost-ramp fraction; O stays at its coefficient.
+    atomic_sources: "atom_name,residue_atom,backbone_torsions,sidechain_torsions,covalent_statistics,functional_groups,atomic_sasa"  # Available canonical chemical sources; historical inputs remain available.
+    atomic_force_sources: "learned"  # Control for chemical sources only, never the historical gates.
+  space:  # Scalar scientific domains; every point below supplies every active dimension.
+    gate_lambda_surface:  # Recognized Training.run scientific argument, never an artificial profile ID.
+      values: [0.04, 0.16, 0.64]  # Finite values; candidates select only the listed joint settings.
+    gate_lambda_chemical:  # Recognized Training.run scientific argument, never an artificial profile ID.
+      values: [0.04, 0.16, 0.64]  # Finite values; candidates select only the listed joint settings.
+    gate_lambda_other:  # Recognized Training.run scientific argument, never an artificial profile ID.
+      values: [0.04, 0.16, 0.64]  # Finite values; candidates select only the listed joint settings.
+    gate_initial_active_surface:  # Recognized Training.run scientific argument, never an artificial profile ID.
+      values: [0.95, 0.5]  # Finite values; candidates select only the listed joint settings.
+    gate_initial_active_chemical:  # Recognized Training.run scientific argument, never an artificial profile ID.
+      values: [0.95, 0.5]  # Finite values; candidates select only the listed joint settings.
+    gate_group_warmup_fraction:  # Recognized Training.run scientific argument, never an artificial profile ID.
+      values: [0.0, 0.01]  # Finite values; candidates select only the listed joint settings.
+    gate_group_ramp_fraction:  # Recognized Training.run scientific argument, never an artificial profile ID.
+      values: [0.0, 0.02, 0.04]  # Finite values; candidates select only the listed joint settings.
+    atomic_sources:  # Recognized Training.run scientific argument, never an artificial profile ID.
+      values: ["atom_name,residue_atom,backbone_torsions,sidechain_torsions,covalent_statistics,functional_groups,atomic_sasa", "atom_name,residue_atom"]  # Finite values; candidates select only the listed joint settings.
+    atomic_force_sources:  # Recognized Training.run scientific argument, never an artificial profile ID.
+      values: ["learned", "open", "closed"]  # Finite values; candidates select only the listed joint settings.
+  candidates:  # 9 strengths + 3 initializations + 3 schedules + 2 global + 3 functional controls.
+    # A1: one complete scientific profile, executed with all four seeds.
+    - gate_lambda_surface: 0.04  # S direct-cost coefficient; denominator remains 41.
+      gate_lambda_chemical: 0.04  # C direct-cost coefficient; no second gate_lambda multiplier.
+      gate_lambda_other: 0.04  # O historical direct-cost coefficient; global controls alone increase it.
+      gate_initial_active_surface: 0.95  # Initial analytic S activity P(z>0), not inference opening.
+      gate_initial_active_chemical: 0.95  # Initial analytic C activity P(z>0); O stays at 0.95.
+      gate_group_warmup_fraction: 0.0  # Nominal S/C all-on/no-cost fraction; O stays learned.
+      gate_group_ramp_fraction: 0.0  # Following nominal S/C cost-ramp fraction; O stays at its coefficient.
+      atomic_sources: "atom_name,residue_atom,backbone_torsions,sidechain_torsions,covalent_statistics,functional_groups,atomic_sasa"  # Available canonical chemical sources; historical inputs remain available.
+      atomic_force_sources: "learned"  # Control for chemical sources only, never the historical gates.
+    # A2: one complete scientific profile, executed with all four seeds.
+    - gate_lambda_surface: 0.04  # S direct-cost coefficient; denominator remains 41.
+      gate_lambda_chemical: 0.16  # C direct-cost coefficient; no second gate_lambda multiplier.
+      gate_lambda_other: 0.04  # O historical direct-cost coefficient; global controls alone increase it.
+      gate_initial_active_surface: 0.95  # Initial analytic S activity P(z>0), not inference opening.
+      gate_initial_active_chemical: 0.95  # Initial analytic C activity P(z>0); O stays at 0.95.
+      gate_group_warmup_fraction: 0.0  # Nominal S/C all-on/no-cost fraction; O stays learned.
+      gate_group_ramp_fraction: 0.0  # Following nominal S/C cost-ramp fraction; O stays at its coefficient.
+      atomic_sources: "atom_name,residue_atom,backbone_torsions,sidechain_torsions,covalent_statistics,functional_groups,atomic_sasa"  # Available canonical chemical sources; historical inputs remain available.
+      atomic_force_sources: "learned"  # Control for chemical sources only, never the historical gates.
+    # A3: one complete scientific profile, executed with all four seeds.
+    - gate_lambda_surface: 0.04  # S direct-cost coefficient; denominator remains 41.
+      gate_lambda_chemical: 0.64  # C direct-cost coefficient; no second gate_lambda multiplier.
+      gate_lambda_other: 0.04  # O historical direct-cost coefficient; global controls alone increase it.
+      gate_initial_active_surface: 0.95  # Initial analytic S activity P(z>0), not inference opening.
+      gate_initial_active_chemical: 0.95  # Initial analytic C activity P(z>0); O stays at 0.95.
+      gate_group_warmup_fraction: 0.0  # Nominal S/C all-on/no-cost fraction; O stays learned.
+      gate_group_ramp_fraction: 0.0  # Following nominal S/C cost-ramp fraction; O stays at its coefficient.
+      atomic_sources: "atom_name,residue_atom,backbone_torsions,sidechain_torsions,covalent_statistics,functional_groups,atomic_sasa"  # Available canonical chemical sources; historical inputs remain available.
+      atomic_force_sources: "learned"  # Control for chemical sources only, never the historical gates.
+    # A4: one complete scientific profile, executed with all four seeds.
+    - gate_lambda_surface: 0.16  # S direct-cost coefficient; denominator remains 41.
+      gate_lambda_chemical: 0.04  # C direct-cost coefficient; no second gate_lambda multiplier.
+      gate_lambda_other: 0.04  # O historical direct-cost coefficient; global controls alone increase it.
+      gate_initial_active_surface: 0.95  # Initial analytic S activity P(z>0), not inference opening.
+      gate_initial_active_chemical: 0.95  # Initial analytic C activity P(z>0); O stays at 0.95.
+      gate_group_warmup_fraction: 0.0  # Nominal S/C all-on/no-cost fraction; O stays learned.
+      gate_group_ramp_fraction: 0.0  # Following nominal S/C cost-ramp fraction; O stays at its coefficient.
+      atomic_sources: "atom_name,residue_atom,backbone_torsions,sidechain_torsions,covalent_statistics,functional_groups,atomic_sasa"  # Available canonical chemical sources; historical inputs remain available.
+      atomic_force_sources: "learned"  # Control for chemical sources only, never the historical gates.
+    # A5: one complete scientific profile, executed with all four seeds.
+    - gate_lambda_surface: 0.16  # S direct-cost coefficient; denominator remains 41.
+      gate_lambda_chemical: 0.16  # C direct-cost coefficient; no second gate_lambda multiplier.
+      gate_lambda_other: 0.04  # O historical direct-cost coefficient; global controls alone increase it.
+      gate_initial_active_surface: 0.95  # Initial analytic S activity P(z>0), not inference opening.
+      gate_initial_active_chemical: 0.95  # Initial analytic C activity P(z>0); O stays at 0.95.
+      gate_group_warmup_fraction: 0.0  # Nominal S/C all-on/no-cost fraction; O stays learned.
+      gate_group_ramp_fraction: 0.0  # Following nominal S/C cost-ramp fraction; O stays at its coefficient.
+      atomic_sources: "atom_name,residue_atom,backbone_torsions,sidechain_torsions,covalent_statistics,functional_groups,atomic_sasa"  # Available canonical chemical sources; historical inputs remain available.
+      atomic_force_sources: "learned"  # Control for chemical sources only, never the historical gates.
+    # A6: one complete scientific profile, executed with all four seeds.
+    - gate_lambda_surface: 0.16  # S direct-cost coefficient; denominator remains 41.
+      gate_lambda_chemical: 0.64  # C direct-cost coefficient; no second gate_lambda multiplier.
+      gate_lambda_other: 0.04  # O historical direct-cost coefficient; global controls alone increase it.
+      gate_initial_active_surface: 0.95  # Initial analytic S activity P(z>0), not inference opening.
+      gate_initial_active_chemical: 0.95  # Initial analytic C activity P(z>0); O stays at 0.95.
+      gate_group_warmup_fraction: 0.0  # Nominal S/C all-on/no-cost fraction; O stays learned.
+      gate_group_ramp_fraction: 0.0  # Following nominal S/C cost-ramp fraction; O stays at its coefficient.
+      atomic_sources: "atom_name,residue_atom,backbone_torsions,sidechain_torsions,covalent_statistics,functional_groups,atomic_sasa"  # Available canonical chemical sources; historical inputs remain available.
+      atomic_force_sources: "learned"  # Control for chemical sources only, never the historical gates.
+    # A7: one complete scientific profile, executed with all four seeds.
+    - gate_lambda_surface: 0.64  # S direct-cost coefficient; denominator remains 41.
+      gate_lambda_chemical: 0.04  # C direct-cost coefficient; no second gate_lambda multiplier.
+      gate_lambda_other: 0.04  # O historical direct-cost coefficient; global controls alone increase it.
+      gate_initial_active_surface: 0.95  # Initial analytic S activity P(z>0), not inference opening.
+      gate_initial_active_chemical: 0.95  # Initial analytic C activity P(z>0); O stays at 0.95.
+      gate_group_warmup_fraction: 0.0  # Nominal S/C all-on/no-cost fraction; O stays learned.
+      gate_group_ramp_fraction: 0.0  # Following nominal S/C cost-ramp fraction; O stays at its coefficient.
+      atomic_sources: "atom_name,residue_atom,backbone_torsions,sidechain_torsions,covalent_statistics,functional_groups,atomic_sasa"  # Available canonical chemical sources; historical inputs remain available.
+      atomic_force_sources: "learned"  # Control for chemical sources only, never the historical gates.
+    # A8: one complete scientific profile, executed with all four seeds.
+    - gate_lambda_surface: 0.64  # S direct-cost coefficient; denominator remains 41.
+      gate_lambda_chemical: 0.16  # C direct-cost coefficient; no second gate_lambda multiplier.
+      gate_lambda_other: 0.04  # O historical direct-cost coefficient; global controls alone increase it.
+      gate_initial_active_surface: 0.95  # Initial analytic S activity P(z>0), not inference opening.
+      gate_initial_active_chemical: 0.95  # Initial analytic C activity P(z>0); O stays at 0.95.
+      gate_group_warmup_fraction: 0.0  # Nominal S/C all-on/no-cost fraction; O stays learned.
+      gate_group_ramp_fraction: 0.0  # Following nominal S/C cost-ramp fraction; O stays at its coefficient.
+      atomic_sources: "atom_name,residue_atom,backbone_torsions,sidechain_torsions,covalent_statistics,functional_groups,atomic_sasa"  # Available canonical chemical sources; historical inputs remain available.
+      atomic_force_sources: "learned"  # Control for chemical sources only, never the historical gates.
+    # A9: one complete scientific profile, executed with all four seeds.
+    - gate_lambda_surface: 0.64  # S direct-cost coefficient; denominator remains 41.
+      gate_lambda_chemical: 0.64  # C direct-cost coefficient; no second gate_lambda multiplier.
+      gate_lambda_other: 0.04  # O historical direct-cost coefficient; global controls alone increase it.
+      gate_initial_active_surface: 0.95  # Initial analytic S activity P(z>0), not inference opening.
+      gate_initial_active_chemical: 0.95  # Initial analytic C activity P(z>0); O stays at 0.95.
+      gate_group_warmup_fraction: 0.0  # Nominal S/C all-on/no-cost fraction; O stays learned.
+      gate_group_ramp_fraction: 0.0  # Following nominal S/C cost-ramp fraction; O stays at its coefficient.
+      atomic_sources: "atom_name,residue_atom,backbone_torsions,sidechain_torsions,covalent_statistics,functional_groups,atomic_sasa"  # Available canonical chemical sources; historical inputs remain available.
+      atomic_force_sources: "learned"  # Control for chemical sources only, never the historical gates.
+    # B1: one complete scientific profile, executed with all four seeds.
+    - gate_lambda_surface: 0.16  # S direct-cost coefficient; denominator remains 41.
+      gate_lambda_chemical: 0.16  # C direct-cost coefficient; no second gate_lambda multiplier.
+      gate_lambda_other: 0.04  # O historical direct-cost coefficient; global controls alone increase it.
+      gate_initial_active_surface: 0.5  # Initial analytic S activity P(z>0), not inference opening.
+      gate_initial_active_chemical: 0.95  # Initial analytic C activity P(z>0); O stays at 0.95.
+      gate_group_warmup_fraction: 0.0  # Nominal S/C all-on/no-cost fraction; O stays learned.
+      gate_group_ramp_fraction: 0.0  # Following nominal S/C cost-ramp fraction; O stays at its coefficient.
+      atomic_sources: "atom_name,residue_atom,backbone_torsions,sidechain_torsions,covalent_statistics,functional_groups,atomic_sasa"  # Available canonical chemical sources; historical inputs remain available.
+      atomic_force_sources: "learned"  # Control for chemical sources only, never the historical gates.
+    # B2: one complete scientific profile, executed with all four seeds.
+    - gate_lambda_surface: 0.16  # S direct-cost coefficient; denominator remains 41.
+      gate_lambda_chemical: 0.16  # C direct-cost coefficient; no second gate_lambda multiplier.
+      gate_lambda_other: 0.04  # O historical direct-cost coefficient; global controls alone increase it.
+      gate_initial_active_surface: 0.95  # Initial analytic S activity P(z>0), not inference opening.
+      gate_initial_active_chemical: 0.5  # Initial analytic C activity P(z>0); O stays at 0.95.
+      gate_group_warmup_fraction: 0.0  # Nominal S/C all-on/no-cost fraction; O stays learned.
+      gate_group_ramp_fraction: 0.0  # Following nominal S/C cost-ramp fraction; O stays at its coefficient.
+      atomic_sources: "atom_name,residue_atom,backbone_torsions,sidechain_torsions,covalent_statistics,functional_groups,atomic_sasa"  # Available canonical chemical sources; historical inputs remain available.
+      atomic_force_sources: "learned"  # Control for chemical sources only, never the historical gates.
+    # B3: one complete scientific profile, executed with all four seeds.
+    - gate_lambda_surface: 0.16  # S direct-cost coefficient; denominator remains 41.
+      gate_lambda_chemical: 0.16  # C direct-cost coefficient; no second gate_lambda multiplier.
+      gate_lambda_other: 0.04  # O historical direct-cost coefficient; global controls alone increase it.
+      gate_initial_active_surface: 0.5  # Initial analytic S activity P(z>0), not inference opening.
+      gate_initial_active_chemical: 0.5  # Initial analytic C activity P(z>0); O stays at 0.95.
+      gate_group_warmup_fraction: 0.0  # Nominal S/C all-on/no-cost fraction; O stays learned.
+      gate_group_ramp_fraction: 0.0  # Following nominal S/C cost-ramp fraction; O stays at its coefficient.
+      atomic_sources: "atom_name,residue_atom,backbone_torsions,sidechain_torsions,covalent_statistics,functional_groups,atomic_sasa"  # Available canonical chemical sources; historical inputs remain available.
+      atomic_force_sources: "learned"  # Control for chemical sources only, never the historical gates.
+    # C1: one complete scientific profile, executed with all four seeds.
+    - gate_lambda_surface: 0.16  # S direct-cost coefficient; denominator remains 41.
+      gate_lambda_chemical: 0.16  # C direct-cost coefficient; no second gate_lambda multiplier.
+      gate_lambda_other: 0.04  # O historical direct-cost coefficient; global controls alone increase it.
+      gate_initial_active_surface: 0.95  # Initial analytic S activity P(z>0), not inference opening.
+      gate_initial_active_chemical: 0.95  # Initial analytic C activity P(z>0); O stays at 0.95.
+      gate_group_warmup_fraction: 0.0  # Nominal S/C all-on/no-cost fraction; O stays learned.
+      gate_group_ramp_fraction: 0.02  # Following nominal S/C cost-ramp fraction; O stays at its coefficient.
+      atomic_sources: "atom_name,residue_atom,backbone_torsions,sidechain_torsions,covalent_statistics,functional_groups,atomic_sasa"  # Available canonical chemical sources; historical inputs remain available.
+      atomic_force_sources: "learned"  # Control for chemical sources only, never the historical gates.
+    # C2: one complete scientific profile, executed with all four seeds.
+    - gate_lambda_surface: 0.16  # S direct-cost coefficient; denominator remains 41.
+      gate_lambda_chemical: 0.16  # C direct-cost coefficient; no second gate_lambda multiplier.
+      gate_lambda_other: 0.04  # O historical direct-cost coefficient; global controls alone increase it.
+      gate_initial_active_surface: 0.95  # Initial analytic S activity P(z>0), not inference opening.
+      gate_initial_active_chemical: 0.95  # Initial analytic C activity P(z>0); O stays at 0.95.
+      gate_group_warmup_fraction: 0.0  # Nominal S/C all-on/no-cost fraction; O stays learned.
+      gate_group_ramp_fraction: 0.04  # Following nominal S/C cost-ramp fraction; O stays at its coefficient.
+      atomic_sources: "atom_name,residue_atom,backbone_torsions,sidechain_torsions,covalent_statistics,functional_groups,atomic_sasa"  # Available canonical chemical sources; historical inputs remain available.
+      atomic_force_sources: "learned"  # Control for chemical sources only, never the historical gates.
+    # C3: one complete scientific profile, executed with all four seeds.
+    - gate_lambda_surface: 0.16  # S direct-cost coefficient; denominator remains 41.
+      gate_lambda_chemical: 0.16  # C direct-cost coefficient; no second gate_lambda multiplier.
+      gate_lambda_other: 0.04  # O historical direct-cost coefficient; global controls alone increase it.
+      gate_initial_active_surface: 0.95  # Initial analytic S activity P(z>0), not inference opening.
+      gate_initial_active_chemical: 0.95  # Initial analytic C activity P(z>0); O stays at 0.95.
+      gate_group_warmup_fraction: 0.01  # Nominal S/C all-on/no-cost fraction; O stays learned.
+      gate_group_ramp_fraction: 0.02  # Following nominal S/C cost-ramp fraction; O stays at its coefficient.
+      atomic_sources: "atom_name,residue_atom,backbone_torsions,sidechain_torsions,covalent_statistics,functional_groups,atomic_sasa"  # Available canonical chemical sources; historical inputs remain available.
+      atomic_force_sources: "learned"  # Control for chemical sources only, never the historical gates.
+    # G1: one complete scientific profile, executed with all four seeds.
+    - gate_lambda_surface: 0.16  # S direct-cost coefficient; denominator remains 41.
+      gate_lambda_chemical: 0.16  # C direct-cost coefficient; no second gate_lambda multiplier.
+      gate_lambda_other: 0.16  # O historical direct-cost coefficient; global controls alone increase it.
+      gate_initial_active_surface: 0.95  # Initial analytic S activity P(z>0), not inference opening.
+      gate_initial_active_chemical: 0.95  # Initial analytic C activity P(z>0); O stays at 0.95.
+      gate_group_warmup_fraction: 0.0  # Nominal S/C all-on/no-cost fraction; O stays learned.
+      gate_group_ramp_fraction: 0.0  # Following nominal S/C cost-ramp fraction; O stays at its coefficient.
+      atomic_sources: "atom_name,residue_atom,backbone_torsions,sidechain_torsions,covalent_statistics,functional_groups,atomic_sasa"  # Available canonical chemical sources; historical inputs remain available.
+      atomic_force_sources: "learned"  # Control for chemical sources only, never the historical gates.
+    # G2: one complete scientific profile, executed with all four seeds.
+    - gate_lambda_surface: 0.64  # S direct-cost coefficient; denominator remains 41.
+      gate_lambda_chemical: 0.64  # C direct-cost coefficient; no second gate_lambda multiplier.
+      gate_lambda_other: 0.64  # O historical direct-cost coefficient; global controls alone increase it.
+      gate_initial_active_surface: 0.95  # Initial analytic S activity P(z>0), not inference opening.
+      gate_initial_active_chemical: 0.95  # Initial analytic C activity P(z>0); O stays at 0.95.
+      gate_group_warmup_fraction: 0.0  # Nominal S/C all-on/no-cost fraction; O stays learned.
+      gate_group_ramp_fraction: 0.0  # Following nominal S/C cost-ramp fraction; O stays at its coefficient.
+      atomic_sources: "atom_name,residue_atom,backbone_torsions,sidechain_torsions,covalent_statistics,functional_groups,atomic_sasa"  # Available canonical chemical sources; historical inputs remain available.
+      atomic_force_sources: "learned"  # Control for chemical sources only, never the historical gates.
+    # ALL-ON: one complete scientific profile, executed with all four seeds.
+    - gate_lambda_surface: 0.04  # S direct-cost coefficient; denominator remains 41.
+      gate_lambda_chemical: 0.04  # C direct-cost coefficient; no second gate_lambda multiplier.
+      gate_lambda_other: 0.04  # O historical direct-cost coefficient; global controls alone increase it.
+      gate_initial_active_surface: 0.95  # Initial analytic S activity P(z>0), not inference opening.
+      gate_initial_active_chemical: 0.95  # Initial analytic C activity P(z>0); O stays at 0.95.
+      gate_group_warmup_fraction: 0.0  # Nominal S/C all-on/no-cost fraction; O stays learned.
+      gate_group_ramp_fraction: 0.0  # Following nominal S/C cost-ramp fraction; O stays at its coefficient.
+      atomic_sources: "atom_name,residue_atom,backbone_torsions,sidechain_torsions,covalent_statistics,functional_groups,atomic_sasa"  # Available canonical chemical sources; historical inputs remain available.
+      atomic_force_sources: "open"  # Control for chemical sources only, never the historical gates.
+    # ALL-OFF: one complete scientific profile, executed with all four seeds.
+    - gate_lambda_surface: 0.04  # S direct-cost coefficient; denominator remains 41.
+      gate_lambda_chemical: 0.04  # C direct-cost coefficient; no second gate_lambda multiplier.
+      gate_lambda_other: 0.04  # O historical direct-cost coefficient; global controls alone increase it.
+      gate_initial_active_surface: 0.95  # Initial analytic S activity P(z>0), not inference opening.
+      gate_initial_active_chemical: 0.95  # Initial analytic C activity P(z>0); O stays at 0.95.
+      gate_group_warmup_fraction: 0.0  # Nominal S/C all-on/no-cost fraction; O stays learned.
+      gate_group_ramp_fraction: 0.0  # Following nominal S/C cost-ramp fraction; O stays at its coefficient.
+      atomic_sources: "atom_name,residue_atom,backbone_torsions,sidechain_torsions,covalent_statistics,functional_groups,atomic_sasa"  # Available canonical chemical sources; historical inputs remain available.
+      atomic_force_sources: "closed"  # Control for chemical sources only, never the historical gates.
+    # COMPACT: one complete scientific profile, executed with all four seeds.
+    - gate_lambda_surface: 0.04  # S direct-cost coefficient; denominator remains 41.
+      gate_lambda_chemical: 0.04  # C direct-cost coefficient; no second gate_lambda multiplier.
+      gate_lambda_other: 0.04  # O historical direct-cost coefficient; global controls alone increase it.
+      gate_initial_active_surface: 0.95  # Initial analytic S activity P(z>0), not inference opening.
+      gate_initial_active_chemical: 0.95  # Initial analytic C activity P(z>0); O stays at 0.95.
+      gate_group_warmup_fraction: 0.0  # Nominal S/C all-on/no-cost fraction; O stays learned.
+      gate_group_ramp_fraction: 0.0  # Following nominal S/C cost-ramp fraction; O stays at its coefficient.
+      atomic_sources: "atom_name,residue_atom"  # Available canonical chemical sources; historical inputs remain available.
+      atomic_force_sources: "learned"  # Control for chemical sources only, never the historical gates.
+# Training defaults: scalar group lambdas/initials=null preserve historical policy; once enabled,
+# omitted lambdas=.04 and omitted initial S/C=.95; O initialization uses gate_initial_active=.95.
+# gate_group_warmup_fraction=gate_group_ramp_fraction=0; atomic_sources=null and
+# atomic_force_sources=null preserve the original atomic_representation mapping.
+# Scalar sources are comma-separated canonical source names; force accepts learned/open/closed.
+# No extra combinations, seeds, pruning or test evaluation; native LF expands exactly 80 Runs.
+
+objective:  # Descriptive LF utility; NEVER local-GT epoch selection.
+  metric: val_wisdom_hpo_score  # Retain separate G, original/operational S and regret.
+  mode: max  # W indexes development candidates; scientific priority remains localization.
+  range: [0.0, 1.0]  # Mathematical bounds, not an empirical confidence interval.
+  practical_margin: 0.015  # Existing composite utility margin, not the .005 S decision margin.
+# Objective defaults: mode=max; metric required; range/practical_margin optional.
+# No execution limits authored: native LF admits independent Runs on the granted GPUs.
+# Execution defaults: max_parallel/runs_per_gpu/max_runs/max_time=null, failure_retries=1.
+resources:  # Shared Study envelope, never a guarantee of per-Run feasibility.
+  gpu: 2  # Two accelerators with native resource-aware concurrent admission.
+  cpu: 36  # Total CPUs shared by admitted Runs.
+  memory: 96GiB  # Total host RAM, not per-Run VRAM.
+  time: 168h  # Operational ceiling; use native recovery for interrupted mandatory cells.
+# Resource defaults: cpu=1, gpu=0, processes=1, memory/gpu_memory/storage=0, time=null.
+
+

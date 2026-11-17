@@ -1,14 +1,14 @@
 import pytest
 import torch
 
-from wisdom.models.ArchitectureSpike import ArchitectureSpike
-from wisdom.models.GlobalSurfaceHeads import GlobalSurfaceHeads
-from wisdom.models.InitializationProfile import InitializationProfile
-from wisdom.models.ModelWeightAverage import ModelWeightAverage
-from wisdom.models.OptimizationProfile import OptimizationProfile
-from wisdom.models.SurfaceAtomFeedback import SurfaceAtomFeedback
-from wisdom.models.VectorAtomicState import VectorAtomicState
-from wisdom.models.WeakLossProfile import WeakLossProfile
+from wisdom.models.architecture.ArchitectureSpike import ArchitectureSpike
+from wisdom.models.atomic.VectorAtomicState import VectorAtomicState
+from wisdom.models.communication.SurfaceAtomFeedback import SurfaceAtomFeedback
+from wisdom.models.heads.GlobalSurfaceHeads import GlobalSurfaceHeads
+from wisdom.models.initialization.InitializationProfile import InitializationProfile
+from wisdom.models.losses.WeakLossProfile import WeakLossProfile
+from wisdom.models.optimization.ModelWeightAverage import ModelWeightAverage
+from wisdom.models.optimization.OptimizationProfile import OptimizationProfile
 from wisdom.models.WisdomV1 import WisdomV1
 
 

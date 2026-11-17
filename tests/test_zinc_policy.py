@@ -2,16 +2,19 @@
 
 import hashlib
 import json
+from concurrent.futures import ThreadPoolExecutor
 from types import SimpleNamespace
 
 import pytest
+from lambdaforge.work.checkpoints import CheckpointCollection
 from test_surface_features_and_zinc import _assembly
 
-from wisdom.preprocessing.common import population
-from wisdom.preprocessing.common.shortcut import shortcut_baseline
-from wisdom.preprocessing.zinc import metadata
-from wisdom.preprocessing.zinc.audit import write_benchmark_report
-from wisdom.preprocessing.zinc.evidence import load_evidence
+from wisdom.preprocessing.common.auditing.shortcut import shortcut_baseline
+from wisdom.preprocessing.common.sampling import population
+from wisdom.preprocessing.zinc.stages import metadata
+from wisdom.preprocessing.zinc.stages.audit import write_benchmark_report
+from wisdom.preprocessing.zinc.stages.evidence import load_evidence
+from wisdom.preprocessing.zinc.stages.negatives import fetch_json, valid_source_receipt
 from wisdom.preprocessing.zinc.ZincCoordination import ZincCoordination
 
 
@@ -165,6 +168,7 @@ def test_metadata_respects_author_chain_and_exact_uniprot_scope(monkeypatch, tmp
 
     def response(work, url, *args):
         """Simulate source responses, not biological label acquisition."""
+        assert args[-1] is False
         return (
             {"data": {"entry": {"polymer_entities": [entity]}}}
             if "graphql" in url
@@ -187,6 +191,79 @@ def test_metadata_respects_author_chain_and_exact_uniprot_scope(monkeypatch, tmp
     assert enriched[1]["pfam"] == ["PF1"]
     assert enriched[2]["pfam"] == []
     assert enriched[2]["functional_metadata_status"] == "unavailable"
+
+
+def test_metadata_does_not_transfer_uniprot_annotations_without_sequence(monkeypatch, tmp_path):
+    """A returned accession without sequence remains auditable but proves no identity."""
+    entity = {
+        "rcsb_polymer_entity_container_identifiers": {
+            "auth_asym_ids": ["AQ"],
+            "reference_sequence_identifiers": [
+                {"database_name": "UniProt", "database_accession": "P1"}
+            ],
+        },
+    }
+    canonical = {
+        "primaryAccession": "P1",
+        "proteinDescription": {"recommendedName": {"ecNumbers": [{"value": "1.2.3.4"}]}},
+        "uniProtKBCrossReferences": [{"database": "InterPro", "id": "IP1"}],
+    }
+
+    def response(work, url, *args):
+        """Return a valid entity link and an incomplete canonical search hit."""
+        return (
+            {"data": {"entry": {"polymer_entities": [entity]}}}
+            if "graphql" in url
+            else {"results": [canonical]}
+        )
+
+    monkeypatch.setattr(metadata, "fetch_json", response)
+    job = {"pdb_id": "1abc", "rows": [{"identifier": "1ABC_AQ", "sequence": "ACDE"}]}
+    row = metadata.enrich_metadata(job, SimpleNamespace(), tmp_path, "fixture", 2)["rows"][0]
+
+    assert row["uniprot"] == ["P1"]
+    assert row["uniprot_sequence_unavailable"] == ["P1"]
+    assert row["exact_uniprot"] == []
+    assert row["interpro"] == row["ec"] == []
+
+
+def test_parallel_metadata_reads_defer_portable_source_copy(tmp_path):
+    """Repeated accession readers share validated cache bytes without touching one audit path."""
+    source = tmp_path / "cached.json"
+    source.write_text('{"results": []}')
+    root = tmp_path / "audit"
+    key = "zinc-metadata/session/uniprot/P1.json"
+
+    work = SimpleNamespace(
+        cache=SimpleNamespace(rate_limit=lambda *args, **kwargs: None,
+                              fetch=lambda *args, **kwargs: source),
+        checkpoints=CheckpointCollection(tmp_path / "checkpoints"),
+        log=lambda *args, **kwargs: None,
+    )
+
+    def read_cached(_):
+        """Return validated cache content without writing a shared portable source."""
+        return fetch_json(work, "https://rest.uniprot.org/example", key, root, 2.0,
+                          persist_source=False)
+
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        results = list(executor.map(read_cached, range(8)))
+
+    assert results == [{"results": []}] * 8
+    assert not (root / "sources" / key).exists()
+
+    fetch_json(work, "https://rest.uniprot.org/example", key, root, 2.0)
+    assert (root / "sources" / key).read_bytes() == source.read_bytes()
+
+
+def test_source_receipt_rejects_an_older_partial_copy(tmp_path):
+    """A legacy checkpoint cannot certify bytes copied during an overlapping write."""
+    path = tmp_path / "receipt.json"
+    path.write_text(json.dumps({"url": "https://example.org/a", "file": "sources/a",
+                                "sha256": "partial"}))
+
+    assert not valid_source_receipt(path, "https://example.org/a", "a", "complete")
+    assert valid_source_receipt(path, "https://example.org/a", "a", "partial")
 
 
 def test_confidence_tier_does_not_change_acceptance():

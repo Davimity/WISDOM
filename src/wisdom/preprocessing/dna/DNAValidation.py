@@ -20,7 +20,7 @@ from collections import Counter, defaultdict
 from scipy.stats import wasserstein_distance
 from sklearn.preprocessing import RobustScaler
 from wisdom.features.SurfaceFeatureSidecar import SurfaceFeatureSidecar
-from wisdom.preprocessing.common.structure.StructuralSidecars import StructuralSidecars
+from wisdom.preprocessing.common.structure.assets.StructuralSidecars import StructuralSidecars
 
 matplotlib.use("Agg")
 
@@ -186,7 +186,7 @@ class DNAValidation(lf.Work):
                 self._validate_member(root, member)
                 StructuralSidecars.validate_assets(root / member.assets["universal_npz"].path,
                     {name: root / asset.path for name, asset in member.assets.items()})
-                for name in ("atomic_context", "extended_surface_atom"):
+                for name in sorted(StructuralSidecars.FAMILIES):
                     if name in member.assets:
                         asset = member.assets[name]
                         digest = hashlib.sha256((root / asset.path).read_bytes()).hexdigest()
@@ -646,6 +646,17 @@ class DNAValidation(lf.Work):
             OSError: If an asset cannot be read.
         """
         assets = member.assets
+
+        # Audit the declared inventory independently; checking only present optional files would
+        # miss a required family removed from a member's index after publication.
+
+        required_structural = set(member.metadata.get("required_structural_assets", ()))
+        if required_structural - StructuralSidecars.FAMILIES:
+            raise ValueError("unknown required structural asset family")
+        missing_structural = required_structural - assets.keys()
+        if missing_structural:
+            raise ValueError(f"missing required structural assets: {sorted(missing_structural)}")
+
         for required in ("universal_npz", "dna_annotation", "source_structure"):
             if required not in assets:
                 raise ValueError(f"missing required asset {required}")

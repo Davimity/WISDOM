@@ -1,0 +1,73 @@
+{
+  "scope": "Read-only exact atom-count audit; no model fitting, BFS or dense matrix allocation.",
+  "dataset": "wisdom-dna-reduced@6",
+  "dataset_id": "sha256:ac1745504422cf60b84e57b90efc99206dea039dc36d0c1359782062cb10e202",
+  "members": 589,
+  "formula": "N*N*8 bytes for int64 paths; identical for 2-head FP32 scores, per protein/relation/layer. Not total VRAM.",
+  "old_guard_bytes": 134217728,
+  "old_guard_rejected": 74,
+  "recipe_guard_bytes": 1073741824,
+  "recipe_guard_rejected": 0,
+  "top_members": [
+    {
+      "identifier": "9KLO_A",
+      "split": "validation",
+      "atoms": 10852,
+      "principal_bytes": 942127232
+    },
+    {
+      "identifier": "5FW3_B",
+      "split": "train",
+      "atoms": 10824,
+      "principal_bytes": 937271808
+    },
+    {
+      "identifier": "5MC6_i",
+      "split": "validation",
+      "atoms": 9827,
+      "principal_bytes": 772559432
+    },
+    {
+      "identifier": "9F6L_A",
+      "split": "train",
+      "atoms": 9098,
+      "principal_bytes": 662188832
+    },
+    {
+      "identifier": "5U33_A",
+      "split": "validation",
+      "atoms": 8864,
+      "principal_bytes": 628563968
+    },
+    {
+      "identifier": "3Q23_A",
+      "split": "validation",
+      "atoms": 8454,
+      "principal_bytes": 571760928
+    },
+    {
+      "identifier": "8JG9_A",
+      "split": "train",
+      "atoms": 8436,
+      "principal_bytes": 569328768
+    },
+    {
+      "identifier": "6LTR_A",
+      "split": "validation",
+      "atoms": 8327,
+      "principal_bytes": 554711432
+    },
+    {
+      "identifier": "9K9S_A",
+      "split": "train",
+      "atoms": 8207,
+      "principal_bytes": 538838792
+    },
+    {
+      "identifier": "7LUF_B",
+      "split": "validation",
+      "atoms": 8175,
+      "principal_bytes": 534645000
+    }
+  ]
+}

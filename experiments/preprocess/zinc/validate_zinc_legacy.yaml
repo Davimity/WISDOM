@@ -1,0 +1,11 @@
+name: wisdom-zinc-tfg-validation  # Audit historical membership preservation, not modern label curation.
+run: wisdom.preprocessing.zinc.ZincValidation.ZincValidation  # Same independent structural validator.
+with:  # Run after zinc_legacy_preprocess.yaml publishes on the selected target.
+  dataset: {dataset: wisdom-zinc-tfg@1}  # Resolve the separate immutable TFG reproduction dataset.
+  fail_on_error: true  # Record verdict/details before failing on representation or membership errors.
+# Defaults: dataset=null (required unless skip=true), fail_on_error=true, skip=false,
+# output_directory=null (managed reports only). Historical labels/splits are checked against
+# frozen original files. No homology-independence or experimental-negative claim is made.
+# Missing local reference support is unavailable, not a fabricated all-negative positive target.
+resources: {cpu: 1, memory: 16GiB}  # Read-only full-archive audit; no model inference or training.
+# LF resource defaults: cpu=1 (>0), gpu=0 (>=0); memory/storage/time/processes/gpu_memory optional.

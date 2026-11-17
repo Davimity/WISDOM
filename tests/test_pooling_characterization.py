@@ -10,10 +10,10 @@ from lambdaforge.work import WorkConfig, WorkRunner
 from test_wisdom_v2 import _line_operator
 from yaml import safe_load
 
-from wisdom.models.BoundedScalar import BoundedScalar
-from wisdom.models.DiffusionSurfaceEncoder import DiffusionSurfaceEncoder
-from wisdom.models.PoolingType import PoolingType
-from wisdom.models.ProteinPoolingHead import ProteinPoolingHead
+from wisdom.models.pooling.BoundedScalar import BoundedScalar
+from wisdom.models.pooling.PoolingType import PoolingType
+from wisdom.models.pooling.ProteinPoolingHead import ProteinPoolingHead
+from wisdom.models.surface.DiffusionSurfaceEncoder import DiffusionSurfaceEncoder
 from wisdom.Training import _create_model
 
 

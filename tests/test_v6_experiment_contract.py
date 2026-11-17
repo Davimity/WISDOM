@@ -17,7 +17,7 @@ from torch.nn import functional as F
 from lambdaforge.work import WorkConfig, WorkRunner
 from wisdom.Training import _model_inputs, _train_wisdom
 from wisdom.data.WisdomCollator import WisdomCollator
-from wisdom.models.WeakSurfaceLoss import WeakSurfaceLoss
+from wisdom.models.losses.WeakSurfaceLoss import WeakSurfaceLoss
 
 
 ROOT = Path(__file__).parents[1] / "experiments"

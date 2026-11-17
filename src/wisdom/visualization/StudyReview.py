@@ -41,6 +41,7 @@ class StudyReview(lf.Work):
         strict_checkpoints    : bool = True,
         source_seed           : int | None = None,
         parameter_filter      : Mapping[str, Any] | Sequence[Mapping[str, Any]] | None = None,
+        view_audit            : Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Select existing Trials/seeds and evaluate their frozen best-model snapshots.
 
@@ -76,6 +77,9 @@ class StudyReview(lf.Work):
             parameter_filter: Exact scalar/list choices, or a list of alternative mappings.
                 Mutually exclusive with trial_selection. Empty mapping reviews every eligible
                 configuration; missing inactive fields never match a requested value.
+            view_audit: Optional SurfaceMapAudit options plus maximum_proteins=16 (zero=all).
+                Frozen V12 tensor/view controls. The legacy published protocol requires a
+                surface_view asset; isolated protocols rebuild coherent managed geometry.
 
         Returns:
             Native source identity, reviewed model count, missing evidence and HTML byte summary.
@@ -186,4 +190,5 @@ class StudyReview(lf.Work):
             batch_size,
             data_workers,
             strict_checkpoints,
+            view_audit,
         )

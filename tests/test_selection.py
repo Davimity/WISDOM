@@ -8,13 +8,13 @@ from pathlib import Path
 
 import numpy as np
 
-from wisdom.preprocessing.common.audit import audit_dataset
-from wisdom.preprocessing.common.dilutions import create_dilutions
-from wisdom.preprocessing.common.leakage import assign_leakage_groups
-from wisdom.preprocessing.common.population import select_population
-from wisdom.preprocessing.common.similarity import _sequence_edges, _structure_edges
-from wisdom.preprocessing.common.snapshots import snapshot_structures
-from wisdom.preprocessing.common.splits import assign_splits
+from wisdom.preprocessing.common.auditing.audit import audit_dataset
+from wisdom.preprocessing.common.independence.leakage import assign_leakage_groups
+from wisdom.preprocessing.common.independence.similarity import _sequence_edges, _structure_edges
+from wisdom.preprocessing.common.independence.snapshots import snapshot_structures
+from wisdom.preprocessing.common.sampling.dilutions import create_dilutions
+from wisdom.preprocessing.common.sampling.population import select_population
+from wisdom.preprocessing.common.sampling.splits import assign_splits
 from wisdom.preprocessing.dna.selection.evidence import load_evidence
 from wisdom.preprocessing.dna.selection.report import write_design
 from wisdom.preprocessing.dna.selection.structures import _contacts

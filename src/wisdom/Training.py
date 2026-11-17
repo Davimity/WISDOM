@@ -6,51 +6,67 @@ import json
 import math
 import time
 import torch
+import random
 import inspect
 import importlib
+import numpy as np
 import lambdaforge as lf
 
 from pathlib import Path
 from torch import Tensor
 from typing import Any, cast
+from statistics import median
 from scipy.stats import spearmanr
+from torch.utils.data import Subset
 from torch.nn import functional as F
 from torch.utils.data import DataLoader
+from lambdaforge.data import DatasetIndex
+from torch.utils.data import RandomSampler
 from wisdom.models.WisdomV1 import WisdomV1
 from collections.abc import Mapping, Sequence
-from wisdom.models.PoolingType import PoolingType
 from wisdom.data.WisdomDataset import WisdomDataset
 from wisdom.data.WisdomCollator import WisdomCollator
-from wisdom.models.DiffusionBlock import DiffusionBlock
-from wisdom.models.ProteinTaskLoss import ProteinTaskLoss
-from wisdom.models.WeakLossProfile import WeakLossProfile
-from wisdom.models.WeakSurfaceLoss import WeakSurfaceLoss
-from wisdom.models.StabilityProfile import StabilityProfile
-from wisdom.models.ArchitectureSpike import ArchitectureSpike
-from wisdom.models.AtomicEncoderType import AtomicEncoderType
-from wisdom.models.AtomicGraphEncoder import AtomicGraphEncoder
-from wisdom.models.ModelWeightAverage import ModelWeightAverage
+from wisdom.models.pooling.PoolingType import PoolingType
+from wisdom.models.surface.DiffusionBlock import DiffusionBlock
+from wisdom.models.gating.GateDiagnostics import GateDiagnostics
+from wisdom.models.losses.ProteinTaskLoss import ProteinTaskLoss
+from wisdom.models.losses.WeakLossProfile import WeakLossProfile
+from wisdom.models.losses.WeakSurfaceLoss import WeakSurfaceLoss
+from wisdom.models.negative.NegativeMining import NegativeMining
+from wisdom.models.negative.SurfaceRegions import SurfaceRegions
 from wisdom.evaluation.BinaryMetricSuite import BinaryMetricSuite
-from wisdom.models.OptimizationProfile import OptimizationProfile
-from wisdom.models.WeightAveragingMode import WeightAveragingMode
+from wisdom.evaluation.NegativeAdmission import NegativeAdmission
 from wisdom.evaluation.SurfaceMetricSuite import SurfaceMetricSuite
+from wisdom.models.physics.PhysicalTraining import PhysicalTraining
+from wisdom.models.atomic.AtomicEncoderType import AtomicEncoderType
+from wisdom.models.atomic.SchNetFilterAudit import SchNetFilterAudit
 from wisdom.visualization.ProteinReportPage import ProteinReportPage
+from wisdom.data.AtomicStructuralInputs import AtomicStructuralInputs
 from wisdom.evaluation.SubgroupMetricSuite import SubgroupMetricSuite
 from wisdom.features.SurfaceFeatureSchema import SurfaceFeatureSchema
-from wisdom.models.InitializationProfile import InitializationProfile
+from wisdom.models.atomic.AtomicGraphEncoder import AtomicGraphEncoder
 from wisdom.analysis.WisdomAnalysisProfile import WisdomAnalysisProfile
-from wisdom.models.DiffusionSurfaceEncoder import DiffusionSurfaceEncoder
-from wisdom.models.FeedbackPropagationMode import FeedbackPropagationMode
+from wisdom.models.optimization.StabilityProfile import StabilityProfile
+from wisdom.models.architecture.ArchitectureSpike import ArchitectureSpike
+from wisdom.models.optimization.MiningContinuation import MiningContinuation
+from wisdom.models.optimization.ModelWeightAverage import ModelWeightAverage
 from wisdom.evaluation.OptimizationDiagnostics import OptimizationDiagnostics
-from wisdom.evaluation.SurfacePredictionReport import SurfacePredictionReport
-from wisdom.models.SurfaceRepresentationMode import SurfaceRepresentationMode
+from wisdom.models.optimization.OptimizationProfile import OptimizationProfile
+from wisdom.models.optimization.WeightAveragingMode import WeightAveragingMode
 from wisdom.evaluation.SurfaceFaithfulnessAudit import SurfaceFaithfulnessAudit
-from wisdom.evaluation.SurfaceVisualizationMode import SurfaceVisualizationMode
-from wisdom.preprocessing.common.structure.VisualizationContent import VisualizationContent
+from wisdom.models.surface.DiffusionSurfaceEncoder import DiffusionSurfaceEncoder
+from wisdom.models.initialization.InitializationProfile import InitializationProfile
+from wisdom.models.surface.SurfaceRepresentationMode import SurfaceRepresentationMode
+from wisdom.models.architecture.FeedbackPropagationMode import FeedbackPropagationMode
+from wisdom.models.atomic.representation.AtomicRepresentation import AtomicRepresentation
+from wisdom.visualization.predictions.SurfacePredictionReport import SurfacePredictionReport
+from wisdom.visualization.predictions.SurfaceVisualizationMode import SurfaceVisualizationMode
+from wisdom.preprocessing.common.structure.viewer.VisualizationContent import VisualizationContent
 
 
 _MODEL_INPUT_NAMES = (
     "atomic_numbers",
+    "atom_batch",
     "residue_type_ids",
     "atom_role_ids",
     "atom_hybridization_ids",
@@ -105,6 +121,11 @@ class Training(lf.Work):
         subset               : str = "full",
         surface_representation_mode: str = "learned",
         surface_features     : Sequence[str] = (),
+        structural_assets    : Sequence[str] = (),
+        atomic_representation: Mapping[str, Any] | None = None,
+        external_context_dim : int | None = None,
+        transfer_options: Mapping[str, Any] | None = None,
+        surface_options: Mapping[str, Any] | None = None,
         surface_feature_group: str | None = None,
         surface_feature_exclude: Sequence[str] = (),
         hidden_dim           : int = 128,
@@ -122,6 +143,9 @@ class Training(lf.Work):
         atomic_message_chunk_size: int = 65536,
         atomic_encoder_type: str = "baseline",
         atomic_radial_count: int = 16,
+        atomic_radial_encoding: str = "gaussian",
+        atomic_hidden_dim: int | None = None,
+        atomic_output_dim: int | None = None,
         atomic_vector_channels: int = 16,
         atomic_basis_count: int = 4,
         atomic_spatial_cutoff: float = 6.0,
@@ -200,6 +224,17 @@ class Training(lf.Work):
         learning_rate        : float = 3.0e-4,
         weight_decay         : float = 1.0e-4,
         gate_lambda          : float = 1.0e-3,
+        gate_policy          : Mapping[str, Any] | None = None,
+        dataset_content_id   : str | None = None,
+        gate_lambda_surface         : float | None = None,
+        gate_lambda_chemical        : float | None = None,
+        gate_lambda_other           : float | None = None,
+        gate_initial_active_surface : float | None = None,
+        gate_initial_active_chemical: float | None = None,
+        gate_group_warmup_fraction  : float = 0.0,
+        gate_group_ramp_fraction    : float = 0.0,
+        atomic_sources              : str | None = None,
+        atomic_force_sources        : str | None = None,
         architecture_spike            : str   = "custom",
         weak_loss_profile              : str   = "custom",
         initialization_profile        : str   = "custom",
@@ -258,6 +293,12 @@ class Training(lf.Work):
         initialization_seed           : int | None = None,
         training_seed                 : int | None = None,
         save_initial_checkpoint       : bool = False,
+        negative_mining               : Mapping[str, Any] | None = None,
+        negative_calibration          : Mapping[str, Any] | None = None,
+        calibration_dataset           : Path | None = None,
+        decision_dataset              : Path | None = None,
+        physics                       : Mapping[str, Any] | None = None,
+        physics_checkpoint            : Path | None = None,
     ) -> dict[str, Any]:
         """Train and evaluate one compatible WISDOM generation from a managed DatasetVersion.
 
@@ -267,10 +308,26 @@ class Training(lf.Work):
 
         Args:
             dataset: Resolved managed dataset root containing LambdaForge ``index.jsonl``.
+            physics: Optional VF mapping: mode=joint/pretrain, objective options, decoder options,
+                freeze_encoder=false, validation_interval=1 and evaluation_queries=4096.
+                None leaves the existing functional experiment unchanged. Field targets are
+                supervision only; their normalization is fitted exclusively on training members.
+            physics_checkpoint: Optional native typed file for compatible pretrained atomic
+                weights. Only atomic components transfer; functional heads are never imported.
             model_version: Architecture generation resolved from ``WisdomV{N}`` by convention.
             subset: Full data or a deterministic training-view name.
             surface_representation_mode: learned (default), explicit or hybrid late evidence fusion.
             surface_features: Ordered fixed field names; empty by default, never local targets.
+            structural_assets: Optional universal sidecar families for future model consumers;
+                empty preserves historical data. Loading a family does not activate a new encoder.
+            atomic_representation: Optional V10 AtomicRepresentation constructor mapping; required
+                assets are loaded automatically and normalization uses the selected train only.
+            external_context_dim: Optional scalar override of atomic_representation.context_dim
+                for paired conditional capacity rows. None keeps that mapping unchanged; it
+                requires an explicitly enabled contextual external source and a positive width.
+            transfer_options: V11 TransferExperiment parameters, including candidates=base/extended.
+            surface_options: V13 diffusion readout/gradient/local-branch options; required immutable
+                graph/spectral assets are selected explicitly, never rebuilt during training.
             surface_feature_group: Optional SurfaceFeatureSchema group; None by default.
             surface_feature_exclude: Known field names removed after expansion; empty by default.
             hidden_dim: Shared atom/surface latent width.
@@ -290,6 +347,10 @@ class Training(lf.Work):
             atomic_message_chunk_size: Maximum atomic messages materialized per RGCN chunk.
             atomic_encoder_type: Exact V9 atomic operator/control; baseline keeps historical keys.
             atomic_radial_count: Gaussian/sinusoidal/Bessel radial basis count, positive.
+            atomic_radial_encoding: SchNet gaussian (historical) or direct (one d/r input).
+            atomic_hidden_dim: SchNet internal channels; None uses hidden_dim. Chemical inputs
+                and surface widths remain fixed; other encoders require the common width.
+            atomic_output_dim: None or hidden_dim; fixes the surface-transfer interface width.
             atomic_vector_channels: Positive GVP polar-channel count; PaiNN uses hidden_dim.
             atomic_basis_count: Positive NNConv basis count, inactive for full filters.
             atomic_spatial_cutoff: Spatial radial support in Å, without generating new neighbors.
@@ -381,6 +442,21 @@ class Training(lf.Work):
             surface_loss_fraction: rho in [0,1) for normalized multi-head loss; default 0.5.
             learning_rate: Positive AdamW learning rate.
             weight_decay: Non-negative AdamW decoupled weight decay.
+            gate_lambda_surface: Optional nonnegative S coefficient; enables grouped policy.
+            gate_lambda_chemical: Optional nonnegative C coefficient; grouped default .04.
+            gate_lambda_other: Optional nonnegative O coefficient; grouped default .04.
+            gate_initial_active_surface: Optional initial S activity in (0,1); default .95.
+            gate_initial_active_chemical: Optional initial C activity in (0,1); default .95.
+            gate_group_warmup_fraction: Nominal fraction forcing S/C open; default zero.
+            gate_group_ramp_fraction: Following S/C coefficient ramp fraction; default zero.
+            atomic_sources: Optional comma-separated canonical source names; None retains
+                atomic_representation.sources. Scalars support native explicit sweep candidates.
+            atomic_force_sources: Optional learned/open/closed chemical-only control; None retains
+                atomic_representation.force_sources. Historical gates are never forced here.
+            dataset_content_id: Optional immutable dataset identity verified before loading.
+            gate_policy: Optional GatePolicy mapping for group coefficients/initial probabilities
+                and localized S/C schedule. None preserves scalar gate_lambda; grouped costs are
+                already weighted. Legacy global schedules must be zero with this policy.
             gate_lambda: Non-negative multiplier for normalized expected L0 gate cost.
             architecture_spike: Named single-factor point-conditioning, feedback, depth-control,
                 or vector-state hypothesis. ``custom`` preserves the detailed model arguments.
@@ -484,6 +560,14 @@ class Training(lf.Work):
                 seed. Fix it while varying run seeds to isolate initialization variability.
             save_initial_checkpoint: Publish the epoch-zero model state for seed-factorization
                 audits. It is never used automatically as a trained checkpoint.
+            negative_mining: Optional VN01 selector/loss mapping; None preserves the old loop.
+                NegativeMining documents thresholds, global budgets, memory and N2 defaults.
+                Reviews use TRAIN negatives only; no local targets are passed to this component.
+            negative_calibration: Optional frozen-checkpoint N3 mapping: levels=[.01,.05,.1],
+                split=val, development_split=val, formal=false, lower=.25. No reserve reports
+                unavailable; no validation/test cohort is silently repurposed for calibration.
+            calibration_dataset: Typed independent negative-only DatasetVersion for N3, or None.
+            decision_dataset: Optional separate development DatasetVersion for F1 threshold fitting.
 
         Returns:
             Best validation epoch/metrics, stopping reason, optional surface-report summary, and
@@ -497,7 +581,16 @@ class Training(lf.Work):
                 or the installed framework/shared viewer lacks the requested rendering API.
             OSError: If managed arrays or checkpoint/report artifacts cannot be accessed.
         """
-        # Keep presentation options together in YAML while preserving older callable consumers.
+        # Closed scalar capacity rows override only the external projection width; every other
+        # source, normalization policy and graph option remains in the original mapping.
+
+        if external_context_dim is not None:
+            if (external_context_dim < 1 or atomic_representation is None or
+                    atomic_representation.get("external_mode") not in
+                    {"context", "both", "replace"}):
+                raise ValueError("external_context_dim requires a positive contextual source width")
+            atomic_representation = {**atomic_representation, "context_dim": external_context_dim}
+
         # These options never enter scientific model parameters or change checkpoint selection.
 
         options = dict(visualization or {})
@@ -534,6 +627,10 @@ class Training(lf.Work):
             subset=subset,
             surface_representation_mode=representation.value,
             surface_features=feature_names,
+            structural_assets=structural_assets,
+            atomic_representation=atomic_representation,
+            transfer_options=transfer_options,
+            surface_options=surface_options,
             hidden_dim=hidden_dim,
             embedding_dim=embedding_dim,
             residue_embedding_dim=residue_embedding_dim,
@@ -549,6 +646,9 @@ class Training(lf.Work):
             atomic_message_chunk_size=atomic_message_chunk_size,
             atomic_encoder_type=atomic_encoder_type,
             atomic_radial_count=atomic_radial_count,
+            atomic_radial_encoding=atomic_radial_encoding,
+            atomic_hidden_dim=atomic_hidden_dim,
+            atomic_output_dim=atomic_output_dim,
             atomic_vector_channels=atomic_vector_channels,
             atomic_basis_count=atomic_basis_count,
             atomic_spatial_cutoff=atomic_spatial_cutoff,
@@ -627,6 +727,17 @@ class Training(lf.Work):
             learning_rate=learning_rate,
             weight_decay=weight_decay,
             gate_lambda=gate_lambda,
+            gate_policy=gate_policy,
+            dataset_content_id=dataset_content_id,
+            gate_lambda_surface=gate_lambda_surface,
+            gate_lambda_chemical=gate_lambda_chemical,
+            gate_lambda_other=gate_lambda_other,
+            gate_initial_active_surface=gate_initial_active_surface,
+            gate_initial_active_chemical=gate_initial_active_chemical,
+            gate_group_warmup_fraction=gate_group_warmup_fraction,
+            gate_group_ramp_fraction=gate_group_ramp_fraction,
+            atomic_sources=atomic_sources,
+            atomic_force_sources=atomic_force_sources,
             architecture_spike=architecture_spike,
             weak_loss_profile=weak_loss_profile,
             initialization_profile=initialization_profile,
@@ -686,6 +797,12 @@ class Training(lf.Work):
             initialization_seed=initialization_seed,
             training_seed=training_seed,
             save_initial_checkpoint=save_initial_checkpoint,
+            negative_mining=negative_mining,
+            negative_calibration=negative_calibration,
+            calibration_dataset=calibration_dataset,
+            decision_dataset=decision_dataset,
+            physics=physics,
+            physics_checkpoint=physics_checkpoint,
             seed=self.seed or 0,
         )
 
@@ -693,10 +810,16 @@ class Training(lf.Work):
 def _train_wisdom(
     work                 : Training,
     dataset              : Path,
+    physics              : Mapping[str, Any] | None = None,
+    physics_checkpoint   : Path | None = None,
     model_version        : int = 1,
     subset               : str = "full",
     surface_representation_mode: str = "learned",
     surface_features     : Sequence[str] = (),
+    structural_assets    : Sequence[str] = (),
+    atomic_representation: Mapping[str, Any] | None = None,
+    transfer_options: Mapping[str, Any] | None = None,
+    surface_options: Mapping[str, Any] | None = None,
     hidden_dim           : int = 128,
     embedding_dim        : int = 32,
     residue_embedding_dim: int | None = None,
@@ -712,6 +835,9 @@ def _train_wisdom(
     atomic_message_chunk_size: int = 65536,
     atomic_encoder_type: str = "baseline",
     atomic_radial_count: int = 16,
+    atomic_radial_encoding: str = "gaussian",
+    atomic_hidden_dim: int | None = None,
+    atomic_output_dim: int | None = None,
     atomic_vector_channels: int = 16,
     atomic_basis_count: int = 4,
     atomic_spatial_cutoff: float = 6.0,
@@ -790,6 +916,17 @@ def _train_wisdom(
     learning_rate        : float = 3.0e-4,
     weight_decay         : float = 1.0e-4,
     gate_lambda          : float = 1.0e-3,
+    gate_policy          : Mapping[str, Any] | None = None,
+    dataset_content_id   : str | None = None,
+    gate_lambda_surface         : float | None = None,
+    gate_lambda_chemical        : float | None = None,
+    gate_lambda_other           : float | None = None,
+    gate_initial_active_surface : float | None = None,
+    gate_initial_active_chemical: float | None = None,
+    gate_group_warmup_fraction  : float = 0.0,
+    gate_group_ramp_fraction    : float = 0.0,
+    atomic_sources              : str | None = None,
+    atomic_force_sources        : str | None = None,
     architecture_spike            : str   = "custom",
     weak_loss_profile              : str   = "custom",
     initialization_profile        : str   = "custom",
@@ -849,6 +986,10 @@ def _train_wisdom(
     initialization_seed           : int | None = None,
     training_seed                 : int | None = None,
     save_initial_checkpoint       : bool = False,
+    negative_mining               : Mapping[str, Any] | None = None,
+    negative_calibration          : Mapping[str, Any] | None = None,
+    calibration_dataset           : Path | None = None,
+    decision_dataset              : Path | None = None,
     seed                          : int   = 0,
 ) -> dict[str, Any]:
     """Train and evaluate one compatible WISDOM generation from a managed DatasetVersion.
@@ -859,10 +1000,16 @@ def _train_wisdom(
     Args:
         work: Active LambdaForge Work providing run-owned metrics and output services.
         dataset: Resolved managed dataset root containing LambdaForge ``index.jsonl``.
+        physics: Optional VF objective/decoder mapping; None preserves functional-only training.
+        physics_checkpoint: Optional explicitly staged compatible physical encoder checkpoint.
         model_version: Architecture generation resolved from ``WisdomV{N}`` by convention.
         subset: Full data or a deterministic view such as ``replicate-00/train-25``.
         surface_representation_mode: learned (default), explicit or hybrid late evidence fusion.
         surface_features: Ordered frozen train-normalized field names; empty by default.
+        structural_assets: Optional immutable universal sidecars; empty performs no extra reads.
+        atomic_representation: V10 input choices, empty preserves historical model/data behavior.
+        transfer_options: Explicit V11 candidate/score/value/summary interventions.
+        surface_options: Explicit V13 spectral/gradient/local surface choices.
         hidden_dim: Shared atom/surface latent width.
         embedding_dim: Element and optional residue embedding width.
         residue_embedding_dim: Independent residue embedding width or ``None`` for the legacy
@@ -880,6 +1027,10 @@ def _train_wisdom(
         atomic_message_chunk_size: Maximum RGCN messages per chunk.
         atomic_encoder_type: Exact V9 atomic operator/control; baseline preserves historical keys.
         atomic_radial_count: Gaussian/sinusoidal/Bessel radial basis count, positive.
+        atomic_radial_encoding: SchNet gaussian (historical) or direct (one d/r input).
+        atomic_hidden_dim: SchNet internal channels; None uses hidden_dim. Chemical inputs
+            and surface widths remain fixed; other encoders require the common width.
+        atomic_output_dim: None or hidden_dim; fixes the surface-transfer interface width.
         atomic_vector_channels: Persistent GVP polar-channel count, positive; PaiNN uses hidden_dim.
         atomic_basis_count: Positive NNConv basis count, inactive for full filters.
         atomic_spatial_cutoff: Spatial radial support in Å, without generating new neighbors.
@@ -963,6 +1114,20 @@ def _train_wisdom(
         surface_loss_fraction: Normalized surface BCE share rho in [0,1).
         learning_rate: Positive AdamW learning rate.
         weight_decay: Non-negative AdamW decoupled weight decay.
+        gate_lambda_surface: Optional nonnegative S coefficient; enables grouped policy.
+        gate_lambda_chemical: Optional nonnegative C coefficient; grouped default .04.
+        gate_lambda_other: Optional nonnegative O coefficient; grouped default .04.
+        gate_initial_active_surface: Optional initial S activity in (0,1); default .95.
+        gate_initial_active_chemical: Optional initial C activity in (0,1); default .95.
+        gate_group_warmup_fraction: Nominal fraction forcing S/C open; default zero.
+        gate_group_ramp_fraction: Following S/C coefficient ramp fraction; default zero.
+        atomic_sources: Optional comma-separated canonical source names; None retains
+            atomic_representation.sources. Scalars support native explicit sweep candidates.
+        atomic_force_sources: Optional learned/open/closed chemical-only control; None retains
+            atomic_representation.force_sources. Historical gates are never forced here.
+        dataset_content_id: Optional immutable dataset ID checked before reading any split.
+        gate_policy: Optional GatePolicy coefficients/initialization/S-C schedule. None preserves
+            scalar historical costs; grouped penalties are not multiplied by gate_lambda again.
         gate_lambda: Non-negative multiplier for the normalized expected L0 gate cost.
         architecture_spike: Named one-factor architecture candidate or ``custom``.
         weak_loss_profile: Named sequential weak-loss candidate or ``custom``.
@@ -1042,6 +1207,10 @@ def _train_wisdom(
         initialization_seed: Optional parameter-initialization seed or ``None`` for ``seed``.
         training_seed: Optional data-order/dropout/gate seed or ``None`` for ``seed``.
         save_initial_checkpoint: Whether to publish an epoch-zero parameter snapshot.
+        negative_mining: Optional negative-TRAIN-only VN01 loss, review and memory settings.
+        negative_calibration: Optional post-checkpoint N3 admission configuration, never a loss.
+        calibration_dataset: Explicit independent negative-only managed reserve, or None.
+        decision_dataset: Separate threshold-development cohort for F1, or None.
         seed: Reproducible seed injected by LambdaForge for each expanded run.
 
     Returns:
@@ -1054,6 +1223,42 @@ def _train_wisdom(
         RuntimeError: If the protein-level validation score is undefined for every epoch.
         OSError: If managed arrays or checkpoint/report artifacts cannot be read or written.
     """
+    # Scalar scientific coordinates support native explicit sweeps without profile-name dispatch.
+    # The assembled mapping is persisted in model_parameters for strict reconstruction/review.
+
+    if atomic_sources is not None or atomic_force_sources is not None:
+        atomic_representation = dict(atomic_representation or {})
+        if atomic_sources is not None:
+            atomic_representation["sources"] = [name.strip() for name in atomic_sources.split(",")]
+        if atomic_force_sources is not None:
+            atomic_representation["force_sources"] = atomic_force_sources
+    grouped_values = (gate_lambda_surface, gate_lambda_chemical, gate_lambda_other,
+                      gate_initial_active_surface, gate_initial_active_chemical)
+    if any(value is not None for value in grouped_values) or (
+        gate_group_warmup_fraction or gate_group_ramp_fraction
+    ):
+        if gate_policy is not None:
+            raise ValueError("choose gate_policy mapping OR scalar group controls, not both")
+        gate_policy = {
+            "lambda_surface": .04 if gate_lambda_surface is None else gate_lambda_surface,
+            "lambda_chemical": .04 if gate_lambda_chemical is None else gate_lambda_chemical,
+            "lambda_other": .04 if gate_lambda_other is None else gate_lambda_other,
+            "initial_active_surface": (.95 if gate_initial_active_surface is None
+                                       else gate_initial_active_surface),
+            "initial_active_chemical": (.95 if gate_initial_active_chemical is None
+                                        else gate_initial_active_chemical),
+            "initial_active_other": gate_initial_active,
+            "warmup_fraction": gate_group_warmup_fraction,
+            "ramp_fraction": gate_group_ramp_fraction,
+        }
+
+    dataset_identity = None
+    artifact_path = Path(dataset) / "dataset-artifact.json"
+    if (dataset_content_id is not None or gate_policy is not None) and artifact_path.is_file():
+        dataset_identity = json.loads(artifact_path.read_text())["dataset_id"]
+    if dataset_content_id is not None and dataset_identity != dataset_content_id:
+        raise ValueError("staged dataset content identity differs from dataset_content_id")
+
     architecture = ArchitectureSpike(architecture_spike)
     architecture_overrides = architecture.overrides()
     surface_geometry_transfer = bool(
@@ -1268,6 +1473,8 @@ def _train_wisdom(
         raise ValueError("vector_atomic_channels cannot be negative")
     if global_context_dim < 1:
         raise ValueError("global context width must be positive")
+    if gate_policy is not None and (gate_warmup_fraction or gate_ramp_fraction):
+        raise ValueError("grouped gate_policy cannot be combined with legacy global schedules")
     if not 0.0 < gate_initial_active < 1.0:
         raise ValueError("gate_initial_active must lie strictly between zero and one")
     if (
@@ -1404,79 +1611,135 @@ def _train_wisdom(
 
     AtomicGraphEncoder.require_public_api(atomic_encoder_type)
 
+    structural_assets = tuple(sorted(set(structural_assets) | set(
+        AtomicRepresentation.required_assets(atomic_representation))))
+    transfer_source = (transfer_options or {}).get("candidates", "base")
+    spectral_source = (surface_options or {}).get("spectral_source", "base")
+    local_surface = (surface_options or {}).get("local_mode", "none") != "none"
+    extra_assets = set(structural_assets)
+    physical = PhysicalTraining(work, physics, _device_batch) if physics is not None else None
+    if physics_checkpoint is not None and physical is None:
+        raise ValueError("physics_checkpoint requires an explicit physics mapping")
+    if physical is not None:
+        extra_assets.add("physical_queries")
+        if negative_mining is not None or negative_calibration is not None or evaluate_test:
+            raise ValueError("VF pilot requires evaluate_test=false and no negative "
+                             "mining/calibration")
+    if (surface_options or {}).get("environment"):
+        extra_assets.add("surface_environment")
+    if transfer_source == "extended":
+        extra_assets.add("extended_surface_atom")
+    if spectral_source == "extension":
+        extra_assets.add("spectral_extension")
+    if local_surface:
+        extra_assets.add("surface_local_graph")
+    structural_assets = tuple(sorted(extra_assets))
     requested_splits = ("train", "val", "test") if evaluate_test else ("train", "val")
+    setup_began = time.perf_counter()
     work.log(f"[Training {run_label}] loading managed splits: {requested_splits}")
 
-    datasets = {
-        split: WisdomDataset(
+    datasets = {}
+    for split in requested_splits:
+        split_began = time.perf_counter()
+        work.log(f"[Training {run_label}] validating {split} inputs and requested sidecars")
+        datasets[split] = WisdomDataset(
             dataset,
             split,
             subset=subset,
             include_surface_targets=False,
             surface_features=tuple(surface_features),
+            structural_assets=tuple(structural_assets),
+            extended_asset_radius=surface_atom_radius if transfer_source == "extended" else None,
+            extended_asset_k=surface_atom_k if transfer_source == "extended" else None,
             include_surface_geometry=(
-                model_version == 3 or weak_surface_loss.needs_surface_neighbors
+                model_version == 3 or local_surface or weak_surface_loss.needs_surface_neighbors
                 or surface_refiner_type not in {"none", "heat", "learned_heat"}
             ),
             include_atom_geometry=(
-                vector_atomic_channels > 0
+                physical is not None or vector_atomic_channels > 0
                 or AtomicEncoderType(atomic_encoder_type).needs_positions()
             ),
+            log=lambda message: work.log(f"[Training {run_label}] {message}"),
         )
-        for split in requested_splits
-    }
+        work.log(f"[Training {run_label}] {split} ready: {len(datasets[split])} proteins "
+                 f"in {time.perf_counter() - split_began:.1f}s")
     loader_datasets = dict(datasets)
+
+    # VN01 uses a separate, label-free instrument graph. It neither changes the predictor's
+    # arrays nor exposes local targets. The whole negative population belongs to this Run.
+
+    mining: NegativeMining | None = None
+    negative_indices = [i for i, record in enumerate(datasets["train"].records) if record[2] == 0]
+    if negative_mining is not None:
+        if averaging_mode is not WeightAveragingMode.NONE:
+            raise ValueError("VN01 currently requires ordinary, non-averaged optimizer weights")
+        review_needed = negative_mining.get("mode", "regional") not in {"none", "distributed"}
+        mining_geometry = {
+            record[3]: SurfaceRegions(record[0], chemistry=bool(negative_mining.get("diversity")),
+                sigma=float((negative_mining.get("diversity") or {}).get("chemistry_sigma", 2.0)))
+            for record in datasets["train"].records if record[2] == 0 and review_needed}
+        mining = NegativeMining(negative_mining, mining_geometry,
+                                len(negative_indices) / len(datasets["train"]))
+        work.outputs.file("negative-mining-geometry", filename="negative-mining-geometry.json",
+                          role="diagnostic").write_json({
+            "negative_fraction": mining.fraction, "sampling": "uniform_proteins",
+            "options": dict(negative_mining),
+            "geometry": {key: value.diagnostics() for key, value in mining_geometry.items()},
+            "attribute_center": mining.diversity.center.tolist() if mining.diversity else None,
+            "attribute_scale": mining.diversity.spread.tolist() if mining.diversity else None})
+        work.log(f"[VN01] prepared {len(mining_geometry)} fixed negative surface graphs; "
+                 "reviews and gradients never read local targets")
+    if negative_calibration is not None:
+        _negative_admission(work, None, datasets, collator=None, device=device,
+            autocast_dtype=autocast_dtype, structural_assets=structural_assets, subset=subset,
+            options=negative_calibration, calibration_dataset=calibration_dataset,
+            decision_dataset=decision_dataset)
 
     # Surface targets live in separate sidecars and are not needed for global validation. A second
     # validation view prevents ordinary epochs from decoding those arrays or retaining every point
     # score merely to compute diagnostics that cannot select the model. Prediction-only reports need
     # identifiers here but read ground/soft targets directly only for the selected HTML sample.
+    # Both views bind identical immutable members: validate structural sidecars once, then change
+    # only whether sample reads include evaluation targets. No scientific check is disabled.
 
     if surface_metrics or surface_predictions or faithfulness_audit:
-        loader_datasets["val_surface"] = WisdomDataset(
-            dataset,
-            "val",
-            subset=subset,
-            surface_features=tuple(surface_features),
-            include_surface_targets=surface_metrics,
-            include_surface_geometry=(
-                model_version == 3 or weak_surface_loss.needs_surface_neighbors
-                or surface_refiner_type not in {"none", "heat", "learned_heat"}
-            ),
-            include_atom_geometry=(
-                vector_atomic_channels > 0
-                or AtomicEncoderType(atomic_encoder_type).needs_positions()
-            ),
-        )
+        loader_datasets["val_surface"] = datasets["val"].surface_target_view(surface_metrics)
         if evaluate_test:
-            loader_datasets["test_surface"] = WisdomDataset(
-                dataset,
-                "test",
-                subset=subset,
-                surface_features=tuple(surface_features),
-                include_surface_targets=surface_metrics,
-                include_surface_geometry=(
-                    model_version == 3 or weak_surface_loss.needs_surface_neighbors
-                    or surface_refiner_type not in {"none", "heat", "learned_heat"}
-                ),
-                include_atom_geometry=(
-                    vector_atomic_channels > 0
-                    or AtomicEncoderType(atomic_encoder_type).needs_positions()
-                ),
-            )
+            loader_datasets["test_surface"] = datasets["test"].surface_target_view(surface_metrics)
+
+    dataset_setup_seconds = time.perf_counter() - setup_began
+    work.metrics.log("dataset_setup_seconds", dataset_setup_seconds)
+    work.log(f"[Training {run_label}] input validation complete in {dataset_setup_seconds:.1f}s; "
+             "surface evaluation reuses the validated split bindings")
+
+    # Fixed graph codes are label-free model inputs, not a neural operation. Prepare exactly the
+    # requested members once through LF-managed files; layers, epochs and evaluation reuse them.
+
+    if AtomicEncoderType(atomic_encoder_type) is AtomicEncoderType.STRUCTURAL_GLOBAL:
+        atomic_inputs = AtomicStructuralInputs(atom_spatial_k, atomic_maximum_pairwise_bytes)
+        paths = atomic_inputs.prepare(
+            work, (record[0] for view in loader_datasets.values() for record in view.records),
+        )
+        for view in loader_datasets.values():
+            view.atomic_structure_paths = paths
 
     generator = torch.Generator().manual_seed(effective_training_seed)
     collator  = WisdomCollator(
         atom_spatial_k=atom_spatial_k,
         surface_atom_k=surface_atom_k,
         diffusion_spectral_modes=diffusion_spectral_modes,
+        transfer_source=transfer_source,
+        spectral_source=spectral_source,
+        surface_graph_source="filtered" if local_surface else "base",
     )
     loaders: dict[str, DataLoader[Any]] = {}
     evaluation_workers = max(1, data_workers // 2) if data_workers else 0
+    separate_sampler = mining is not None or (physical is not None and physical.mode == "pretrain")
 
     # Persistent training workers overlap compressed-NPZ decoding with the previous GPU batch.
     # Evaluation uses half as many temporary workers so the idle training pool plus the active
-    # validation pool and trainer remain inside the per-Run CPU allocation.
+    # validation pool and trainer remain inside the per-Run CPU allocation. Each worker selects
+    # named shared-memory transport: rich per-protein packs must not exhaust descriptor limits.
 
     for split, split_dataset in loader_datasets.items():
         split_workers = (
@@ -1485,22 +1748,35 @@ def _train_wisdom(
             else evaluation_workers
         )
         loader_options: dict[str, Any] = {}
+        if split == "train" and separate_sampler:
+            # VN01 separates shuffle order from worker base seeds. Recreating persistent
+            # workers after a retry must not consume the sampler's saved random stream.
+
+            loader_options["sampler"] = RandomSampler(split_dataset, generator=generator)
         if split_workers:
             loader_options.update(
                 persistent_workers=split == "train",
                 prefetch_factor=1,
+                worker_init_fn=WisdomCollator.initialize_worker,
             )
 
         loaders[split] = DataLoader(
             split_dataset,
             batch_size=batch_size,
-            shuffle=split == "train",
+            shuffle=split == "train" and not separate_sampler,
             num_workers=split_workers,
             collate_fn=collator,
-            generator=generator if split == "train" else None,
+            generator=(generator if not separate_sampler else
+                       torch.Generator().manual_seed(effective_training_seed))
+                      if split == "train" else None,
             pin_memory=device.type == "cuda",
             **loader_options,
         )
+
+    mining_loader = (DataLoader(Subset(datasets["train"], negative_indices),
+        batch_size=batch_size, shuffle=False, num_workers=0, collate_fn=collator,
+        generator=torch.Generator().manual_seed(effective_training_seed))
+        if mining is not None and mining.geometry else None)
 
     # Infer the model input width from the immutable data contract instead of duplicating the
     # preprocessing scale count in a training YAML. All splits must expose the same [M,S,3] shape.
@@ -1524,11 +1800,15 @@ def _train_wisdom(
 
     curvature_features = curvature_widths["train"]
 
+
     available_parameters = {
         "surface_representation_mode": surface_representation_mode,
         "explicit_feature_dim": len(surface_features),
         "hidden_dim":           hidden_dim,
         "embedding_dim":        embedding_dim,
+        "atomic_representation": atomic_representation,
+        "transfer_options": transfer_options,
+        "surface_options": surface_options,
         "residue_embedding_dim": residue_embedding_dim,
         "atomic_layers":        atomic_layers,
         "projection_depth":     projection_depth,
@@ -1542,6 +1822,9 @@ def _train_wisdom(
         "atomic_message_chunk_size": atomic_message_chunk_size,
         "atomic_encoder_type": atomic_encoder_type,
         "atomic_radial_count": atomic_radial_count,
+        "atomic_radial_encoding": atomic_radial_encoding,
+        "atomic_hidden_dim": atomic_hidden_dim,
+        "atomic_output_dim": atomic_output_dim,
         "atomic_vector_channels": atomic_vector_channels,
         "atomic_basis_count": atomic_basis_count,
         "atomic_spatial_cutoff": atomic_spatial_cutoff,
@@ -1616,6 +1899,7 @@ def _train_wisdom(
         "curvature_features":   curvature_features,
         "embedding_initialization": embedding_initialization,
         "gate_initial_active":  gate_initial_active,
+        **({"gate_policy": dict(gate_policy)} if gate_policy is not None else {}),
         "diffusion_time_initialization": diffusion_time_initialization,
         "diffusion_residual_initialization": diffusion_residual_initialization,
         "atomic_residual_initialization": atomic_residual_initialization,
@@ -1639,9 +1923,75 @@ def _train_wisdom(
             atom_spatial_k,
         )
         available_parameters["atomic_degree_log_means"] = degree_statistics
+    if physical is not None:
+        available_parameters["physics_options"] = dict((physics or {}).get("decoder", {}))
     model, model_parameters = _create_model(model_version, available_parameters)
+    # Record exact common initialization before training/calibration, rather than inferring
+    # paired surface weights from equal seeds after a radial input or atomic width change.
+
+    atomic_configuration = SchNetFilterAudit.configuration(model)
+    atomic_audit_root = Path(work.outputs.directory("atomic-encoder-audit", role="report"))
+    (atomic_audit_root / "initialization.json").write_text(
+        json.dumps(atomic_configuration, indent=2) + "\n")
+    for metric in ("atomic_encoder_total_parameter_count",
+                   "atomic_encoder_trainable_parameter_count",
+                   "atomic_filter_parameter_count",
+                   "atomic_hidden_dim", "atomic_output_dim"):
+        work.metrics.log(metric, float(atomic_configuration[metric]))
+    if model.atomic_representation is not None:
+        representation = model.atomic_representation
+        fit_began = time.perf_counter()
+        work.log(f"[Training {run_label}] fitting V10 statistics on selected training members only")
+        initialize_static = representation.external_mode.value in {"static", "both"}
+
+        # Normalization and static initialization can coexist. Declare their shared artifact
+        # once: LambdaForge output names identify an entire directory, not individual writes.
+
+        if representation.width or initialize_static:
+            audit_root = Path(work.outputs.directory("atomic-input-audit", role="report"))
+            if representation.width:
+                normalization = representation.fit(
+                    collator([datasets["train"][i]]) for i in range(len(datasets["train"])))
+                (audit_root / "normalization.json").write_text(json.dumps(normalization, indent=2))
+            if initialize_static:
+                sample = datasets["train"][0]
+                prefix = f"static_embedding_table_{representation.external_model}__"
+                static = {name[len(prefix):]: value for name, value in sample.items()
+                          if name.startswith(prefix)}
+                assert model.residue_type_embedding is not None
+                representation.initialize_residue_table(model.residue_type_embedding, static)
+                (audit_root / "static-table.json").write_text(
+                    json.dumps(representation.initialization_audit, indent=2))
+        fit_seconds = time.perf_counter() - fit_began
+        work.metrics.log("representation_fit_seconds", fit_seconds)
+        work.log(f"[Training {run_label}] atomic input statistics ready in {fit_seconds:.1f}s")
     architecture_name       = str(getattr(model, "ARCHITECTURE_NAME", type(model).__name__))
+    if model.surface_environment is not None:
+        work.log(f"[Training {run_label}] fitting environmental statistics on selected train only")
+        environment_statistics = model.surface_environment.fit(
+            collator([datasets["train"][i]]) for i in range(len(datasets["train"])))
+        environment_audit = Path(work.outputs.directory("surface-environment-audit", role="report"))
+        (environment_audit / "normalization.json").write_text(
+            json.dumps(environment_statistics, indent=2))
     model.to(device)
+    if physical is not None:
+        physical.prepare(model, datasets, physics_checkpoint)
+        if physical.mode == "pretrain":
+            if effective_precision != "float32":
+                raise ValueError("VF physical-only pilot currently requires precision=float32")
+            # This is the same native Training Run, but only atom encoding and VF/control heads
+            # execute. Protein BCE, DiffusionNet, binding targets and functional G are not used.
+
+            physical_validation = DataLoader(datasets["val"], batch_size=1, shuffle=False,
+                num_workers=0, collate_fn=collator)
+            random.seed(effective_training_seed)
+            np.random.seed(effective_training_seed)
+            torch.manual_seed(effective_training_seed)
+            if device.type == "cuda":
+                torch.cuda.manual_seed_all(effective_training_seed)
+            return physical.pretrain(model, {"train": loaders["train"],
+                "val": physical_validation}, device, epochs, patience, minimum_delta,
+                learning_rate, weight_decay, gradient_clip_norm, generator)
     initial_diffusion_times = _diffusion_time_summary(model)
     for statistic in ("minimum", "mean", "median", "maximum"):
         value = initial_diffusion_times.get(statistic)
@@ -1666,6 +2016,19 @@ def _train_wisdom(
         )
         work.metrics.log("initial_local_head_bias", calibrated_local_bias)
 
+    gate_audit = (GateDiagnostics(model, work, {
+        "seed": seed, "initialization_seed": effective_initialization_seed,
+        "training_seed": effective_training_seed,
+        "model_parameters": model_parameters, "epochs": epochs,
+        "dataset_id": dataset_identity, "dataset_content_id": dataset_content_id,
+        "optimizer": {"name": "AdamW", "learning_rate": learning_rate,
+                      "weight_decay": weight_decay, "gate_weight_decay": 0.0},
+        "weak_surface_loss": weak_surface_configuration,
+        "initialization": initialization_configuration,
+        "patience": patience, "minimum_delta": minimum_delta,
+        "checkpoint_selection": "validation protein G only", "evaluate_test": evaluate_test,
+    }) if model.gate_policy is not None else None)
+
     initial_checkpoint = work.run_dir / "initial-model.pt"
     if save_initial_checkpoint:
         torch.save(
@@ -1682,6 +2045,10 @@ def _train_wisdom(
                     ),
                 },
                 "initialization_seed": effective_initialization_seed,
+                **({"inference_state": {
+                    "gate_override": model.semantic_gates.inference_state()["override"],
+                    "semantic_gate_state": model.semantic_gates.inference_state(),
+                }} if model.gate_policy is not None else {}),
             },
             initial_checkpoint,
         )
@@ -1766,8 +2133,11 @@ def _train_wisdom(
     else:
         surface_schedule = f"every-{surface_metrics_interval}-epochs-plus-best"
 
+    startup_seconds = time.perf_counter() - setup_began
+    work.metrics.log("startup_seconds", startup_seconds)
     work.log(
         f"[Training {run_label}] starting on {device.type}; splits={split_sizes}; "
+        f"startup={startup_seconds:.1f}s; "
         f"architecture={architecture_name}; curvature_features={curvature_features}; "
         f"atomic_edge_distance_scale={atomic_edge_distance_scale:g}A; "
         f"semantic_gates={len(model.semantic_gates.names)}; gate_lambda={gate_lambda:g}; "
@@ -1798,6 +2168,7 @@ def _train_wisdom(
     surface_curve              : list[dict[str, float]] = []
     subgroup_curves            : dict[str, list[dict[str, float]]] = {}
     pooling_trajectory         : list[dict[str, float]] = []
+    complete_epoch_seconds     : list[float] = []
 
     stop_reason: str | None = None
 
@@ -1813,10 +2184,57 @@ def _train_wisdom(
     profiled_batches        = 0
     spectral_modes_seen     : list[int] = []
 
+    continuation = MiningContinuation(work) if mining is not None else None
+    resume_state = continuation.restore(generator) if continuation is not None else None
+    mining_summaries: list[dict[str, Any]] = []
+    first_mining_gradient_epoch: int | None = None
+    first_epoch = 1
+    if resume_state is not None:
+        assert mining is not None
+        model.load_state_dict(resume_state["model"])
+        optimizer.load_state_dict(resume_state["optimizer"])
+        scaler.load_state_dict(resume_state["scaler"])
+        mining.load_state_dict(resume_state["mining"])
+        previous = resume_state["progress"]
+        best_auprc = previous["best_auprc"]
+        best_selection_utility = previous["best_selection_utility"]
+        best_val_loss = previous["best_val_loss"]
+        best_validation_metrics = previous["best_validation_metrics"]
+        best_epoch = previous["best_epoch"]
+        epochs_completed = previous["epochs_completed"]
+        epochs_without_improvement = previous["epochs_without_improvement"]
+        patience_reference_utility = previous["patience_reference_utility"]
+        surface_curve = previous["surface_curve"]
+        subgroup_curves = previous["subgroup_curves"]
+        pooling_trajectory = previous["pooling_trajectory"]
+        complete_epoch_seconds = previous["complete_epoch_seconds"]
+        mining_summaries = previous["mining_summaries"]
+        first_mining_gradient_epoch = previous["first_mining_gradient_epoch"]
+        peak_allocated_gib = previous["peak_allocated_gib"]
+        peak_reserved_gib = previous["peak_reserved_gib"]
+        costs = previous["cost_profile"]
+        maximum_atoms = costs["maximum_atoms"]
+        maximum_surface_points = costs["maximum_surface_points"]
+        maximum_atomic_edges = costs["maximum_atomic_edges"]
+        maximum_atomic_degree = costs["maximum_atomic_degree"]
+        mean_atomic_degree_sum = costs["mean_atomic_degree_sum"]
+        atom_count_sum = costs["atom_count_sum"]
+        surface_point_sum = costs["surface_point_sum"]
+        profiled_batches = costs["profiled_batches"]
+        spectral_modes_seen = costs["spectral_modes_seen"]
+        stop_reason = previous["stop_reason"]
+        if resume_state["best"] is not None:
+            torch.save(resume_state["best"], checkpoint)
+        first_epoch = epochs_completed + 1
+        work.log(f"[VN01] restored completed epoch {epochs_completed}, optimizer/RNG and "
+                 f"review {mining.review_epoch}; earlier priorities are not recomputed")
+
     # Train up to the safety ceiling. Validation patience decides the useful duration of an
     # ordinary Run, while LambdaForge may cooperatively prune a weak HPO candidate.
 
-    for epoch in range(1, epochs + 1):
+    for epoch in range(first_epoch, epochs + 1 if stop_reason is None else first_epoch):
+        physical_gradient_measured = False
+        physical_losses: list[float] = []
         epoch_started = time.perf_counter()
         if device.type == "cuda":
             torch.cuda.reset_peak_memory_stats(device)
@@ -1826,7 +2244,11 @@ def _train_wisdom(
         # zero to the requested value. LR warm-up is independent and affects every optimizer group.
 
         training_fraction = (epoch - 1) / max(1, epochs)
-        if training_fraction < gate_warmup_fraction:
+        if model.gate_policy is not None:
+            model.semantic_gates.set_override("learned")
+            gate_phase = model.gate_policy.schedule(model.semantic_gates, epoch, epochs)
+            effective_gate_lambda = 1.0  # Grouped costs already include their coefficients.
+        elif training_fraction < gate_warmup_fraction:
             model.semantic_gates.set_override("all_on")
             effective_gate_lambda = 0.0
             gate_phase = "all_on"
@@ -1869,6 +2291,7 @@ def _train_wisdom(
         total_loss_sum          = torch.zeros((), device=device)
         surface_logit_moments   = torch.zeros(3, device=device, dtype=torch.float64)
         surface_logit_count     = 0
+        transfer_sums: dict[str, Tensor] = {}
         weak_loss_sums = {
             name: torch.zeros((), device=device)
             for name in (
@@ -1883,6 +2306,9 @@ def _train_wisdom(
             )
         }
         examples                = 0
+        mining_loss_sum         = torch.zeros((), device=device)
+        mining_active_batches   = 0
+        mining_gradient_measured = False
         data_wait_seconds       = 0.0
         previous_batch_finished = time.perf_counter()
 
@@ -1913,6 +2339,14 @@ def _train_wisdom(
                 )
 
             tensors = _device_batch(batch, device)
+            physical_reference = None
+            if physical is not None and physical.options.get("no_messages", False):
+                tensors["atom_edge_is_spatial"] = torch.zeros_like(tensors["atom_edge_is_spatial"])
+                tensors["atom_edge_is_covalent"] = torch.zeros_like(
+                    tensors["atom_edge_is_covalent"])
+            if physical is not None and bool(physical.objective.weights.any()):
+                tensors["physics_queries"], physical_reference = physical.objective.queries(
+                    batch, device, epoch)
             optimizer.zero_grad(set_to_none=True)
 
             with torch.autocast(
@@ -1923,6 +2357,8 @@ def _train_wisdom(
                 output = model(**_model_inputs(tensors))
                 if optimization_monitor is not None:
                     optimization_monitor.observe_forward(output)
+                for name, value in model.surface_atom_transfer.diagnostics.items():
+                    transfer_sums[name] = transfer_sums.get(name, torch.zeros_like(value)) + value
                 target = _tensor(tensors, "target")
                 # Both branches use protein labels only. Normalization leaves V6 prior
                 # coefficients comparable to single; legacy_sum remains explicitly available.
@@ -1952,21 +2388,70 @@ def _train_wisdom(
                         else None
                     ),
                 )
-                gate_regularization = model.gate_regularization()
+                gate_regularization = (model.gate_regularization() if model.gate_policy is None
+                    else model.gate_policy.penalty(model.semantic_gates))
                 total_loss = (
                     task_loss
                     + effective_gate_lambda * gate_regularization
                     + weak_losses["total"]
                 )
+                if physical_reference is not None:
+                    assert physical is not None
+                    physical_loss = physical.objective.loss(output["physics_predictions"],
+                                                            physical_reference)["total"]
+                    total_loss = total_loss + physical_loss
+                    physical_losses.append(float(physical_loss.detach()))
+                if mining is not None:
+                    mining_loss = mining.loss(output["surface_logits"],
+                        _tensor(tensors, "surface_area_weights"), _tensor(tensors, "surface_ptr"),
+                        batch["identifier"], target)
+                    total_loss = total_loss + mining_loss
+                    mining_loss_sum += mining_loss.detach() * len(target)
+                    mining_active_batches += int(mining_loss.detach() > 0)
+
+            # Autograd must run outside forward autocast: the functional gradient traverses
+            # FP32 sparse DiffusionNet derivatives whose CUDA backward has no BF16 kernel.
+            # Measure the original retained graph; do not rerun a forward or change either loss.
+
+            if (physical is not None and physical_reference is not None and
+                    not physical_gradient_measured and
+                    physical.options.get("gradient_diagnostics", True)):
+                physical.gradients(model, task_loss, physical_loss, epoch)
+                physical_gradient_measured = True
+
+            # Compare the two actual loss gradients once per active epoch on common trainable
+            # parameters. This is a pilot diagnostic, not adaptive coefficient fitting.
+
+            if (mining is not None and not mining_gradient_measured and
+                    bool(mining_loss.detach() > 0)):
+                common = tuple(p for p in model.local_head.parameters() if p.requires_grad)
+                norms = []
+                for label, component in (("task", task_loss), ("auxiliary", mining_loss)):
+                    gradients = torch.autograd.grad(component, common, retain_graph=True,
+                                                    allow_unused=True)
+                    norm = sum(float(g.detach().float().square().sum())
+                               for g in gradients if g is not None) ** .5
+                    norms.append(norm)
+                    work.metrics.log(f"negative_mining_{label}_gradient_norm", norm,
+                                     step=epoch, split="train")
+                if norms[0] > 0:
+                    work.metrics.log("negative_mining_gradient_ratio", norms[1] / norms[0],
+                                     step=epoch, split="train")
+                mining_gradient_measured = True
+                if first_mining_gradient_epoch is None:
+                    first_mining_gradient_epoch = epoch
 
             if scaler.is_enabled():
                 scaler.scale(total_loss).backward()  # type: ignore[no-untyped-call]
-                if gradient_clip_norm is not None or optimization_monitor is not None:
+                if (gradient_clip_norm is not None or optimization_monitor is not None
+                        or gate_audit is not None):
                     scaler.unscale_(optimizer)
                 if optimization_monitor is not None:
                     optimization_monitor.observe_backward()
                 if gradient_clip_norm is not None:
                     torch.nn.utils.clip_grad_norm_(model.parameters(), gradient_clip_norm)
+                if gate_audit is not None:
+                    gate_audit.observe()
                 scaler.step(optimizer)
                 scaler.update()
             else:
@@ -1975,6 +2460,8 @@ def _train_wisdom(
                     optimization_monitor.observe_backward()
                 if gradient_clip_norm is not None:
                     torch.nn.utils.clip_grad_norm_(model.parameters(), gradient_clip_norm)
+                if gate_audit is not None:
+                    gate_audit.observe()
                 optimizer.step()
             if weight_average is not None:
                 weight_average.update(model, epoch)
@@ -2015,6 +2502,8 @@ def _train_wisdom(
             )
             previous_batch_finished = time.perf_counter()
 
+        if gate_audit is not None:
+            gate_audit.snapshot("epoch", epoch)
         optimizer.zero_grad(set_to_none=True)
 
         if device.type == "cuda":
@@ -2105,6 +2594,28 @@ def _train_wisdom(
             "gate_regularization", train_gate_regularization, step=epoch, split="train"
         )
         work.metrics.log("total_loss", train_total_loss, step=epoch, split="train")
+        if physical is not None:
+            if physical_losses:
+                work.metrics.log("physics_loss", float(np.mean(physical_losses)),
+                                 step=epoch, split="train")
+            interval = int(physical.options.get("validation_interval", 1))
+            if interval > 0 and epoch % interval == 0:
+                physical.evaluate(model, DataLoader(datasets["val"], batch_size=1,
+                    shuffle=False, num_workers=0, collate_fn=collator), device, epoch)
+        if transfer_sums:
+            # Synchronize small aggregate counters once per epoch, never once per surface chunk.
+
+            transfer_values = {key: float(value.cpu()) for key, value in transfer_sums.items()}
+            support = transfer_values["supported_rows"]
+            rows = transfer_values["rows"]
+            work.metrics.log("transfer_empty_fraction", transfer_values["empty_rows"] / rows,
+                             step=epoch, split="train")
+            if support:
+                diagnostics = (
+                    "effective_support", "entropy", "head_divergence", "attended_distance")
+                for name in diagnostics:
+                    work.metrics.log(f"transfer_{name}", transfer_values[name + "_sum"] / support,
+                                     step=epoch, split="train")
         work.metrics.log("learning_rate", learning_rate * learning_rate_scale, step=epoch)
         work.metrics.log("effective_gate_lambda", effective_gate_lambda, step=epoch)
         pooling_head = getattr(model, "pooling_head", None)
@@ -2275,6 +2786,8 @@ def _train_wisdom(
                 {
                     "model_version":    model_version,
                     "model_parameters": model_parameters,
+                    "physics": physics,
+                    "physical_normalization": physical.statistics if physical is not None else None,
                     "surface_features": tuple(surface_features),
                     "surface_representation_contract": "H/X/Z:2.0",
                     "surface_feature_statistics": datasets["train"].feature_statistics,
@@ -2298,6 +2811,7 @@ def _train_wisdom(
                     "surface_encoder_type": surface_encoder_type,
                     "gate_lambda":      gate_lambda,
                     "weak_surface_loss": weak_surface_configuration,
+                    "negative_mining": negative_mining,
                     "initialization": initialization_configuration,
                     "semantic_gate_definition": tuple(
                         (name, model.semantic_gates.parents[name])
@@ -2308,14 +2822,19 @@ def _train_wisdom(
                         "atom_spatial_k":           atom_spatial_k,
                         "surface_atom_k":           surface_atom_k,
                         "diffusion_spectral_modes": diffusion_spectral_modes,
+                        "transfer_source": transfer_source,
+                        "spectral_source": spectral_source,
+                        "surface_graph_source": "filtered" if local_surface else "base",
                     },
+                    "structural_assets": tuple(structural_assets),
                     "state_dict":       model.state_dict(),
                     "seed":             seed,
                     "initialization_seed": effective_initialization_seed,
                     "training_seed":       effective_training_seed,
                     "epoch":            epoch,
                     "inference_state": {
-                        "gate_override": "all_on" if gate_phase == "all_on" else "learned",
+                        "gate_override": model.semantic_gates.inference_state()["override"],
+                        "semantic_gate_state": model.semantic_gates.inference_state(),
                     },
                     "val_auprc":        objective,
                     "val_loss":         best_val_loss,
@@ -2407,10 +2926,13 @@ def _train_wisdom(
             work.metrics.log("cuda_allocated_gib", allocated_gib, step=epoch, split="train")
             work.metrics.log("cuda_reserved_gib", reserved_gib, step=epoch, split="train")
             work.metrics.log("cuda_peak_gib", peak_gib, step=epoch, split="train")
+            work.metrics.log("cuda_peak_reserved_gib", peak_reserved, step=epoch, split="train")
 
             progress_message += f"; cuda_peak={peak_gib:.2f}GiB"
 
         epoch_seconds = time.perf_counter() - epoch_started
+        if epoch > 1:
+            complete_epoch_seconds.append(epoch_seconds)
         proteins_per_second = examples / max(epoch_seconds, 1.0e-9)
         work.metrics.log("epoch_seconds", epoch_seconds, step=epoch, split="train")
         work.metrics.log(
@@ -2446,6 +2968,66 @@ def _train_wisdom(
             f"{memory_text}"
         )
 
+        if mining is not None:
+            work.metrics.log("negative_mining_loss", float(mining_loss_sum.cpu()) / examples,
+                             step=epoch, split="train")
+            work.metrics.log("negative_mining_active_batches", float(mining_active_batches),
+                             step=epoch, split="train")
+            terminal_reason = ("adaptive-hpo" if work.stop_requested else
+                "validation-patience" if epochs_without_improvement >= patience else
+                "maximum-epochs" if epoch == epochs else None)
+            if mining_loader is not None and terminal_reason is None:
+                review_began = time.perf_counter()
+                snapshot = _negative_snapshot(model, mining_loader, device, autocast_dtype)
+                audit = mining.review({key: value["logits"].sigmoid().numpy()
+                                       for key, value in snapshot.items()}, epoch)
+                audit["review_seconds"] = time.perf_counter() - review_began
+                audit_path = work.outputs.file(f"negative-mining-review-{epoch:04d}",
+                    filename=f"review-{epoch:04d}.json", role="diagnostic")
+                Path(audit_path).write_text(json.dumps(audit, indent=2))
+                summary = {key: audit[key] for key in ("epoch", "components", "candidates",
+                    "selected", "remembered", "selected_proteins", "selected_area",
+                    "review_seconds")}
+                summary["fgw_fallback"] = int(audit["families"].get("fallback", False))
+                mining_summaries.append(summary)
+                for key, value in summary.items():
+                    if key != "epoch":
+                        work.metrics.log(f"negative_mining_{key}", float(value),
+                                         step=epoch, split="train")
+                work.log(f"[VN01] review={epoch} candidates={audit['candidates']} "
+                         f"priorities={audit['selected']} remembered={audit['remembered']} "
+                         f"seconds={audit['review_seconds']:.1f}")
+            assert continuation is not None
+            continuation.save(epoch, {"model": model.state_dict(),
+                "optimizer": optimizer.state_dict(), "scaler": scaler.state_dict(),
+                "mining": mining.state_dict(),
+                "best": torch.load(checkpoint, map_location="cpu", weights_only=True)
+                        if checkpoint.exists() else None,
+                "progress": {"best_auprc": best_auprc,
+                    "best_selection_utility": best_selection_utility,
+                    "best_val_loss": best_val_loss,
+                    "best_validation_metrics": best_validation_metrics, "best_epoch": best_epoch,
+                    "epochs_completed": epochs_completed,
+                    "epochs_without_improvement": epochs_without_improvement,
+                    "patience_reference_utility": patience_reference_utility,
+                    "surface_curve": surface_curve, "subgroup_curves": subgroup_curves,
+                    "pooling_trajectory": pooling_trajectory,
+                    "complete_epoch_seconds": complete_epoch_seconds,
+                    "mining_summaries": mining_summaries, "peak_allocated_gib": peak_allocated_gib,
+                    "first_mining_gradient_epoch": first_mining_gradient_epoch,
+                    "peak_reserved_gib": peak_reserved_gib,
+                    "cost_profile": {"maximum_atoms": maximum_atoms,
+                        "maximum_surface_points": maximum_surface_points,
+                        "maximum_atomic_edges": maximum_atomic_edges,
+                        "maximum_atomic_degree": maximum_atomic_degree,
+                        "mean_atomic_degree_sum": mean_atomic_degree_sum,
+                        "atom_count_sum": atom_count_sum, "surface_point_sum": surface_point_sum,
+                        "profiled_batches": profiled_batches,
+                        "spectral_modes_seen": spectral_modes_seen},
+                    "stop_reason": terminal_reason}}, generator)
+            work.metrics.log("negative_mining_complete_epoch_seconds",
+                time.perf_counter() - epoch_started, step=epoch, split="train")
+
         # A framework pruning request is checked only after metrics and the best checkpoint have
         # been persisted. The Run then returns normally and LambdaForge records it as pruned.
 
@@ -2464,6 +3046,9 @@ def _train_wisdom(
                 f"{minimum_delta:g} for {patience} epochs"
             )
             break
+
+    if gate_audit is not None:
+        gate_audit.snapshot("final", epochs_completed)
 
     if best_epoch == 0:
         raise RuntimeError(
@@ -2495,6 +3080,7 @@ def _train_wisdom(
     surface_prediction_reports: list[dict[str, Any]] = []
     surface_report_documents  : list[dict[str, Any]] = []
     surface_report_summary    : dict[str, Any] | None = None
+    admission_summary         : dict[str, Any] | None = None
     prediction_root           : Path | None = None
 
     # Pruned HPO Runs are excluded from candidate scores and need no held-out test evaluation.
@@ -2505,6 +3091,22 @@ def _train_wisdom(
         saved = torch.load(checkpoint, map_location=device, weights_only=True)
         model.load_state_dict(saved["state_dict"])
         model.semantic_gates.set_override(saved["inference_state"]["gate_override"])
+        if "semantic_gate_state" in saved["inference_state"]:
+            model.semantic_gates.restore_inference_state(saved["inference_state"]["semantic_gate_state"])
+        if gate_audit is not None:
+            assert model.gate_policy is not None
+            model.gate_policy.schedule(model.semantic_gates, best_epoch, epochs)
+            model.semantic_gates.restore_inference_state(saved["inference_state"]["semantic_gate_state"])
+            gate_audit.snapshot("selected", best_epoch)
+        if physical is not None:
+            physical.evaluate(model, DataLoader(datasets["val"], batch_size=1,
+                shuffle=False, num_workers=0, collate_fn=collator), device, best_epoch,
+                detailed=True)
+        if model.atomic_encoder_type in {AtomicEncoderType.SCHNET, AtomicEncoderType.SCHNET_RADIAL}:
+            # Probe only restored best-G filters on a fixed physical grid and declared metadata
+            # profiles. These diagnostics never consume local targets or modify the checkpoint.
+
+            SchNetFilterAudit.write(model, atomic_audit_root)
 
         if surface_predictions:
             prediction_root = Path(
@@ -2642,6 +3244,11 @@ def _train_wisdom(
                 surface_prediction_reports,
             )
 
+        if negative_calibration is not None:
+            admission_summary = _negative_admission(work, model, datasets, collator, device,
+                autocast_dtype, structural_assets, subset, negative_calibration,
+                calibration_dataset, decision_dataset)
+
     # Native LF selection retains every Trial/seed instead of cherry-picking the best seed.
     # The report is presentation only; disabled or pruned Runs expose a small empty-state page.
 
@@ -2717,6 +3324,9 @@ def _train_wisdom(
                 work.metrics.log(name, optional_metric, split="val")
 
     final_diffusion_times = _diffusion_time_summary(model)
+    transfer_experiment = model.surface_atom_transfer.experiment
+    if transfer_experiment is not None and transfer_experiment.radius is not None:
+        work.metrics.log("final_transfer_radius", float(transfer_experiment.radius().detach()))
     pooling_head = getattr(model, "pooling_head", None)
     final_pooling_values = (
         pooling_head.parameter_values()
@@ -2808,6 +3418,13 @@ def _train_wisdom(
         "surface_prediction_reports":      surface_prediction_reports,
         "surface_coupling":                final_coupling,
         "surface_metric_curve":            surface_curve,
+        "negative_mining":                 negative_mining,
+        "negative_mining_reviews":         mining_summaries,
+        "negative_mining_first_gradient_epoch": first_mining_gradient_epoch,
+        "negative_mining_selected_before_auxiliary": (
+            first_mining_gradient_epoch is None or best_epoch < first_mining_gradient_epoch)
+            if mining is not None else None,
+        "negative_admission":              admission_summary,
         "subgroup_coupling":               final_subgroup_coupling,
         "subgroup_metric_curves":          subgroup_curves,
         "test_evaluated":                evaluate_test,
@@ -2832,6 +3449,16 @@ def _train_wisdom(
         "split_sizes":                 split_sizes,
         "split_storage_bytes":         split_storage,
     }
+    median_epoch_seconds = (
+        float(median(complete_epoch_seconds)) if complete_epoch_seconds else None
+    )
+    if median_epoch_seconds is not None:
+        work.metrics.log("median_complete_epoch_seconds_excluding_first", median_epoch_seconds)
+    if device.type == "cuda":
+        work.metrics.log("peak_cuda_allocated_gib", peak_allocated_gib)
+        work.metrics.log("peak_cuda_reserved_gib", peak_reserved_gib)
+    report["atomic_encoder_configuration"] = atomic_configuration
+    report["median_complete_epoch_seconds_excluding_first"] = median_epoch_seconds
     report_path = work.run_dir / "evaluation.json"
     gate_summary_path = work.run_dir / "gate_summary.json"
     report_path.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
@@ -2898,6 +3525,9 @@ def _diffusion_time_summary(model: torch.nn.Module) -> dict[str, Any]:
         for block_index, block in enumerate(module.blocks):
             typed_block = cast(DiffusionBlock, block)
             values      = typed_block.diffusion_times.detach().float().cpu()
+            if typed_block.extra_raw_times is not None:
+                extra = torch.nn.functional.softplus(typed_block.extra_raw_times.detach().float())
+                values = torch.cat((values, extra.flatten().cpu() + 1e-8))
             all_values.append(values)
             blocks.append(
                 {
@@ -3010,6 +3640,171 @@ def _calibrate_local_head_bias(
     calibrated = 0.5 * (lower + upper)
     local_head.bias.data.fill_(calibrated)
     return calibrated
+
+
+def _negative_snapshot(
+    model: torch.nn.Module, loader: DataLoader[Any], device: torch.device,
+    autocast_dtype: torch.dtype | None,
+) -> dict[str, dict[str, Any]]:
+    """Review full proteins deterministically without perturbing optimizer RNG or mode.
+
+    Args:
+        model: Current optimizer weights for N1, or the restored fixed G checkpoint for N3.
+        loader: Explicit deterministic cohort loader with its own generator and no random sampler.
+        device: Granted logical Torch device; no discovery or enlargement of GPU visibility.
+        autocast_dtype: Same dense precision used by ordinary evaluation, or None for FP32.
+
+    Returns:
+        Detached CPU logits in exact per-protein point order and explicit global labels. Local
+        targets are included only if this evaluation loader already requested them; mining uses
+        a TRAIN loader that never loads those arrays.
+    """
+    snapshot: dict[str, dict[str, Any]] = {}
+    was_training = model.training
+    python_rng, numpy_rng = random.getstate(), np.random.get_state()
+    devices = [torch.cuda.current_device()] if device.type == "cuda" else []
+    try:
+        with torch.random.fork_rng(devices=devices), torch.inference_mode():
+            model.eval()
+            for batch in loader:
+                tensors = _device_batch(batch, device)
+                with torch.autocast(device_type=device.type,
+                    dtype=autocast_dtype or torch.bfloat16, enabled=autocast_dtype is not None):
+                    output = model(**_model_inputs(tensors))
+                logits = output["surface_logits"].detach().float().cpu()
+                global_logits = output["logits"].detach().float().cpu()
+                pointers = batch["surface_ptr"].tolist()
+                for index, identifier in enumerate(batch["identifier"]):
+                    start, stop = pointers[index:index + 2]
+                    record = {"logits": logits[start:stop],
+                        "protein_logit": float(global_logits[index]),
+                        "label": int(batch["target"][index])}
+                    if "surface_target_hard" in batch:
+                        record.update(local_target=batch["surface_target_hard"][start:stop].cpu(),
+                                      local_valid=batch["surface_valid_mask"][start:stop].cpu())
+                    if identifier in snapshot:
+                        raise ValueError("negative review contains a repeated protein identifier")
+                    snapshot[identifier] = record
+    finally:
+        model.train(was_training)
+        random.setstate(python_rng)
+        np.random.set_state(numpy_rng)
+    return snapshot
+
+
+def _negative_admission(
+    work: Training, model: torch.nn.Module | None, datasets: Mapping[str, WisdomDataset],
+    collator: WisdomCollator | None, device: torch.device, autocast_dtype: torch.dtype | None,
+    structural_assets: Sequence[str], subset: str, options: Mapping[str, Any],
+    calibration_dataset: Path | None, decision_dataset: Path | None,
+) -> dict[str, Any]:
+    """Apply N3 after G restoration, or publish an explicit missing-reserve status.
+
+    Args:
+        work: LF output/metric owner; no training or nested execution is started here.
+        model: Frozen best-G predictor, or None for a pre-training partition preflight only.
+        datasets: Original train/selection/test bindings, used to audit cohort overlap.
+        collator: Same model-support batching policy used during training; None during preflight.
+        device: Existing granted logical device.
+        autocast_dtype: Frozen evaluation precision.
+        structural_assets: Same required immutable model sidecars as ordinary inference.
+        subset: Original training subset; not applied to the independent reserve population.
+        options: levels=[.01,.05,.1], split=val, development_split=val, lower=.25,
+            formal=false; formal=true additionally requires a nonempty history_attestation.
+        calibration_dataset: Typed negative-only independent reserve, never inferred from val/test.
+        decision_dataset: Optional explicit F1 development cohort disjoint from every other role.
+
+    Returns:
+        Artifact-bound F0/F1/F2 evidence or a clear unavailable status; unchanged ranking scores.
+
+    Raises:
+        ValueError: Overlapping IDs/groups, nonnegative calibration members or unaudited formal use.
+    """
+    del subset  # The reserve is deliberately not a diluted view of the training population.
+    report: dict[str, Any]
+    if calibration_dataset is None:
+        if model is None:
+            work.log("[VN01 N3] no independent reserve declared; formal calibration is unavailable")
+            return {"status": "unavailable_no_independent_negative_reserve"}
+        report = {"status": "unavailable_no_independent_negative_reserve",
+                  "formal_guarantee": False, "test_used_for_calibration": False}
+    else:
+        if options.get("formal", False) and not str(options.get("history_attestation", "")).strip():
+            raise ValueError("formal N3 needs an explicit independent sampling/history attestation")
+        reserve = WisdomDataset(calibration_dataset, str(options.get("split", "val")),
+            structural_assets=tuple(structural_assets))
+        if reserve.task_specification != datasets["train"].task_specification:
+            raise ValueError("N3 reserve must describe the same scientific task as the predictor")
+        if datasets["train"].surface_features:
+            raise ValueError("N3 integration currently supports the learned molecular reference, "
+                             "not independently normalized explicit-field predictors")
+
+        def records(view: WisdomDataset) -> list[dict[str, Any]]:
+            """Read only explicit global membership and leakage identity for overlap auditing.
+
+            Args:
+                view: Validated managed cohort; no point targets are opened.
+            """
+            return [{"identifier": r[3], "label": r[2], "leakage_group": r[5]}
+                    for r in view.records]
+
+        manifest = datasets["train"].manifest
+        used = ([{"identifier": member.member_id,
+                  "leakage_group": member.partitions.get("leakage_group", "")}
+                 for member in DatasetIndex(manifest)] if manifest.suffix == ".jsonl" else
+                [record for view in datasets.values() for record in records(view)])
+        development = None
+        if decision_dataset is not None:
+            development = WisdomDataset(decision_dataset,
+                str(options.get("development_split", "val")),
+                structural_assets=tuple(structural_assets))
+            if development.task_specification != datasets["train"].task_specification:
+                raise ValueError("N3 development cohort must describe the predictor's task")
+            if {r["identifier"] for r in records(development)} & \
+                    {r["identifier"] for r in used} or \
+                    {r["leakage_group"] for r in records(development)} & {
+                        r["leakage_group"] for r in used}:
+                raise ValueError("N3 F1 development cohort overlaps training/selection/evaluation")
+            used.extend(records(development))
+        NegativeAdmission.verify_reserve(records(reserve), used)
+        if model is None:
+            return {"status": "partition_preflight_passed", "negative_count": len(reserve)}
+        assert collator is not None
+
+        def loader(view: WisdomDataset) -> DataLoader[Any]:
+            """Make deterministic inference over explicit cohort membership.
+
+            Args:
+                view: Validated reserve/development/evaluation inputs using frozen model transforms.
+            """
+            return DataLoader(view, batch_size=1, shuffle=False, num_workers=0,
+                collate_fn=collator, generator=torch.Generator().manual_seed(0))
+
+        calibration = _negative_snapshot(model, loader(reserve), device, autocast_dtype)
+        admission = NegativeAdmission([float(v["logits"].max()) for v in calibration.values()],
+                                      bool(options.get("formal", False)))
+        threshold = None
+        if development is not None:
+            snapshot = _negative_snapshot(model, loader(development), device, autocast_dtype)
+            threshold = admission.development_threshold(
+                [v["protein_logit"] for v in snapshot.values()],
+                [v["label"] for v in snapshot.values()])
+        view = datasets["val"].surface_target_view(True)
+        snapshot = _negative_snapshot(model, loader(view), device, autocast_dtype)
+        geometry = {r[3]: SurfaceRegions(r[0]) for r in view.records}
+        report = admission.evaluate(snapshot, geometry, options.get("levels", [.01, .05, .1]),
+            float(options.get("lower", .25)), threshold)
+        report.update(status="available", evaluation_split="validation_development_only",
+                      history_attestation=options.get("history_attestation"),
+                      calibration_identifiers=list(calibration))
+        for name, result in report["procedures"].items():
+            for metric in ("false_admission_rate", "sensitivity"):
+                if result[metric] is not None:
+                    work.metrics.log(f"negative_admission_{name}_{metric}", result[metric],
+                                     split="val")
+    work.outputs.file("negative-admission", filename="negative-admission.json",
+                      role="diagnostic").write_json(report)
+    return report
 
 
 def _evaluate(
@@ -3641,42 +4436,82 @@ def _device_batch(batch: Mapping[str, Any], device: torch.device) -> dict[str, A
     """Move model tensors to one device while retaining prefix boundaries on the host.
 
     Args:
-        batch: Collated WISDOM graph mapping, which may also contain point-level diagnostics.
+        batch: Collated WISDOM graph mapping, including the required integer ``atom_batch``
+            ownership vector with shape ``(N_atoms,)`` and optional point-level diagnostics.
         device: Destination CPU or CUDA device.
 
     Returns:
         New mapping containing model tensors/operator packs and the global target on ``device``.
         ``surface_ptr`` stays on CPU because it supplies Python slice boundaries; moving it to
         CUDA would force one device synchronization for every protein. DNA sidecars, identifiers,
-        tiers, and unused diagnostics also stay on the host.
+        tiers, and unused diagnostics also stay on the host. Optional ``atomic_operators`` retain
+        local ownership and expand uint8 path buckets to int64 once on the destination device.
+
+    Raises:
+        KeyError: If a required collator field, including atomic ownership, is missing.
     """
+    # Atomic ownership is a model input, not a disposable diagnostic: directional and global
+    # encoders use it to enforce per-protein memory guards without changing the optimizer batch.
+
     selected_names = [*_MODEL_INPUT_NAMES, "target"]
     selected_names.extend(name for name in _V3_INPUT_NAMES if name in batch)
     selected_names.extend(name for name in _VECTOR_INPUT_NAMES if name in batch)
     if "surface_explicit_features" in batch:
         selected_names.append("surface_explicit_features")
-    return {
-        name: batch[name] if name == "surface_ptr" else _move_to_device(batch[name], device)
-        for name in selected_names
+    selected_names.extend(
+        name for name in ("structural_assets", "atom_residue_indices") if name in batch)
+    if "atomic_operators" in batch:
+        selected_names.append("atomic_operators")
+    selected = {name: batch[name] for name in selected_names}
+    if "structural_assets" in selected:
+        # Only atomic inputs consume raw sidecars on the GPU. Spectrum prefixes, filtered graphs
+        # and transfer candidates already live in operator/model tensors; moving their full raw
+        # archives again would duplicate memory. Static tables and alternate views stay on CPU.
+
+        consumed = {"atomic_context", "atomic_sasa", "external_embeddings_esm2",
+                    "external_embeddings_esmc", "external_embeddings_saprot", "residue_graph",
+                    "surface_environment"}
+        consumed.add("external_atomic_slae")
+        selected["structural_assets"] = {
+            family: value for family, value in selected["structural_assets"].items()
+            if family in consumed}
+    moved = {
+        name: value if name == "surface_ptr" else _move_to_device(value, device)
+        for name, value in selected.items()
     }
+    if "atomic_operators" in moved:
+        # Expand compact code buckets only once on device; every layer shares the same int64
+        # index tensor, including its autograd reference, rather than retaining repeated copies.
+
+        moved["atomic_operators"] = [
+            {name: value.long() for name, value in pack.items()}
+            for pack in moved["atomic_operators"]
+        ]
+    return moved
 
 
 def _model_inputs(batch: Mapping[str, Any]) -> dict[str, Any]:
     """Select the bounded common model inputs and optional WISDOM v3 geometry.
 
     Args:
-        batch: Device-resident collated graph mapping.
+        batch: Device-resident collated graph mapping with required per-atom ownership.
 
     Returns:
         Keyword mapping accepted by the active trainable model generation.
+
+    Raises:
+        KeyError: If a required model field is absent; never infer one protein for a whole batch.
     """
     names = list(_MODEL_INPUT_NAMES)
-    if "atom_batch" in batch:
-        names.append("atom_batch")
     names.extend(name for name in _V3_INPUT_NAMES if name in batch)
     names.extend(name for name in _VECTOR_INPUT_NAMES if name in batch)
     if "surface_explicit_features" in batch:
         names.append("surface_explicit_features")
+    names.extend(name for name in ("structural_assets", "atom_residue_indices") if name in batch)
+    if "atomic_operators" in batch:
+        names.append("atomic_operators")
+    if "physics_queries" in batch:
+        names.append("physics_queries")
     return {name: batch[name] for name in names}
 
 

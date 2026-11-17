@@ -3,6 +3,7 @@ from __future__ import annotations
 import csv
 import hashlib
 import json
+import pickle
 from pathlib import Path
 from typing import Any
 
@@ -15,8 +16,8 @@ from torch.utils.data import DataLoader
 
 from wisdom.data.WisdomCollator import WisdomCollator
 from wisdom.data.WisdomDataset import WisdomDataset
-from wisdom.models.DiffusionSurfaceEncoder import DiffusionSurfaceEncoder
-from wisdom.models.WeakSurfaceLoss import WeakSurfaceLoss
+from wisdom.models.losses.WeakSurfaceLoss import WeakSurfaceLoss
+from wisdom.models.surface.DiffusionSurfaceEncoder import DiffusionSurfaceEncoder
 from wisdom.models.WisdomV1 import WisdomV1
 from wisdom.models.WisdomV2 import WisdomV2
 from wisdom.preprocessing.common.structure.PreprocessConfig import PreprocessConfig
@@ -463,7 +464,7 @@ def test_dataset_rejects_legacy_schema_clearly(tmp_path: Path) -> None:
         WisdomDataset(tmp_path / "manifest.csv", "train")[0]
 
 
-def test_dataset_loads_only_required_surface_metric_targets(tmp_path: Path) -> None:
+def test_dataset_loads_only_required_surface_metric_targets(tmp_path: Path, monkeypatch) -> None:
     """Epoch diagnostics avoid loading unrelated coordinates and soft sidecar arrays."""
     base = tmp_path / "protein.npz"
     _write_npz(base, _sample(3, 3, 1.0))
@@ -498,6 +499,58 @@ def test_dataset_loads_only_required_surface_metric_targets(tmp_path: Path) -> N
     assert torch.equal(batch["surface_valid_mask"], torch.from_numpy(valid))
     assert "surface_target_soft" not in sample
     assert "surface_positions" not in sample
+
+    # A target view must retain every validated input without constructing a second dataset.
+
+    original = WisdomDataset(manifest, "val")
+
+    def forbidden_init(*args, **kwargs):
+        """Reject duplicate manifest/sidecar setup when only target loading changes.
+
+        Args:
+            args: Unexpected constructor positional arguments.
+            kwargs: Unexpected constructor keyword arguments.
+
+        Raises:
+            AssertionError: Always; immutable view construction must not initialize again.
+        """
+        raise AssertionError("repeated dataset validation")
+
+    monkeypatch.setattr(WisdomDataset, "__init__", forbidden_init)
+    view = original.surface_target_view()
+    assert view.records is original.records
+    assert view.structural_inputs is original.structural_inputs
+    assert not original.include_surface_targets and view.include_surface_targets
+    assert "surface_target_hard" not in original[0]
+    for key, value in sample.items():
+        if isinstance(value, torch.Tensor):
+            torch.testing.assert_close(view[0][key], value, rtol=0, atol=0)
+        else:
+            assert view[0][key] == value
+    assert not view.surface_target_view(False).include_surface_targets
+
+
+def test_dataset_startup_progress_is_not_retained_by_loader_workers(tmp_path: Path) -> None:
+    """Startup reports selected members without pickling the Work's logging callback.
+
+    Args:
+        tmp_path: Disposable managed index referencing one shared synthetic base archive.
+    """
+    base = tmp_path / "protein.npz"
+    _write_npz(base, _sample(3, 3, 0.0))
+    members = [DatasetMember(f"protein-{i}", partitions={"split": "train"},
+        targets={"dna_binding": 0}, assets={"universal_npz": DatasetAsset(path=base.name)})
+        for i in range(26)]
+    DatasetIndex.write(tmp_path / "index.jsonl", members)
+    messages = []
+    dataset = WisdomDataset(tmp_path, "train", log=lambda message: messages.append(message))
+    assert len(dataset) == 26
+    assert len(messages) == 2
+    assert "validated 1 input members" in messages[0]
+    assert "validated 25 input members" in messages[1]
+    restored = pickle.loads(pickle.dumps(dataset))
+    assert restored.records == dataset.records
+    assert len(restored) == 26
 
 
 def test_evaluation_reports_surface_metrics_across_multiple_batches() -> None:

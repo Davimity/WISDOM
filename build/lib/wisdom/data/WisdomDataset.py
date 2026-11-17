@@ -3,16 +3,19 @@
 from __future__ import annotations
 
 import csv
+import copy
 import json
 import torch
 import numpy as np
 
 from pathlib import Path
 from torch import Tensor
-from collections.abc import Mapping
+from collections.abc import Mapping, Callable
 from torch.utils.data import Dataset
 from lambdaforge.data import DatasetIndex
+from wisdom.data.StructuralInputs import StructuralInputs
 from wisdom.data.TaskSpecification import TaskSpecification
+from wisdom.data.AtomicStructuralInputs import AtomicStructuralInputs
 from wisdom.utils.structure.AtomicDescriptors import AtomicDescriptors
 from wisdom.features.SurfaceFeatureSidecar import SurfaceFeatureSidecar
 
@@ -39,12 +42,17 @@ class WisdomDataset(Dataset[Mapping[str, Tensor | str]]):
         include_atom_geometry  : bool = False,
         surface_features       : tuple[str, ...] = (),
         normalization_subset   : str | None = None,
+        structural_assets      : tuple[str, ...] = (),
+        extended_asset_radius  : float | None = None,
+        extended_asset_k       : int | None = None,
+        log                    : Callable[[str], None] | None = None,
     ) -> None:
         """Read and validate a compact ``file,label,split`` CSV manifest.
 
         Paths are resolved relative to the manifest directory. Rows keep CSV order and only rows
         whose explicit split equals ``split`` are retained; no random or implicit division occurs.
-        NPZ files remain unopened until ``__getitem__`` so DataLoader workers do not share handles.
+        Requested structural sidecars are validated during initialization. Sample arrays are
+        decoded in ``__getitem__``; no archive handle is retained or shared with loader workers.
 
         Args:
             manifest: LambdaForge 0.14 managed dataset root containing ``index.jsonl``, or a legacy
@@ -66,6 +74,12 @@ class WisdomDataset(Dataset[Mapping[str, Tensor | str]]):
                 Nonempty requires frozen train statistics and aligned assets on every member.
             normalization_subset: Training population whose frozen transform all splits reuse.
                 None uses subset, including when validation/test membership is unfiltered.
+            structural_assets: Optional immutable asset families validated once, then loaded
+                selectively. Empty preserves historical fields and opens no new asset files.
+            extended_asset_radius: Optional radius requested from expanded CSR candidates, in Å.
+            extended_asset_k: Optional expanded-candidate cap; cannot exceed stored support.
+            log: Optional startup progress callback, called every 25 selected members. It is not
+                retained by the dataset or sent to loader subprocesses.
 
         Raises:
             ValueError: If the split, header, label, row split, path, or selected subset is invalid.
@@ -85,12 +99,15 @@ class WisdomDataset(Dataset[Mapping[str, Tensor | str]]):
             subset if normalization_subset is None else normalization_subset
         )
         self.feature_assets: dict[str, list[Path]] = {}
+        self.atomic_structure_paths: Mapping[Path, Path] = {}
+        self.structural_inputs = StructuralInputs(
+            structural_assets, extended_asset_radius, extended_asset_k)
         self.feature_statistics: Mapping[str, object] | None = None
         self.task_specification = TaskSpecification()
 
         manifest_path = Path(manifest).resolve()
         if manifest_path.is_dir():
-            managed_records = self._dataset_records(manifest_path, split, subset)
+            managed_records = self._dataset_records(manifest_path, split, subset, log)
             self.manifest = manifest_path / "index.jsonl"
             self.split    = split
             self.records  = tuple(managed_records)
@@ -98,6 +115,8 @@ class WisdomDataset(Dataset[Mapping[str, Tensor | str]]):
 
         records: list[tuple[Path, Path | None, int, str, str, str, str, str]] = []
         with manifest_path.open("r", encoding="utf-8", newline="") as handle:
+            if structural_assets:
+                raise ValueError("optional structural assets require a managed DatasetIndex")
             reader = csv.DictReader(handle)
             columns = tuple(reader.fieldnames or ())
             if columns not in {self.LEGACY_COLUMNS, self.DNA_COLUMNS}:
@@ -165,11 +184,28 @@ class WisdomDataset(Dataset[Mapping[str, Tensor | str]]):
         self.split    = split
         self.records  = tuple(records)
 
+    def surface_target_view(self, enabled: bool = True) -> WisdomDataset:
+        """Expose evaluation targets without repeating validation of the same immutable inputs.
+
+        Args:
+            enabled: Load hard surface targets and their validity masks during sample reads.
+
+        Returns:
+            Shallow dataset view sharing the already validated records and structural bindings.
+            Only the target-loading flag changes; no arrays, paths, labels or splits are rebuilt.
+            Source mappings must not be mutated after constructing the loader views. Each sample
+            read still opens and closes its own archives, including the requested annotation.
+        """
+        view = copy.copy(self)
+        view.include_surface_targets = enabled
+        return view
+
     def _dataset_records(
         self,
         root  : Path,
         split : str,
         subset: str,
+        log   : Callable[[str], None] | None = None,
     ) -> list[tuple[Path, Path | None, int, str, str, str, str, str]]:
         """Read explicit labels, partitions, views, and assets from DatasetArtifact v2.
 
@@ -178,6 +214,7 @@ class WisdomDataset(Dataset[Mapping[str, Tensor | str]]):
             split: Required main partition.
             subset: ``full`` or one deterministic training-dilution name. The filter applies only
                 to train because validation and test membership is fixed across learning curves.
+            log: Optional startup progress callback; never stored on the dataset instance.
 
         Returns:
             Ordered base/annotation paths and labels consumed by ``__getitem__``.
@@ -292,6 +329,9 @@ class WisdomDataset(Dataset[Mapping[str, Tensor | str]]):
                         member.partitions.get("interface_phenotype", "unspecified"))),
                 )
             )
+            if self.structural_inputs.requested:
+                self.structural_inputs.register(member.member_id, base,
+                    {name: root / asset.path for name, asset in member.assets.items()})
             if self.surface_features:
                 feature_asset_names = member.metadata.get(
                     "optional_surface_feature_assets", ["surface_features"]
@@ -299,6 +339,8 @@ class WisdomDataset(Dataset[Mapping[str, Tensor | str]]):
                 self.feature_assets[member.member_id] = [
                     root / member.assets[name].path for name in feature_asset_names
                 ]
+            if log is not None and (len(records) == 1 or len(records) % 25 == 0):
+                log(f"{split}: validated {len(records)} input members; last={member.member_id}")
         if not records:
             raise ValueError(
                 f"managed dataset contains no records for split={split!r}, subset={subset!r}"
@@ -350,12 +392,18 @@ class WisdomDataset(Dataset[Mapping[str, Tensor | str]]):
         annotation_bytes = sum(path.stat().st_size for path in annotation_paths)
         feature_paths    = {path for paths in self.feature_assets.values() for path in paths}
         feature_bytes    = sum(path.stat().st_size for path in feature_paths)
-        return {
+        result = {
             "universal_npz": base_bytes,
             self.task_specification.local_annotation_asset: annotation_bytes,
             "surface_features": feature_bytes,
             "total": base_bytes + annotation_bytes + feature_bytes,
         }
+        if self.structural_inputs.requested:
+            optional_paths = {path for paths in self.structural_inputs.paths.values()
+                              for path in paths.values()}
+            result["structural_assets"] = sum(path.stat().st_size for path in optional_paths)
+            result["total"] += result["structural_assets"]
+        return result
 
     def __getitem__(self, index: int) -> Mapping[str, Tensor | str]:
         """Load the bounded schema-3 model arrays and optional evaluation diagnostics.
@@ -370,7 +418,9 @@ class WisdomDataset(Dataset[Mapping[str, Tensor | str]]):
 
         Returns:
             Mapping containing bounded topology, compact atom-neighbor geometry, intrinsic surface
-            operators, one scalar float32 target, and requested host-side diagnostics.
+            operators, one scalar float32 target, and requested host-side diagnostics. When a
+            Work binds ``atomic_structure_paths``, load its prepared uint8 graph codes too;
+            never compute shortest paths in the dataset, collator or neural forward.
 
         Raises:
             IndexError: If ``index`` is outside the selected split.
@@ -460,6 +510,8 @@ class WisdomDataset(Dataset[Mapping[str, Tensor | str]]):
                     f"{sorted(missing_descriptors)}"
                 )
             values.update({name: archive[name] for name in available_descriptors})
+            if self.structural_inputs.requested:
+                values["residue_indices"] = archive["residue_indices"]
             if self.include_diagnostics or self.include_surface_geometry:
                 geometry_names = {
                     "surface_positions",
@@ -765,4 +817,10 @@ class WisdomDataset(Dataset[Mapping[str, Tensor | str]]):
         output["leakage_group"]       = leakage_group
         output["global_phenotype"]    = global_phenotype
         output["local_phenotype"] = local_phenotype
+        if self.structural_inputs.requested:
+            output["atom_residue_indices"] = torch.from_numpy(
+                values["residue_indices"].astype(np.int64, copy=False))
+        output.update(self.structural_inputs.read(identifier))
+        if self.atomic_structure_paths:
+            output.update(AtomicStructuralInputs.read(self.atomic_structure_paths[path]))
         return output

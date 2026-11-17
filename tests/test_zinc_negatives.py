@@ -9,9 +9,10 @@ from urllib.error import HTTPError
 
 import pytest
 from lambdaforge.work import WorkCache
+from lambdaforge.work.checkpoints import CheckpointCollection
 
-from wisdom.preprocessing.zinc import discovery, negatives
-from wisdom.preprocessing.zinc.evidence import load_evidence
+from wisdom.preprocessing.zinc.stages import discovery, negatives
+from wisdom.preprocessing.zinc.stages.evidence import load_evidence
 
 
 def denial(**overrides):
@@ -89,7 +90,8 @@ def test_empty_negative_inventory_stops_before_positive_query(tmp_path, monkeypa
     source = tmp_path / "negative-evidence.jsonl"
     source.write_text("")
     monkeypatch.setattr(discovery, "discover_negatives", lambda *args: source)
-    work = SimpleNamespace(outputs=Mock(), cache=Mock())
+    work = SimpleNamespace(outputs=Mock(), cache=Mock(),
+                           checkpoints=CheckpointCollection(tmp_path / "checkpoints"))
     work.outputs.directory.return_value = tmp_path
     with pytest.raises(RuntimeError, match="positive structure scan has not started"):
         discovery.discover_candidates(work, None, "fixture")
@@ -108,15 +110,8 @@ def test_quickgo_pagination_and_native_rate_limiter(tmp_path, monkeypatch):
         )
     )
 
-    def checkpoint(key, build):
-        """Materialize a receipt through the same build callback as a native checkpoint."""
-        path = tmp_path / "checkpoints" / key
-        path.parent.mkdir(parents=True, exist_ok=True)
-        if not path.exists():
-            build(path)
-        return path
-
-    work = SimpleNamespace(cache=Mock(), log=Mock(), checkpoints=SimpleNamespace(file=checkpoint))
+    work = SimpleNamespace(cache=Mock(), log=Mock(),
+                           checkpoints=CheckpointCollection(tmp_path / "checkpoints"))
     work.cache.fetch.side_effect = [first, second]
     rows = negatives.annotations(
         work, {"goId": "GO:0008270", "goUsage": "exact"}, "fixture", tmp_path, 2
@@ -138,20 +133,30 @@ def test_quickgo_pagination_and_native_rate_limiter(tmp_path, monkeypatch):
         negatives.annotations(work, {}, "fixture-other", tmp_path, 2)
 
 
-def test_rejected_json_query_reports_the_server_reason_without_partial_output(tmp_path):
-    """Native permanent HTTP failures retain the offending search attribute in the Work log."""
+@pytest.mark.parametrize("body_retained", [False, True])
+def test_rejected_json_query_reports_the_server_reason_without_partial_output(
+    tmp_path, body_retained,
+):
+    """A native-owned closed HTTP body never masks the permanent source/query failure."""
     url = "https://search.rcsb.org/rcsbsearch/v2/query?json=invalid"
     cause = HTTPError(url, 400, "Bad Request", {}, BytesIO(
         b'{"message":"search is not enabled on [wrong.attribute] attribute"}'
     ))
-    work = SimpleNamespace(cache=WorkCache(tmp_path / "cache"), log=Mock())
+    if body_retained:
+        # An earlier LF release retained the response; keep the richer diagnostic when possible.
+
+        cause.close = Mock()
+    work = SimpleNamespace(cache=WorkCache(tmp_path / "cache"), log=Mock(),
+                           checkpoints=CheckpointCollection(tmp_path / "checkpoints"))
 
     with patch("urllib.request.urlopen", side_effect=cause) as download:
-        with pytest.raises(RuntimeError, match=r"wrong\.attribute.*correct its fields") as caught:
+        with pytest.raises(RuntimeError, match="correct its fields") as caught:
             negatives.fetch_json(work, url, "fixture/query.json", tmp_path, 2)
         download.assert_called_once()
 
     assert url in str(caught.value)
+    if body_retained:
+        assert "wrong.attribute" in str(caught.value)
     assert "fixture/query.json" in str(caught.value)
     assert caught.value.__cause__.__cause__ is cause
     assert not (tmp_path / "sources").exists()
@@ -178,10 +183,7 @@ def test_public_json_uses_native_transient_retries_and_restores_without_network(
     """A temporary server failure is retried by LF and the successful response is reused."""
     url = "https://example.org/evidence.json"
     work = SimpleNamespace(cache=WorkCache(tmp_path / "cache"), log=Mock(),
-                           checkpoints=Mock())
-    receipt = tmp_path / "receipt.json"
-    receipt.write_text("{}")
-    work.checkpoints.file.return_value = receipt
+                           checkpoints=CheckpointCollection(tmp_path / "checkpoints"))
     responses = [HTTPError(url, 503, "Unavailable", {}, BytesIO(b"try later")),
                  BytesIO(b'{"results": []}')]
     with patch("urllib.request.urlopen", side_effect=responses) as download:
@@ -199,10 +201,7 @@ def test_invalid_json_is_not_published_to_native_cache_and_can_be_refetched(tmp_
     """An HTTP-200 HTML error page cannot become a reusable scientific source."""
     url = "https://example.org/evidence.json"
     work = SimpleNamespace(cache=WorkCache(tmp_path / "cache"), log=Mock(),
-                           checkpoints=Mock())
-    receipt = tmp_path / "receipt.json"
-    receipt.write_text("{}")
-    work.checkpoints.file.return_value = receipt
+                           checkpoints=CheckpointCollection(tmp_path / "checkpoints"))
     with patch("urllib.request.urlopen", side_effect=[
         BytesIO(b"<html>proxy error</html>"), BytesIO(b'{"results": []}')
     ]) as download:
@@ -240,8 +239,10 @@ def test_subject_mapping_requires_complete_exact_sequence_and_keeps_chain_names(
         sha256=lambda: "coordinate-hash",
     )
     monkeypatch.setattr(negatives, "ProteinStructure", lambda path: structure)
-    work = SimpleNamespace(cache=Mock(), log=Mock())
+    work = SimpleNamespace(cache=Mock(), log=Mock(),
+                           checkpoints=CheckpointCollection(tmp_path / "checkpoints"))
     work.cache.fetch.return_value = tmp_path / "fixture.cif"
+    work.cache.fetch.return_value.write_text("Synthetic bytes; Gemmi is replaced in this test.")
     result = negatives.map_subject(
         {"accession": "P00001", "annotations": [denial()]}, work, tmp_path, "fixture", 2
     )

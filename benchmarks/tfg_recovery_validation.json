@@ -1,0 +1,52 @@
+{
+  "date": "2026-11-12",
+  "purpose": "Read-only regression and component timing on the protein that blocked TFG zinc recovery",
+  "identifier": "1HTY_A",
+  "origin_job": "job-20261111182119-e5e63cda",
+  "failed_recovery_job": "job-20261112091733-4cb30fdc",
+  "execution": "execution-95fe53f00a13002a",
+  "run": "run-3bed97f306afd66f7dbe",
+  "base_npz_sha256": "c301b8d161320be48c2089c7c781c1060442efbe0b8fde411d89ec70121d334e",
+  "atom_count": 8181,
+  "alternate_surface_point_count": 37851,
+  "execution_context": {
+    "target": "citius-ctgpgpu16",
+    "python_environment": "env-b083ddb03dfa696373caaa5f",
+    "mode": "One diagnostic interpreter reading existing checkpoint bytes",
+    "remote_files_written": false,
+    "cluster_work_submitted": false,
+    "repetitions_per_timing": 1
+  },
+  "normal_validation": {
+    "original_full_validator_error": "a surface normal disagrees with the outward molecular envelope",
+    "rounded_minimum_normal_cosine": 0.9794455139191909,
+    "required_minimum_cosine_unchanged": 0.99,
+    "corrected_full_validator_passed": true,
+    "corrected_minimum_normal_cosine": 0.9999999570896216,
+    "minimum_signed_gap_angstrom": -0.01997858708219269,
+    "maximum_signed_gap_angstrom": 0.0000026661587777532247,
+    "cause": "Coordinate quantization toggles one sphere across the hard gradient-blend cutoff",
+    "correction": "Validate normals at deterministically reproduced unrounded points; validate stored geometry independently"
+  },
+  "surface_sampling": {
+    "original_seconds": 8.337584611028433,
+    "optimized_seconds": 4.976407084148377,
+    "speedup": 1.6754225428194167,
+    "points_bitwise_equal": true,
+    "owner_indices_bitwise_equal": true,
+    "optimization": "Sparse bounded containment batches with original scalar evaluation at ambiguous thresholds"
+  },
+  "atomic_sasa": {
+    "samples_per_atom": 960,
+    "original_seconds": 8.742433463223279,
+    "optimized_seconds": 5.578704155981541,
+    "speedup": 1.5671082779769845,
+    "areas_bitwise_equal": true,
+    "optimization": "Remove buried sample directions from subsequent sphere tests without changing quadrature"
+  },
+  "limitations": [
+    "Single-protein single-observation component timings, not a complete recovery benchmark",
+    "Concurrent load and other protein geometries can change timing; no end-to-end speedup is claimed",
+    "The scientific correction does not resolve LambdaForge staged-input ownership rejection"
+  ]
+}

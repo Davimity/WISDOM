@@ -16,7 +16,7 @@ from pathlib import Path
 from collections import defaultdict
 from plotly.offline import get_plotlyjs
 from collections.abc import Mapping, Sequence
-from wisdom.preprocessing.common.structure.ProteinVisualizer import ProteinVisualizer
+from wisdom.preprocessing.common.structure.viewer.ProteinVisualizer import ProteinVisualizer
 
 
 class ProteinReportPage:

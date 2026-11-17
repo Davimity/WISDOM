@@ -1,0 +1,27 @@
+{
+  "measured_on": "2026-11-05",
+  "cluster": "citius-ctgpgpu16",
+  "source_execution": "execution-588dfae29b0633e7",
+  "dataset": "wisdom-dna-reduced@8",
+  "historical_run_startup": {
+    "scope": "From the loading-managed-splits log to the fitting-V10-statistics log; includes input validation and model construction, not framework environment/staging or an epoch.",
+    "runs": 24,
+    "minimum_seconds": 672.018859,
+    "median_seconds": 674.2461985,
+    "maximum_seconds": 680.136165
+  },
+  "atomic_context_decode_microbenchmark": {
+    "scope": "One existing protein, five warm-file repetitions with alternating order. Decode arrays only, not source parsing, context reconstruction, normalization or training.",
+    "base_archive_bytes": 19359593,
+    "before_all_arrays": {
+      "median_seconds": 0.10532307694666088,
+      "decoded_array_bytes": 32548843
+    },
+    "after_nine_atomic_fields": {
+      "median_seconds": 0.002568810945376754,
+      "decoded_array_bytes": 434287
+    },
+    "unchanged_checks": "Whole-base SHA-256, context field reconstruction, source correspondence, dtype/shape/mask/numerical checks.",
+    "limitation": "This is not an end-to-end speedup measurement. Validation is still performed once per selected member in each Run; surface evaluation now reuses the same validated input bindings. No training or cluster job was launched."
+  }
+}

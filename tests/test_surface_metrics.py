@@ -53,6 +53,9 @@ def test_surface_metrics_separate_point_micro_and_positive_protein_macro() -> No
     assert metrics["surface_positive_macro_normalized_auprc"] == pytest.approx(1.0)
     assert metrics["surface_negative_positive_mass"] == pytest.approx(0.2)
     assert metrics["surface_negative_peak"] == pytest.approx(0.3)
+    assert metrics["surface_positive_auprc_std"] == pytest.approx(0.0)
+    for statistic in ("q25", "median", "q75"):
+        assert metrics[f"surface_positive_auprc_{statistic}"] == pytest.approx(1.0)
 
 
 def test_surface_metrics_relate_protein_confidence_to_localization_quality() -> None:
@@ -68,6 +71,12 @@ def test_surface_metrics_relate_protein_confidence_to_localization_quality() -> 
     )
 
     assert metrics["surface_confidence_quality_spearman"] == pytest.approx(1.0)
+    # Positive-protein AP values are 1 and 0.5, not a seed-to-seed distribution.
+
+    assert metrics["surface_positive_auprc_std"] == pytest.approx(0.5 / 2**0.5)
+    assert metrics["surface_positive_auprc_q25"] == pytest.approx(0.625)
+    assert metrics["surface_positive_auprc_median"] == pytest.approx(0.75)
+    assert metrics["surface_positive_auprc_q75"] == pytest.approx(0.875)
 
 
 def test_surface_metrics_keep_undefined_positive_macro_values_explicit() -> None:
@@ -83,6 +92,8 @@ def test_surface_metrics_keep_undefined_positive_macro_values_explicit() -> None
 
     assert metrics["surface_positive_proteins"] == 0.0
     assert metrics["surface_positive_macro_auprc"] is None
+    assert metrics["surface_positive_auprc_std"] is None
+    assert metrics["surface_positive_auprc_q25"] is None
     assert metrics["surface_micro_auprc"] is None
     assert metrics["surface_negative_positive_mass"] == pytest.approx(0.125)
     assert metrics["surface_negative_peak"] == pytest.approx(0.2)

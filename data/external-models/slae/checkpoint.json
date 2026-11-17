@@ -1,0 +1,12 @@
+{
+  "identifier": "ProteinDesignLab/SLAE",
+  "revision": "078b94e436b8eceb02251a254c3c224358ec6ee2",
+  "file": "autoencoder.ckpt",
+  "bytes": 882525854,
+  "sha256": "ac5bf9613209fc310145e58f1aa7ddc9111d833a131488fe30ea738d51f7bb99",
+  "source": "https://media.githubusercontent.com/media/ProteinDesignLab/SLAE/078b94e436b8eceb02251a254c3c224358ec6ee2/checkpoints/autoencoder.ckpt",
+  "variant": "base, not PDB-finetuned",
+  "code_license": "Apache-2.0",
+  "benchmark_overlap": "unknown; no independence claim",
+  "verification": "Downloaded exact bytes verified against upstream Git LFS SHA-256; runtime not installed or scientifically validated."
+}

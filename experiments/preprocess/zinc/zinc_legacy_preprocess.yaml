@@ -1,0 +1,102 @@
+# Reproduce the TFG population, not modern Zn discovery or selection.
+# All 450 original IDs/labels/splits are preserved: 148 train, 148 validation, 154 test.
+# Bootstrap the target first; it provisions the same isolated SLAE runtime as DNA enrichment:
+# lf clusters bootstrap citius-ctgpgpu16 --project .
+# lf run experiments/preprocess/zinc/zinc_legacy_preprocess.yaml --on citius-ctgpgpu16
+name: wisdom-zinc-tfg-preprocess  # Distinct historical reproduction, not a replacement for wisdom-zinc.
+run: wisdom.preprocessing.zinc.ZincPreprocessing.ZincPreprocessing  # Same universal geometry and frozen encoders as the current pipeline.
+with:  # Typed original files are the scientific membership authority; no Selection Work runs.
+  skip: false  # True performs no work and publishes nothing.
+  legacy_train: {file: ../../../data/zn_old/train.txt}  # Preserve all 148 original training proteins.
+  legacy_validation: {file: ../../../data/zn_old/val.txt}  # Preserve all 148 original validation proteins.
+  legacy_test: {file: ../../../data/zn_old/test.txt}  # Preserve all 154 original test proteins.
+  legacy_positives: {file: ../../../data/zn_old/positives.txt}  # Inherit the 225 historical positive labels without re-curation.
+  legacy_negatives: {file: ../../../data/zn_old/negatives.txt}  # Inherit the 225 historical negative labels without claiming assay evidence.
+  legacy_all: {file: ../../../data/zn_old/all.txt}  # Check exact agreement with the union of splits and labels.
+  dataset_name: wisdom-zinc-tfg  # Separate immutable Registry family for comparison with the TFG.
+  dataset_version: "1"  # First publication using the modern representation.
+  training_subset: full  # Never apply DNA's train-25 reduction to the historical split.
+  workers: 12  # Bounded CPU geometry processes; downloads use native threaded maps.
+  progress_log_seconds: 120.0  # Parent phase-liveness logs; LF maps expose exact completed counts.
+  surface_resolution: 1.0  # Same 1 Å surface spacing as the DNA @9 recipe.
+  probe_radius: 1.4  # Same 1.4 Å solvent radius as DNA @9.
+  atom_spatial_radius: 6.0  # Preserve the universal base graph's 6 Å cutoff.
+  atom_spatial_k_max: 32  # Same ranked per-atom base budget as DNA @9.
+  surface_atom_radius: 6.0  # Preserve the historical base transfer table; expansion is a separate asset.
+  surface_atom_k_max: 32  # Same base per-point atom budget as DNA @9.
+  diffusion_spectral_modes_max: 128  # Same base intrinsic mode budget as DNA @9.
+  surface_neighbor_k_max: 24  # Same sparse intrinsic point-neighbor budget as DNA @9.
+  curvature_scales: [1.5, 2.5, 5.0, 7.5, 10.0]  # Same five curvature scales as the current DNA recipe.
+  atomic_context: true  # Protein-only chemistry, backbone conformation and residue context.
+  source_quality: true  # Masked metadata aligned to observed atoms, not a learned input by default.
+  extended_surface_atom: true  # Separate expanded sparse transfer candidates.
+  extended_radius: 12.0  # Same expanded 12 Å protein-only cutoff as DNA @9.
+  extended_k_max: 96  # Keep up to 96 candidates; short/empty rows remain legal.
+  sequence_context: true  # Observed/full residue correspondence for structural and frozen-model assets.
+  covalent_environment: true  # Fixed chemical neighbor counts, not trainable messages.
+  atomic_sasa: true  # Protein-only atom solvent-accessible area.
+  sasa_probe: 1.4  # Solvent probe radius in Å.
+  sasa_samples: 960  # Same deterministic sphere quadrature as DNA @9.
+  residue_graph: true  # Heavy-contact and independent alpha-carbon residue graphs.
+  residue_contact_radius: 8.0  # Heavy-atom residue contact cutoff in Å.
+  residue_surface_radius: 12.0  # Direct residue/surface association cutoff in Å.
+  residue_ca_radius: 12.0  # Independent alpha-carbon spatial support in Å.
+  residue_ca_k_max: 32  # Directed alpha-carbon neighbor budget before undirected union.
+  surface_environment: true  # Same masked depth, occlusion and free-space geometry used by V15.
+  environment_options:  # Fixed structural approximation; never consumes Zn or local targets.
+    spacing: 1.0  # Grid-cell side length in Å.
+    probe: 1.4  # Solvent radius in Å.
+    rays: 64  # Deterministic hemispherical quadrature count.
+    horizons: [4.0, 15.0]  # Near/far observation distances in Å.
+    offset: 0.2  # Outward ray-origin displacement in Å.
+    association_radius: 8.0  # Maximum center-to-wall association distance in Å.
+    maximum_voxels: 18000000  # Hard memory guard; never silently coarsen the surface.
+    hull_directions: 96  # Expanded-sphere envelope supporting directions.
+  surface_local_graph: true  # Normal/chord-filtered local point topology.
+  surface_graph_resolution: 1.0  # Physical coherence-rule scale in Å.
+  spectral_modes: 256  # Extended fixed spectral asset; the base remains at 128 modes.
+  surface_view: true  # Alternate deterministic discretization with its own operators.
+  view_id: 1  # Fixed Fibonacci phase/grid offset.
+  view_resolution: 1.0  # Same alternate point spacing in Å as DNA @9.
+  structure_tokens: false  # ESM-2 does not require 3Di tokens; SaProt remains opt-in.
+  protein_models: {file: ../../../data/models}  # Same pinned local model manifest as the DNA recipe.
+  protein_model_kinds: [esm2]  # Generate only the selected frozen residue encoder.
+  protein_static_tables: false  # Do not export unused input-table initialization prototypes.
+  external_device: cuda  # Respect LF's granted logical GPU; no physical ordinal is chosen.
+  atomic_checkpoint: {file: ../../../data/external-models/slae/autoencoder.ckpt}  # Same reviewed base SLAE weights as the current enriched DNA dataset.
+  atomic_device: cuda  # Sequential isolated SLAE extraction on the granted device.
+# ZincPreprocessing.run defaults: skip=false, design=null, dataset_name="wisdom-zinc",
+# dataset_version="1", training_subset="full", workers=8 (>0), progress_log_seconds=120 (>0),
+# verbose=false. legacy_train/validation/test/positives/negatives/all=null; enabling legacy requires
+# all five split/label inputs, excludes design, and forbids training_subset other than full.
+# legacy_all is optional. No discovery, balancing, homology grouping, sampling or resplitting runs.
+# Current RCSB bytes are frozen durably; no identity to the TFG's original coordinates is claimed.
+# Unsupported positive local GT and negative/contact contradictions are masked, never relabelled.
+# Base defaults: surface_resolution=1, probe_radius=1.4, atom_spatial_radius=6,
+# surface_atom_radius=6 Å (>0), atom_spatial_k_max=32, surface_atom_k_max=32,
+# diffusion_spectral_modes_max=128, surface_neighbor_k_max=24 (positive counts),
+# curvature_scales=[2.5,5] (increasing positive), positive_gap=1.4, negative_gap=3 Å
+# (0<=positive_gap<negative_gap), sensitivity_gaps=[1,1.4,2] (nonempty positive Å cutoffs).
+# Structural defaults: atomic_context=false, source_quality=true, extended_surface_atom=false,
+# extended_radius=12 Å, extended_k_max=96; sequence_context=false, covalent_environment=false,
+# atomic_sasa=false, sasa_probe=1.4 Å, sasa_samples=960 (>=24); residue_graph=false,
+# residue_contact_radius=8 Å, residue_surface_radius=12 Å, residue_ca_radius=null,
+# residue_ca_k_max=32; surface_environment=false, environment_options=null. When enabled,
+# SurfaceEnvironment defaults equal the eight explicit values above; lengths/counts are positive.
+# surface_local_graph=false, surface_graph_resolution=1 Å; spectral_modes=null (positive if set),
+# surface_view=false, view_id=1 (>=0), view_resolution=null (base spacing, or positive Å).
+# Frozen-model defaults: structure_tokens=false, protein_models=null, protein_model_kinds=null
+# (all esm2/esmc/saprot when a bundle is supplied), protein_static_tables=true. A nonempty unique
+# explicit kind list limits acquisition/extraction. external_model=null (esm2/esmc/saprot),
+# external_checkpoint=null, external_identifier/revision="", external_layer=-1,
+# external_maximum_length=1022 (>0 residues), external_device=cpu,
+# external_sequence_policy=fragments (or complete), static_embedding_table=false.
+# Bundle and single-model inputs are mutually exclusive. atomic_checkpoint=null disables SLAE;
+# atomic_device=cpu is its default. The selected CUDA tool runtime requires bootstrap/GPU access.
+resources:  # Per-Work allocation; CPU processes and frozen encoders stay within this grant.
+  gpu: 1  # One logical accelerator for ESM-2 and isolated SLAE; no training is performed.
+  cpu: 12  # Matches the maximum geometry-worker count.
+  memory: 96GiB  # Bounded parallel structural grids and model-host state.
+  storage: 200GiB  # Durable sources, geometry, optional assets and immutable publication.
+  time: 168h  # Safety ceiling; successful per-protein checkpoints resume on recovery.
+# LF resource defaults: cpu=1 (>0), gpu=0 (>=0); memory/storage/time/processes/gpu_memory optional.

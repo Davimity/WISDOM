@@ -4,7 +4,7 @@ import torch
 
 from torch import Tensor
 from typing import Any, cast
-from wisdom.models.PoolingType import PoolingType
+from wisdom.models.pooling.PoolingType import PoolingType
 
 
 class SurfaceFaithfulnessAudit:

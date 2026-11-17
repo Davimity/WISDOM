@@ -11,9 +11,9 @@ from test_wisdom_v2 import _v2
 from test_v8_architectures import batch, model as historical_model
 from lambdaforge.work import WorkConfig, WorkRunner
 from wisdom.Training import _model_inputs, _create_model
-from wisdom.models.FeedbackPropagationMode import FeedbackPropagationMode
-from wisdom.models.SurfaceAtomFeedback import SurfaceAtomFeedback
-from wisdom.models.PostFeedbackPropagation import PostFeedbackPropagation
+from wisdom.models.architecture.FeedbackPropagationMode import FeedbackPropagationMode
+from wisdom.models.communication.SurfaceAtomFeedback import SurfaceAtomFeedback
+from wisdom.models.architecture.PostFeedbackPropagation import PostFeedbackPropagation
 
 
 MODES = [f"d{index}" for index in range(9)]

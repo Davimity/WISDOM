@@ -51,9 +51,12 @@ class ZincAnnotation:
             base: Immutable universal protein-only NPZ with point coordinates and source origin.
             output: Native checkpoint build destination for pickle-free annotation NPZ.
             row: Verified selected record, sites, label, assembly transform and split provenance.
+                Explicit legacy_tfg_manifest records preserve historical global labels; absent
+                positive references or contacts contradicting a negative produce unavailable GT.
 
         Raises:
-            ValueError: Missing accepted site, invalid transform, or observed Zn in base inputs.
+            ValueError: Missing accepted site outside the historical protocol, invalid transform,
+                or observed Zn in base inputs. Modern negatives cannot contradict Zn contacts.
         """
         with np.load(base, allow_pickle=False) as archive:
             metadata = json.loads(str(archive["metadata_json"].item()))
@@ -69,11 +72,28 @@ class ZincAnnotation:
         count = len(points)
         label = int(row["label"])
         sites = [site for site in row["sites"] if site["accepted"]]
+        legacy = row["label_evidence"].get("kind") == "legacy_tfg_manifest"
 
         # Coordinating atoms belong to the selected copy, not an adjacent binding partner.
         # Their positions are GT-only evidence; no projection/classifier reads this sidecar.
 
-        if label == 1:
+        # Historical protein labels are never repaired from today's structure. Unsupported
+        # positive sites or a contact contradicting a negative disable local evaluation only.
+
+        contradictory_contact = any(site["selected_donor_count"] for site in row["sites"])
+        quality = row.get("legacy_coordinate_quality", {})
+        no_occupied_atoms = quality.get("occupied_heavy_atoms") == 0
+        if legacy and (no_occupied_atoms or (label == 1 and not sites) or
+                       (label == 0 and contradictory_contact)):
+            gap = np.zeros(count, dtype=np.float32)
+            zinc_gap = np.zeros(count)
+            hard = np.zeros(count, dtype=np.bool_)
+            soft = np.zeros(count)
+            valid = np.zeros(count, dtype=np.bool_)
+            sensitivity = np.zeros((count, len(self.sensitivity_gaps)), dtype=np.bool_)
+            distance_valid = np.zeros(count, dtype=np.bool_)
+            available = False
+        elif label == 1:
             if not sites:
                 raise ValueError("positive Zn annotation requires verified assembly sites")
             donors = {tuple(atom["position"]): atom for site in sites for atom in site["partners"]
@@ -107,7 +127,7 @@ class ZincAnnotation:
             sensitivity = np.zeros((count, len(self.sensitivity_gaps)), dtype=np.bool_)
             distance_valid = np.zeros(count, dtype=np.bool_)
             available = True
-        if label and not available and row["split"] in ("validation", "test"):
+        if label and not available and row["split"] in ("validation", "test") and not legacy:
             raise ValueError(f"{row['identifier']}: positive evaluation member has no usable GT; "
                              "revise Selection explicitly; never create all-negative positive GT")
         # Preserve Zn-center references as a separately named diagnostic. For explicit negatives
@@ -154,7 +174,8 @@ class ZincAnnotation:
             base: Corresponding immutable protein-only NPZ.
 
         Returns:
-            True after schema, point-order fingerprint and numerical checks.
+            True after schema, point-order fingerprint and numerical checks. Historical records
+            without usable local reference must have empty masks and no fabricated targets.
 
         Raises:
             ValueError: Invalid hash, dtype, count, probability, mask, or sensitivity shape.
@@ -213,7 +234,13 @@ class ZincAnnotation:
                 raise ValueError("Zn reference and coordinating-atom gaps disagree")
             if sensitivity.dtype != np.bool_ or archive["surface_distance_valid"].dtype != np.bool_:
                 raise ValueError("Zn sensitivity/distance masks must be Boolean")
-            if audit["label"]:
+            unavailable_legacy = (audit["label_evidence"].get("kind") == "legacy_tfg_manifest"
+                and not bool(archive["local_gt_available"].item())
+                and not archive["surface_distance_valid"].any())
+            if unavailable_legacy:
+                if hard.any() or soft.any() or valid.any() or sensitivity.any() or gap.any():
+                    raise ValueError("unavailable legacy Zn reference has fabricated local targets")
+            elif audit["label"]:
                 expected_hard = gap <= audit["positive_gap"]
                 expected_valid = (expected_hard | (gap >= audit["negative_gap"])) & bool(
                     archive["local_gt_available"].item())

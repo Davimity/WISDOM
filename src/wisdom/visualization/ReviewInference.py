@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import csv
 import copy
+import json
 import torch
 import lambdaforge as lf
 
@@ -14,10 +15,12 @@ from collections.abc import Mapping, Sequence
 from wisdom.data.WisdomDataset import WisdomDataset
 from wisdom.Training import _create_model, _evaluate
 from wisdom.data.WisdomCollator import WisdomCollator
-from wisdom.models.AtomicEncoderType import AtomicEncoderType
+from wisdom.evaluation.SurfaceMapAudit import SurfaceMapAudit
 from wisdom.visualization.ModelValidation import ModelValidation
+from wisdom.models.atomic.AtomicEncoderType import AtomicEncoderType
 from wisdom.visualization.ProteinReportPage import ProteinReportPage
-from wisdom.evaluation.SurfacePredictionReport import SurfacePredictionReport
+from wisdom.data.AtomicStructuralInputs import AtomicStructuralInputs
+from wisdom.visualization.predictions.SurfacePredictionReport import SurfacePredictionReport
 
 
 class ReviewInference:
@@ -172,6 +175,7 @@ class ReviewInference:
         batch_size            : int,
         data_workers          : int,
         strict_checkpoints    : bool,
+        view_audit            : Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Evaluate a source-independent list of exact checkpoint descriptors and publish HTML.
 
@@ -196,6 +200,7 @@ class ReviewInference:
             batch_size: Positive protein count per forward batch, independent of training batch.
             data_workers: Nonnegative decoding processes; no training workers or optimizer.
             strict_checkpoints: Missing checkpoint fails if true, otherwise recorded and skipped.
+            view_audit: Optional frozen V12 audit options; maximum_proteins defaults sixteen.
 
         Returns:
             Source, model count, missing checkpoints and presentation-byte summary.
@@ -256,6 +261,9 @@ class ReviewInference:
             )
             override = state.get("inference_state", {}).get("gate_override", override)
             model.semantic_gates.set_override(override)
+            if "semantic_gate_state" in state.get("inference_state", {}):
+                model.semantic_gates.restore_inference_state(
+                    state["inference_state"]["semantic_gate_state"])
             precision = parameters.get("precision", "auto")
             bf16 = device.type == "cuda" and torch.cuda.is_bf16_supported()
             if precision == "auto":
@@ -269,10 +277,20 @@ class ReviewInference:
                     dataset,
                     split,
                     surface_features=tuple(state.get("surface_features", ())),
+                    structural_assets=tuple(sorted(set(state.get("structural_assets", ()))
+                        | ({"surface_view"} if view_audit is not None and
+                           tuple(view_audit.get("protocols", ("published",))) ==
+                           ("published",) else set()))),
+                    extended_asset_radius=(state["model_parameters"]["surface_atom_radius"]
+                        if state["data_parameters"].get("transfer_source") == "extended" else None),
+                    extended_asset_k=(state["data_parameters"]["surface_atom_k"]
+                        if state["data_parameters"].get("transfer_source") == "extended" else None),
                     subset=parameters.get("subset", "full"),
                     include_surface_targets=True,
                     include_surface_geometry=(
                         int(state["model_version"]) == 3
+                        or view_audit is not None
+                        or state["data_parameters"].get("surface_graph_source") == "filtered"
                         or state["model_parameters"].get("surface_refiner_type", "none")
                         not in {"none", "heat", "learned_heat"}
                     ),
@@ -295,6 +313,11 @@ class ReviewInference:
                     )
                 if not len(data):
                     continue
+                if model.atomic_encoder_type is AtomicEncoderType.STRUCTURAL_GLOBAL:
+                    data.atomic_structure_paths = AtomicStructuralInputs(
+                        state["data_parameters"]["atom_spatial_k"],
+                        state["model_parameters"].get("atomic_maximum_pairwise_bytes", 134_217_728),
+                    ).prepare(work, (record[0] for record in data.records))
                 output = root / str(len(audits))
                 collector = SurfacePredictionReport(
                     data,
@@ -313,6 +336,7 @@ class ReviewInference:
                     batch_size=batch_size,
                     shuffle=False,
                     num_workers=data_workers,
+                    worker_init_fn=WisdomCollator.initialize_worker,
                     collate_fn=WisdomCollator(**state["data_parameters"]),
                 )
                 work.log(
@@ -322,6 +346,28 @@ class ReviewInference:
                 with torch.inference_mode():
                     protein, surface = _evaluate(model, loader, device, autocast_dtype, collector)
                 statistics = ModelValidation._statistics(collector, prediction_threshold)
+                if view_audit is not None:
+                    # A predeclared deterministic prefix limits audit cost, not ordinary metrics.
+                    # The alternate view has its own operators; local GT is never reindexed.
+
+                    options = dict(view_audit)
+                    maximum = int(options.pop("maximum_proteins", 16))
+                    auditor = SurfaceMapAudit(**options)
+                    count = min(maximum, len(data)) if maximum else len(data)
+                    view_rows = {}
+                    for index in range(count):
+                        sample = data[index]
+                        work.log(f"Frozen view audit {index + 1}/{count}: {sample['identifier']}")
+                        view_rows[str(sample["identifier"])] = auditor.evaluate(
+                            model, dict(sample), WisdomCollator(**state["data_parameters"]),
+                            device, work, data.records[index][0])
+                    (output / "view-audit.json").write_text(json.dumps(view_rows, indent=2))
+                    for metric in next(iter(view_rows.values()), {}):
+                        supported = [row[metric] for row in view_rows.values()
+                                     if isinstance(row[metric], (int, float))]
+                        if supported:
+                            work.metrics.log(f"view_{len(audits)}_{split}_{metric}",
+                                             sum(supported) / len(supported))
                 chosen, reasons = self.proteins(
                     statistics, policy, maximum_proteins, prediction_threshold
                 )
@@ -344,6 +390,7 @@ class ReviewInference:
                     feature_loader = DataLoader(
                         display_data, batch_size=batch_size, shuffle=False,
                         num_workers=data_workers,
+                        worker_init_fn=WisdomCollator.initialize_worker,
                         collate_fn=WisdomCollator(**state["data_parameters"]),
                     )
                     work.log(

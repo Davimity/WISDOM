@@ -9,8 +9,9 @@ from urllib.parse import parse_qs, urlsplit
 
 import pytest
 import yaml
+from lambdaforge.work.checkpoints import CheckpointCollection
 
-from wisdom.preprocessing.zinc import discovery
+from wisdom.preprocessing.zinc.stages import discovery
 from wisdom.preprocessing.zinc.ZincDiscovery import ZincDiscovery
 from wisdom.preprocessing.zinc.ZincSelection import ZincSelection
 
@@ -45,14 +46,15 @@ def test_shared_discovery_owns_native_map_query_and_raw_evidence(tmp_path, monke
     root = tmp_path / "raw"
     root.mkdir()
     digest = hashlib.sha256(query.read_bytes()).hexdigest()
-    negatives = [{"identifier": "3NEG_A", "label": 0, "structure_sha256": digest}]
+    negatives = [{"identifier": "3NEG_A", "label": 0, "structure_sha256": digest,
+                  "sequence": "ACDE"}]
     monkeypatch.setattr(discovery, "load_evidence", lambda path: negatives)
     monkeypatch.setattr(
         discovery,
-        "candidates_for_entry",
-        lambda work, pdb, **parameters: [
+        "inspect_entry",
+        lambda entry, **parameters: [
             {
-                "identifier": pdb.upper() + "_A",
+                "identifier": entry["pdb_id"].upper() + "_A",
                 "label": 1,
                 "structure_sha256": digest,
                 "assembly_alternatives": [{"accepted_sites": 1}],
@@ -66,31 +68,31 @@ def test_shared_discovery_owns_native_map_query_and_raw_evidence(tmp_path, monke
         calls.append((items, options))
         return [function(item) for item in items]
 
-    def checkpoint(key, build):
-        """Use real receipt builders without any public acquisition."""
-        path = tmp_path / "checkpoints" / key
-        path.parent.mkdir(parents=True, exist_ok=True)
-        build(path)
-        return path
-
     work = SimpleNamespace(
         cache=Mock(),
         outputs=Mock(),
         log=Mock(),
         resume_map=resume_map,
-        checkpoints=SimpleNamespace(file=checkpoint),
+        checkpoints=CheckpointCollection(tmp_path / "checkpoints"),
     )
     work.cache.fetch.return_value = query
     work.outputs.directory.return_value = root
     result = discovery.discover_candidates(
-        work, negative, "release-test", maximum_entries=1, acquire_functional_metadata=False
+        work, negative, "release-test", maximum_entries=1, acquire_functional_metadata=False,
+        minimum_negative_sequences=1,
     )
     assert result["raw_path"] == root / "raw.jsonl"
     assert result["positive_candidates"] == result["explicit_negatives"] == 1
     assert calls[0][0] == ["1abc"]
-    assert calls[0][1]["name"] == "zinc-discovery"
+    assert calls[0][1]["name"] == "zinc-coordinate-downloads"
     assert calls[0][1]["executor"] == "thread"
     assert calls[0][1]["workers"] == 8
+    assert calls[1][1]["name"] == "zinc-discovery-source-v2"
+    assert calls[1][1]["executor"] == "process"
+    assert calls[1][1]["key"](calls[1][0][0]) == f"1abc:{digest}:3.0:0.5:2:2"
+    assert calls[1][0][0]["pdb_id"] == "1abc"
+    assert Path(calls[1][0][0]["path"]).read_bytes() == query.read_bytes()
+    assert calls[1][0][0]["path"].scope == "checkpoint"
     rows = [json.loads(line) for line in result["raw_path"].read_text().splitlines()]
     assert [row["label"] for row in rows] == [1, 0]
     assert json.loads((root / "provenance.json").read_text())["pilot"] is True
@@ -120,6 +122,9 @@ def test_shared_discovery_owns_native_map_query_and_raw_evidence(tmp_path, monke
         acquire_functional_metadata=False,
         snapshot_label="another-label",
         started_at="later",
+        structure_executor="thread",
+        progress_log_seconds=60,
+        minimum_negative_sequences=1,
     )
     second = json.loads((root / "provenance.json").read_text())
     assert first["snapshot_id"] == second["snapshot_id"]
@@ -141,7 +146,8 @@ def test_shared_discovery_owns_native_map_query_and_raw_evidence(tmp_path, monke
     root.mkdir()
     work.outputs.directory.return_value = root
     discovery.discover_candidates(
-        work, negative, "changed-session", maximum_entries=1, acquire_functional_metadata=False
+        work, negative, "changed-session", maximum_entries=1, acquire_functional_metadata=False,
+        minimum_negative_sequences=1,
     )
     assert json.loads((root / "provenance.json").read_text())["snapshot_id"] != first["snapshot_id"]
 
@@ -181,4 +187,4 @@ def test_complete_zinc_yaml_has_five_native_steps_and_no_preexisting_dataset_loo
     assert steps[2]["with"]["design"] == {"from": "select.zinc-design"}
     assert steps[3]["with"]["dataset"] == {"from": "preprocess.dataset"}
     assert steps[4]["with"]["dataset"] == {"from": "preprocess.dataset"}
-    assert steps[4]["with"]["skip"] is False
+    assert steps[4]["with"]["skip"] is True  # The optional gallery is disabled in this recipe.

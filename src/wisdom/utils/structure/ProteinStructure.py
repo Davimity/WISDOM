@@ -28,7 +28,16 @@ class ProteinStructure:
         """
         self.path      = path
         self._mmcif_bytes = mmcif_bytes
-        block = gemmi.cif.read_string(mmcif_bytes.decode()).sole_block() if mmcif_bytes else None
+
+        # A single Gemmi CIF block supplies both coordinates and metadata. Large depositions
+        # must not be parsed twice merely to read method/year after constructing the structure.
+
+        name  = path.name.lower()
+        block = None
+        if mmcif_bytes is not None:
+            block = gemmi.cif.read_string(mmcif_bytes.decode()).sole_block()
+        elif name.endswith((".cif", ".mmcif", ".cif.gz", ".mmcif.gz")):
+            block = gemmi.cif.read(str(path)).sole_block()
         self.structure = (
             gemmi.make_structure_from_block(block) if block is not None
             else gemmi.read_structure(str(path))
@@ -47,9 +56,7 @@ class ProteinStructure:
         method     = "unavailable"
         dates      : tuple[str | None, ...] = ()
 
-        name = path.name.lower()
-        if block is not None or name.endswith((".cif", ".mmcif", ".cif.gz", ".mmcif.gz")):
-            block  = block if block is not None else gemmi.cif.read(str(path)).sole_block()
+        if block is not None:
             method = str(block.find_value("_exptl.method") or "unavailable").strip("'\"")
             dates  = (
                 block.find_value("_pdbx_database_status.recvd_initial_deposition_date"),

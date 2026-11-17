@@ -1,316 +1,323 @@
-# WISDOM experiment index
+# Experiment catalogue
 
-## Optional task and surface-representation controls
+Use the [main README](../README.md) for installation, dataset contracts and execution commands.
+The [scientific report](../docs/WISDOM-memoria.pdf) explains hypotheses, controls, results and
+decision criteria. Exact values and unresolved prerequisites live next to the fields in each YAML.
+No catalogue entry proves an improvement, a closed scientific comparison or available checkpoints.
 
-`preprocess/zinc/zinc_preprocess.yaml` runs acquire/select → preprocess → visualize without requiring
-a negative-evidence file. QuickGO experimental NOT annotations and exact UniProt/PDB sequence mappings
-provide conservative negatives; a reviewed JSONL may override acquisition. Sparse evidence can still
-prevent both-class independent splits; no ligand-absence fallback exists. It publishes a frozen
-portable design, universal geometry, Zn
-evaluation sidecars and an offline gallery. Selection's `skip`/`existing_design` reuses the exact
-saved decision without downloads or clustering. `preprocess/zinc/zinc_discovery.yaml` remains an
-optional acquisition-only action; its raw evidence can replace fresh acquisition through `raw_path`.
-`preprocess/zinc/validate_zinc.yaml`
-independently audits the published scientific contract. No Zn DatasetVersion is bundled or claimed
-to have been validated experimentally. See both public README versions, section 3.7, for evidence
-requirements, thresholds and limitations.
+## 1. Dataset preparation
 
-`preprocess/common/surface_features.yaml` adds optional fixed protein-only fields and per-training-view normalization to
-an existing DatasetVersion, without replacing geometry or task annotations.
-`ablations/surface_representation/surface_representation_ablation.yaml` compares five configurations: learned control, and explicit
-or late-hybrid evidence with generic_minimal or generic_basic fields, using four paired seeds.
-The logit-only MAX pooler, backbone configuration, protein-only objective and sealed-test policy remain
-fixed. Publish the feature-augmented DatasetVersion first; neither missing inputs nor missing
-Registry versions are replaced with fake scientific data. See README sections 4.10 and 5.11.
-The secondary `ablations/surface_representation/attention.yaml` repeats the alternatives with
-Attention, whose scorer parameter count changes with H/X/Z width; it is not the primary control.
-The corrected field release is `wisdom-dna-features@2`; older field sidecars retain their historical
-meaning. DNA preparation proposes version 7, while existing training ledgers remain on reduced @6.
+| Directory | Purpose |
+|---|---|
+| `preprocess/dna` | Select/freeze DNA evidence, build the managed representation, audit and inspect it |
+| `preprocess/zinc` | Acquire explicit Zn evidence, select/freeze it, build, validate and visualize |
+| `preprocess/zinc/zinc_legacy_preprocess.yaml` | Preserve the TFG's 450 Zn members, labels and splits with the current geometry/ESM-2/SLAE assets; no selection |
+| `preprocess/enrich_structures.yaml` | Attach declared assets to a compatible immutable representation |
+| `preprocess/enrich_physics.yaml` | Recover/publish historical strict physical `@1`, retaining SLAE/structural assets |
+| `preprocess/enrich_physics_bounded.yaml` | Publish bounded-completion physical `@2`, re-admitting unchanged strict fields without solves |
 
-These actions are independent of the ordered architectural campaign below. They do not renumber
-its stages or imply that the historical Zn dataset is a valid transfer benchmark.
+Preprocessing compositions are intentional exceptions to single-Work training studies. Read the
+`skip` recipes before launching: the DNA recipe currently reuses a design and keeps train-25.
+Enrichment is not equivalent to recomputing geometry with changed settings. A new dataset version
+does not silently replace the immutable version named by a historical experiment.
 
-Post-hoc inference-only reviews live separately in [reviews/](reviews/README.md).
-They consume registered LF Studies or durable ModelSets, not training orchestration steps.
-No automatic winner product is declared for baseline diagnostics.
+## 2. Training stages
 
-This directory distinguishes two different meanings that must never be conflated:
+| Stage | Question and controlled change |
+|---|---|
+| `v1` | Baseline seed variation; `v1a` varies full seeds, `v1b` fixes initialization, `v1c` fixes later randomness |
+| `v2` | Initialization and early optimization stability |
+| `v3` | Optimization policies and weight averaging |
+| `v4` | Core backbone hyperparameter optimization |
+| `v5` | Pooling: fixed/curriculum curves (`5a`), learned parameters (`5b`), surface refinement (`5c`) |
+| `v6` | Isolated weak surface constraints (`6a`–`6g`) and explicit mixtures (`6h`) |
+| `v7` | Protein/local prediction-head comparisons |
+| `v8` | Point geometry, real/null feedback, vector controls and post-feedback propagation |
+| `v9` | Atomic-encoder comparisons with the reviewed single-pass surface context fixed |
+| `v10` | Atom/residue representations, chemical context and declared external-model inputs |
+| `v11` | Atom-to-surface summaries, values, heads and candidate support |
+| `v12` | Frozen isolated tensor/rebuilt rotations, phase, grid and resolution audits; no fitting |
+| `v13` | Spectral budgets, simultaneous scales, local branches and explicit encoder/confirmation YAMLs |
+| `v14` | Context width, optional frozen atomic SLAE, physical CA graphs, source removal and bounded communication |
+| `v15` | Isolated masked travel depth, ray occlusion, associated empty-space radii and a provisional combination |
+| `v16` | Small/current references, bounded numerical HPO and prospectively frozen confirmation sheets |
+| `vn1` | Matched C0–C7 matrices with/without ESM, coverage pilot and two secondary controls |
+| `vf` | Physical reconstruction controls and from-scratch auxiliary-loss pilot; no external descriptors, no test |
 
-- a **construction stage** is an experiment used to decide one part of the first frozen WISDOM
-  model; and
-- a **scientific version** is a later, coherent model generation that answers a new biological or
-  methodological question.
+The V14/V15 continuation fixes `transfer_options: {message: low_rank, rank: 16}` from V11b,
+with short 16/4 support, one DiffusionNet reading, its gradient descriptor, 32 base modes,
+MAX/Heat6 and regional existence 0.3. Every cell preserves that policy, including complete
+surface mappings in environment sweeps. This is a provisional reference, not confirmation of
+a combined winner. Mean/dispersion, shared value projections, wider support, extra diffusion
+readings and gradient removal are not silently combined. The report records their evidence
+and remaining confirmation questions. Publish the authored `@9` or SLAE dataset before launch.
 
-Files use short ordered names (`v1/wisdom_v1a.yaml`, `v1/wisdom_v1b.yaml`, ..., `v10/wisdom_v10.yaml`) so the
-campaign is easy to scan. Here `v6a`, for example, is only an experiment-order label. The
-`model_version` argument is a separate internal code-capability selector, and neither label claims
-that a formal scientific WISDOM generation has already been validated.
 
-## Execution order
+From V14b–f through V15, the fixed input policy uses ESM-2 context projection 64 and
+SchNet hidden state 128 (output 128), following the V14a 64/128 development selection.
+V14a/a2 keep their executed configurations. Swept representation mappings repeat context 64;
+the SLAE-only control remains without ESM-2 and its independent atomic projection stays 32.
+Do not reinterpret a constructor default of context 32 as this selected override. There is no
+automatic V16 winner: its new recipes retain 64/128 and the report's compact 16/64 control.
+V16a and V16c vary those widths explicitly; no earlier seeds or scientific designs change.
 
-| Order | File | Scientific question | Prerequisites | What varies | Decision metric | Next experiment |
-|---:|---|---|---|---|---|---|
-| 1a | `v1/wisdom_v1a.yaml` | How variable and failure-prone is the untouched baseline? | Dataset registered | Complete run seed | Distribution of `val_wisdom_hpo_score` plus collapse diagnostics | 1b |
-| 1b | `v1/wisdom_v1b.yaml` | How much variance comes from training randomness with identical initial weights? | Relevant variance in 1a | Training RNG only | Variance decomposition; no winner | 1c |
-| 1c | `v1/wisdom_v1c.yaml` | How much variance comes from initial weights with fixed training randomness? | Same baseline as 1b | Initialization RNG only | Complementary variance control; no winner | 2 |
-| 2 | `v2/wisdom_v2.yaml` | Which initialization policy is stable on the unchanged backbone? | 1a–1b reviewed | `initialization_profile` | `val_wisdom_hpo_score`, collapse rate, diagnostics | 3 |
-| 3 | `v3/wisdom_v3.yaml` | Which optimizer stabilization complements the selected initialization? | Initialization winner | `optimization_profile` | `val_wisdom_hpo_score`, stability, runtime | 4 |
-| 4 | `v4/wisdom_v4.yaml` | Which width, depth, topology, and regularization define the strongest fixed-MAX core? | Initialization and optimizer winners copied into `with` | Core model and AdamW hyperparameters | `val_wisdom_hpo_score` | 5 |
-| 5a | `v5/wisdom_v5a.yaml` | How do fixed pooling families behave across their parameter curves? | Existing V5 ledger frozen exactly | Family, point/area measure, applicable fixed parameter | G, S, coupling, regret, seed stability, faithfulness, cost | 5b |
-| 5b | `v5/wisdom_v5b.yaml` | Does scalar adaptation improve the selected fixed family reference? | Same frozen ledger and four paired seeds as 5a | Five learned scalars, one selected start/measure each | Same metrics plus parameter trajectories | 5c |
-| 5c | `v5/wisdom_v5c.yaml` | Does evidence coherence improve localization/classification? | Same frozen V5 ledger; retained MAX/LSE/Attention | Eight refiner types, ten settings × three poolers × four seeds = 120 Runs | Refined S, G, raw S/gain, negative controls, ranking, coupling and cost | Isolated priors in 6a–6g; Heat interactions in 6f/g |
-| 6a | `v6/wisdom_v6a.yaml` | negative (frozen) | Frozen V5c backbone; Heat6 | Three poolers × negative lambda | G/S, raw/gain, negative mass/peak, regret, seeds and cost | Individual evidence for 6h |
-| 6b | `v6/wisdom_v6b.yaml` | existence (frozen) | Frozen V5c backbone; Heat6 | Three poolers × existence lambda | G/S, raw/gain, negative mass/peak, regret, seeds and cost | Individual evidence for 6h |
-| 6c | `v6/wisdom_v6c.yaml` | regional positive | Frozen V5c backbone; Heat6 | Three poolers × regional lambda; length 2.5 Å | G/S, raw/gain, negative mass/peak, regret, seeds and cost | Individual evidence for 6h |
-| 6d | `v6/wisdom_v6d.yaml` | regional ranking | Frozen V5c backbone; Heat6 | Three poolers × ranking lambda; length 2.5 Å; margin .5 | G/S, raw/gain, negative mass/peak, regret, seeds and cost | Individual evidence for 6h |
-| 6e | `v6/wisdom_v6e.yaml` | cardinality | Frozen V5c backbone; Heat6 | Three poolers × lambda × conditional lower mass; no upper bound | G/S, raw/gain, negative mass/peak, regret, seeds and cost | Individual evidence for 6h |
-| 6f | `v6/wisdom_v6f.yaml` | TV | Frozen V5c backbone; none / Heat6 | Three poolers × TV lambda × refiner | G/S, raw/gain, negative mass/peak, regret, seeds and cost | Individual evidence for 6h |
-| 6g | `v6/wisdom_v6g.yaml` | Dirichlet | Frozen V5c backbone; none / Heat6 | Three poolers × Dirichlet lambda × refiner | G/S, raw/gain, negative mass/peak, regret, seeds and cost | Individual evidence for 6h |
-| 6h | `v6/wisdom_v6h.yaml` | exploratory weak-loss mixtures | Frozen V5c/Heat6; V6a–V6f report reviewed, V6g pending | 18 exact candidates × three poolers × four seeds = 216 Runs; core interactions and all-family stress | G/S, raw/gain, negative mass/peak, regret, seeds, term activation and cost | Fresh-seed confirmation before 7 |
-| 7 | `v7/wisdom_v7.yaml` | Which global/local head relationship is accurate and faithful? | Selected weak-loss policy copied into `with` | `head_type` | `val_wisdom_hpo_score` and faithfulness | 8 |
-| 8a | `v8/wisdom_v8a.yaml` | Does existing point geometry improve candidate-specific transfer? | MAX R Single and Attention NRK FiLM, complete frozen lines | 2 architectures × 2 lines × 4 seeds = 16 Runs | Same-line/seed S/G and cost; cluster 12, one GPU | Independent of 8b/8c |
-| 8b | `v8/wisdom_v8b.yaml` | Does returned surface information help beyond depth/nominal capacity? | Same two frozen V7 lines | 4 architectures × 2 lines × 4 seeds = 32 Runs | Same-line bidirectional vs depth and matched control; cluster 16, one GPU | Independent of 8a/8c |
-| 8c | `v8/wisdom_v8c.yaml` | Does vector-mediated scalar enrichment help? | Same two frozen V7 lines | 3 architectures × 2 lines × 4 seeds = 24 Runs | Same-line/seed S/G, invariance and cost; cluster 16, one GPU | Independent of 8a/8b |
-| 8d | `v8/wisdom_v8d.yaml` | Does atomic propagation after feedback help beyond depth, extra GNN and local capacity? | Exact exported V8b MAX R Single / Attention NRK FiLM, 4+4 surface blocks | Main D3–D6 × two lines × four seeds = 32 new Runs; D0–D8 implemented | S at G-selected checkpoints, paired D5−D3/D6 and cost; real feasibility pending | Attribution D7/D8, explicit compact budgets, independent confirmation |
-| 9a | `v9/wisdom_v9a.yaml` | Classical atomic propagation | Frozen MAX R Single / Heat6, not an assumed V8 winner | 10 profiles × 4 new seeds | Same-seed S at G-selected checkpoints, G, stability and cost | Review feasibility and shortlist |
-| 9b | `v9/wisdom_v9b.yaml` | Edge-conditioned messages | Same frozen context | 7 profiles × 4 seeds | Same paired criteria | Independent of 9a |
-| 9c | `v9/wisdom_v9c.yaml` | Aggregation and sparse attention | Same frozen context | 9 profiles × 4 seeds | Same paired criteria | Independent of 9a/9b |
-| 9d | `v9/wisdom_v9d.yaml` | Radial and directional propagation | Same frozen context; explicit triplet/support guards | 6 profiles × 4 seeds | Same paired criteria plus feasibility | Review without silent truncation |
-| 9e | `v9/wisdom_v9e.yaml` | Persistent vectors and latent coordinates | Same frozen context; physical geometry unchanged | 5 profiles × 4 seeds | Same paired criteria plus symmetry/displacement | Independent family comparison |
-| 9f | `v9/wisdom_v9f.yaml` | Sparse versus global structural attention | Same frozen context; approved bounded dense exception | 6 profiles × 4 seeds | Same paired criteria plus quadratic-memory feasibility | Review before capacity-matched follow-up |
-| 10 | `v10/wisdom_v10.yaml` | Does the frozen V1 result replicate on fresh seeds and held-out test data? | Final ledger from 9 | Fresh complete run seed | Uncensored metric distribution and one test evaluation per seed | Freeze V1 or return to the diagnosed experiment |
+After V14c, the seven pending V14d–f/V15 YAMLs select the CA-contact residue branch
+(`residue_graph: {mode: contact}`) as a development reference, retaining context 64,
+atomic state/output 128 and residue state 64 with two layers, radius 10 Å and K=16.
+V14d fixes that branch in all thirteen source removals and adds one contemporary
+no-branch control (15 configurations × four seeds = 60 Runs). Removing `external_context`
+zeros ESM-2 content before both the direct and residue-message routes; closing its gate
+alone would not remove both. V14e keeps six communication/control configurations and
+uses contacts in each communicating route. V14f confirms no branch, nodewise, contacts
+and null neighbor messages on its four fresh seeds (16 Runs). That confirmation did NOT support
+the contact branch's operational S improvement. The four V15 YAMLs now use the no-residue-graph
+reference, retaining 64/128, rank 16 and the same other controls. SLAE and feedback are not
+stacked into the default V16/VN01 reference. Historical V14 designs remain unchanged.
 
-Run experiments in this order, but do not run a conditional experiment merely because its YAML exists. Each
-file begins with `OBJECTIVE`, `PREREQUISITES`, `VARIES`, `FIXED`, and `DECISION`. Values marked
-`REPLACE` are an explicit decision ledger: copy the reviewed previous-stage winner before launch.
-V6a–V6g resolve the V5c ledger; V6h now declares provisional mixtures, not a confirmed winner.
-Later stages still require an explicit manual freeze, not silent winner selection.
-V8a–V8c each contain both researcher-reviewed V7 lines and use seeds 151/157/163/167: 72 Runs.
-Explicit conditional candidates keep each line's pooling/priors/head bound together. There are
-no sequential dependencies, pending-winner guard, extra combinations or automatically added seeds.
-Analyze within-line, within-seed architecture differences; a cross-line difference is not pooling-only.
-The old V8 campaign/reviewer are retained as .yaml.example authoring snapshots, not executable
-catalog entries. The three new reviewers use frozen validation checkpoints without retraining.
+Read `OBJECTIVE`, `PREREQUISITES`, `VARIES`, `FIXED` and `DECISION` at the beginning of each study.
+Later-stage shortlists are explicit provisional choices, not automatically imported winners.
+Review them against prior evidence before launching. V14/V15 require a newly published @9;
+V14b additionally requires the optional SLAE runtime and `enrich_atomic.yaml` publication.
+Each V12–V15 study fixes four model seeds across its alternatives; confirmation stages retain
+independent seed sets. V12 selects existing checkpoints, while its view seeds describe a separate
+geometry factor. The V14a 4x3 width grid now requires 48 Runs, not the initial 24-Run screen.
+The optional V13d solver, V14 triple feedback and V15 multi-probe/neck extensions are not silently
+enabled. V16b now disables ESM while retaining compact SchNet width 64 and learned identity
+tables. Its unchanged adaptive search spans three depths, dropout, learning rate and decay:
+up to 128 candidates/300 Runs/168h, adaptive development-seed replication and three finalists
+on three separate confirmation seeds. Curve pruning remains active. Start a new Study for this
+input-source change; the existing ESM Study and its Results are not edited. No new dataset is
+required. Review costs before launch.
+V16c/d ship reference values, NOT fictitious selected finalists; copy and document the reviewed
+upstream choices before treating those sheets as confirmation/freeze experiments. Test stays sealed.
 
-V9a–V9f compare 43 campaign cells, including repeated contemporary controls, with four new paired
-seeds (173/179/181/191): 172 mandatory Runs. They replace the former numerical-retuning proposal.
-Only the atomic encoder changes. The shared
-surface pipeline is initialized identically for each seed even when different atomic operators
-consume different random draws. LF public graph operators own all message/attention equations;
-WISDOM owns their scientific relations, source gates and invariant scalar interface.
-See root README §5.5.4 for precise adaptations and limits. In particular, V9f uses generic LF
-structural attention, not an original Graphormer path-edge recipe. The native inference reviewer
-under `v9/visualization` can inspect one explicit completed campaign without fitting.
+VN01 (`vn1/wisdom_vn1.yaml`) crosses R+/R− with no mining, top-K, memory and current FGW families:
+eight cells × four seeds = 32 full Runs. `wisdom_vn1a.yaml` repeats that matrix with ESM disabled,
+retaining learned atom/residue identity tables and every other setting, including the four seeds.
+`wisdom_vn1b.yaml` is the renamed ten-epoch coverage/intensity pilot (formerly VN1a);
+`wisdom_vn1c.yaml` adds point and distributed controls (formerly VN1b; eight Runs). Both renamed
+recipes retain ESM. Historical Results keep their original identities; never recover an old VN1a
+pilot using the new 32-Run VN1a ablation. New thresholds/K/lambda
+are pilot proposals requiring a common prospective decision. N2 uses LF's `optimal-transport`
+extra and requires chemically supported fixed surface attributes. N3 never invents a calibration
+partition: an absent independent reserve produces an unavailable audit, not a guarantee or a test
+leak. See the two main READMEs §4.6 for configuration, checkpoint and numerical contracts.
 
-The completed V8 audits do not establish a feedback-specific gain or a universal benefit from
-late vector augmentation. All six training Studies therefore explicitly disable these V8 routes
-and retain the single-pass MAX context. They request 2 GPUs, 36 CPUs and 96 GiB total host RAM;
-no `execution` block serializes native LF admission. Keep a small attention/FiLM follow-up with
-its own baseline separate from this 172-Run screen, rather than doubling every cell implicitly.
-See [the execution review](../docs/v9_execution_review.md) for the evidence and limitations.
+`enrich_structures.yaml` publishes @9 from @8 while preserving existing bytes; the full DNA
+recipe publishes the same version from the frozen design. Choose only one route per release.
+Both retain the reduced training population and do not replace historical study selectors.
+The obsolete standalone feature-ablation and sparse-concept experiment recipes were removed;
+the independent tested sparse-concept library remains available for deliberate post-hoc work.
+Selection/provenance JSON ledgers are retained because they preserve actual scientific choices,
+not execution scratch. No `.example` filename is presented as a runnable experiment.
 
-The later report protocol still requires real feasibility measurements, parameter/compute-matched
-follow-ups, equal retuning budgets and fresh confirmation after a reviewed shortlist exists.
-These initial YAMLs do not invent that shortlist, launch jobs, establish hardware fit or authorize
-test access. V10 must be explicitly rebound to the final reviewed configuration before use.
+Training files contain one executable Work, never sequential training `steps`. Paired sweeps must
+retain their declared candidates and seeds; adaptive HPO is a different design, not an equivalent
+way to save time on a fixed comparison. Native LF study extensions preserve the original evidence
+when adding compatible candidates; changing scientific parameters is not ordinary failed-Run recovery.
 
-Every training study is a single executable Work: none contains `steps`. Only the
-dataset-construction YAML composes sequential actions. Seven isolated V6 Studies share the frozen
-parent; V6h combines loss anchors and labels missing or weak evidence explicitly.
+### 2.1. V9f SchNet and V9g attention
 
-V8d is a new scientific design, not recovery or continuation of V8b. Its audited historical source
-is `execution-29c7fa9079512348`; its D0–D3 routes preserve old state keys/outputs. The main new
-factor is one/two independently weighted hidden-state atomic graph layers AFTER the existing
-area-weighted real/null feedback. An explicit nodewise D8 control approximately matches nominal
-two-layer parameters. `surface_stage_layers=null` retains 4+4; [2,2]/[3,1]/[1,3] are separate
-budget experiments, never silent OOM remedies. All local GT stays outside backward and checkpoint
-selection. See [the V8d audit](../docs/v8d_technical_review.md) and root README §5.5.3.
-Only synthetic tests/microbenchmarks have run; no real feasibility or scientific result is claimed.
+V9d compares molecular filters/directional messages; V9e compares vector states. New V9f isolates
+SchNet radial representation, internal state width and the existing five-metadata ablation. V9g
+is the former V9f sparse/global-attention campaign, with identical algorithms, candidates, seeds
+and resources. Historical `wisdom-v9f` results retain that name and their exact identities; use
+Execution IDs, not the old name, to review them. `v9/campaign_migration.json` embeds the exact
+legacy YAML text and its SHA-256. New SchNet uses the unambiguous Work name `wisdom-v9f-schnet`.
 
-## Why V1a, V1b and V1c have no `search`
+All cells fix 128 output channels, the original chemical inputs/graphs/transfer, four DiffusionNet
+blocks, MAX by points, Heat6, BCE+regional existence R=0.3, G-selected checkpoints, and evaluation-only
+local GT. All require seeds **173, 179, 181, 191**, without pruning or favorable-seed selection.
 
-V1a estimates the baseline distribution. V1b keeps epoch-zero weights identical and varies later
-training randomness; V1c varies initial weights while fixing later randomness. These are two
-separate studies with complementary controls. Adaptive HPO would censor precisely the failures and
-tail behavior these diagnostics measure. Their seed lists therefore expand into complete Runs with
-no pruning or winner.
+| Cell | Block | Encoder/metadata | Radial input | Internal channels |
+|---|---|---|---|---|
+| 01 | A | Contemporary full baseline | Original baseline | 128 |
+| 02–05 | A | SchNet full | Direct, RBF-8, RBF-16, RBF-32 | 128 |
+| 06–09 | B | SchNet full | Direct, RBF-8, RBF-16, RBF-32 | 64 |
+| 10–11 | C | SchNet restricted | Direct, RBF-16 | 128 |
+| 12–13 | C | SchNet restricted | Direct, RBF-16 | 64 |
 
-V10 follows the same principle for confirmation: all fresh seeds contribute to the final
-variance estimate, so it also has no `search` section.
+Cell 04 is the compatible V9d SchNet configuration, not reuse of historical means. The complete
+matrix requires **52 Runs**. Gaussian count, filter/input parameter count and atomic state channels
+are distinct quantities; direct distance is a category with one radial input, not missing geometry.
+Cell numbers identify these exact parameter mappings, not LF Trial ordinals or controller order.
+Read [the radial data contract](../README.md#43-schnet-radial-and-width-controls) for equations,
+units, gates, cutoff policy, initialization checks and the reduced-width output projection.
 
-## Diagnostics, complete sweeps, and adaptive HPO
-
-- **Diagnostics:** V1a, V1b and V1c estimate variance and causation; they select nothing.
-- **Complete finite sweeps:** V2, V3, V5a/V5b/V5c, V6a–V6g, V7, V8a–V8d, and V9a–V9f use LambdaForge's explicit
-  `sweep.space`. V5c also uses a complete conditional sweep. Every authored cell is mandatory.
-  V5 and V6 require exactly four explicit paired seeds; stages with automatic seeds use native
-  shared-seed blocks and an anytime-valid paired analysis. HPO pruning and per-cell seed racing
-  are disabled by the sweep contract; ordinary within-Run validation patience remains active.
-- **Adaptive HPO:** V4 uses `search.goal: optimize` plus `search.space`. Candidate
-  generation, seed allocation, curve pruning, convergence, fresh confirmation, and child-Run
-  packing remain automatic. The authored `objective.practical_margin` defines which score gaps are
-  scientifically negligible.
-- **V6 weak-prior campaign:** seven isolated families share the V5c backbone and poolers.
-  V6c–V6e keep Heat6; V6f/g cross none/Heat6. V6a/c/d/f have selective range extensions.
-  V6h uses explicit mixtures, not a Cartesian sweep of all seven losses. See [v6/README.md](v6/README.md).
-- **Confirmation:** V10 is not HPO. It freezes the ledger, uses fresh seeds, and opens test.
-- **Post-hoc analysis:** `interpretability/interpretability_sparse_concepts.yaml` analyzes one explicit frozen
-  checkpoint. It is not a scientific WISDOM version and must not influence V1 selection.
-
-The campaign omits `name`, `execution.max_parallel`, `execution.runs_per_gpu`,
-`resources.gpu_memory`, authored search seeds, and controller stopping knobs wherever LambdaForge
-0.15's defaults match the intended policy. Filenames supply study names, and
-`lf config resolve FILE` exposes every resolved automatic value. `objective.mode: max` remains
-explicit because the current execution path still requires it for a mapped custom metric.
-V1a/V1b/V1c retain their historical explicit seeds, while V10 retains a deliberately fresh explicit
-confirmation set; those identities are scientific inputs rather than scheduler boilerplate.
-
-## V5 family characterization and shortlist
-
-V5c inserts an orthogonal `SurfaceEvidenceRefiner` between raw local logits and the existing
-pooler, inside the training forward. It does not change the backbone or add local-GT losses.
-The refiner choices are none, fixed/learned heat, geometric/embedding/learned anisotropy,
-unrolled graph-TV, and sparse Potts CRF. Only learned heat and learned conductance add parameters.
-The unchanged protein BCE differentiates through every operator; embedding guidance detaches
-only its guide branch by default. V5c crosses ten refiner settings with three retained poolers:
-MAX, area-LSE beta=0.25, area-Attention simple/256. This gives 30 candidates × four paired seeds
-= 120 Runs. V6 preserves these poolers; only V6f/g cross identity/Heat6 to isolate smoothness interactions.
-No local GT enters training or checkpoint selection; refined metrics, raw diagnostics and unclipped
-refinement gain are recorded for development. Existing W remains the objective, not the sole
-decision criterion. Vertex-deletion faithfulness is unavailable because it changes refiner operators.
-No viewers are generated in the sweep; `visualization/wisdom_v5c.yaml` reviews saved models.
-See README section 5.3.1 for all equations, defaults, gradient paths and numerical limitations.
-
-V5a and V5b replace the historical `wisdom_v5.yaml`, now retired from the active campaign.
-Their frozen `with` values retain the reviewed V5 ledger, not V4 defaults. V5 never
-changes the encoder, data, weak losses, initialization/optimizer policy or head relationship.
-Protein BCE plus the existing gate penalty remains the entire training objective; local labels
-are development-only and test remains sealed.
-
-Both studies use **exactly [4, 7, 32, 54]** for every candidate. Unlike automatic sweeps in the
-other stages, they have a finite paired seed budget with no competitive pruning or seed racing.
-Ordinary within-Run validation patience remains enabled. LambdaForge owns scheduling, results,
-curves and pairing; no new WISDOM HPO controller is introduced.
-
-| Study / branch | Candidates | Required Runs |
-|---|---:|---:|
-| V5a MAX / mean / attention / Top-K / regional / LSE | 1 / 2 / 32 / 26 / 16 / 54 | 524 |
-| V5a linear softmax / AutoPool / GeM / MAX–MEAN / multiscale regional | 2 / 26 / 24 / 22 / 1 | 300 |
-| V5a total: all eleven families | 206 | 824 |
-| V5b learned LSE / regional / AutoPool / GeM / MAX–MEAN | 1 each | 4 each |
-| V5b total: scalar adaptation from declared V5a references | 5 | 20 |
-
-Each file now defines one Study, with native `when: {parent: {in: [...]}}` membership conditions
-for shared area parameters and equality conditions for family-specific/nested scalar settings.
-Inactive parameters are absent, not default-valued dimensions. V5a has exactly one MAX reference;
-V5b has none because it contains no MAX cell. The reviewed backbone remains unchanged. V5a includes
-all implemented families, both attention scorers, fixed scalar grids and prescribed LSE schedules.
-V5b isolates learned-scalar adaptation from one declared fixed V5a reference per family. Their scientific
-questions remain distinct, with no automatic winner handoff. Fixed sweeps reject
-`trials` and `proposal_pool_size`; native planning verifies the complete finite design.
-
-V5a currently requests three GPUs, 42 CPUs, 96 GiB RAM and 1000 hours; V5b requests two GPUs,
-36 CPUs, 96 GiB RAM and 168 hours, with native automatic packing. Their dispatch budgets are
-1000 and 168 hours respectively. These budgets do not extend the authored scheduler limit or
-guarantee complete coverage. No packing/pruning compatibility helpers
-are required. Shared research semantics come from Training.analysis_profile, with small YAML
-metric-priority overrides applied to the entire Study.
-
-V5a intentionally sets the curriculum hold to zero only on curriculum cells. With epochs=500
-and patience=30, the previous 0.30 hold delayed the first beta change to epoch 152. The new schedule
-changes at epoch 2, while retaining ordinary patience; endpoint 1 is the deliberate constant-beta
-control. Other endpoints are still not guaranteed before early stopping. Inspect the recorded beta
-trajectory and restored checkpoint, not only the target.
-
-The fixed screen extends Top-K from 0.0005 through 1.0 (including 0.6 and 0.8), attention widths
-from 4 through 512, regional length from 0 through 64 angstroms, LSE beta from 0.01 through 1280,
-AutoPool alpha from 0 through 1000, GeM power from 1 through 1024, and MAX–MEAN weight across
-the full [0,1] interval. Multiscale regional pooling keeps its existing fixed length bank
-[0,1.5,3,6,12] angstroms and learned mixture; no artificial parameter is added to this family.
-V5b uses one start per family: beta=0.25 (area), length=16 Å, alpha=500 (point), power=2 (point),
-and MAX–MEAN coefficient=0.95 (point). These are learned starts, not fixed reductions.
-Its explicit domains are beta [0.005,2560], length [0.05,128] Å, alpha [0,2000],
-power [1,2048] and mixture [0,1]. Constructor defaults remain unchanged for historical weights;
-new checkpoints retain the exact bounds in model_parameters. The comparison reuses V5a controls
-and starts the backbone from paired random seeds, not from V5a weights. It does not prove that
-learning from arbitrary initializations removes the need for HPO.
-
-If quality still improves at a finite grid edge, the range is **not closed**: compare neighboring
-levels over paired seeds and propose a separate extension, never claim the edge is an optimum.
-Small Top-K fractions may select the same number of points; high beta/alpha/power can concentrate
-gradients on a few points. Report these controls and their runtime/local-quality tradeoffs. Zero
-regional length is exact identity, but positive lengths use the existing truncated spectrum;
-even 64 angstroms does not imply whole-protein averaging across disconnected components.
-
-Review each family's fixed/learned representatives with paired seed variation, global score G,
-surface score S, coupling, selection regret, subgroup/faithfulness diagnostics and runtime.
-Missing regional deletion diagnostics are unavailable, not zero: deleting vertices would change
-their diffusion operator. Learned scalar values and multiscale weights have epoch metrics and
-`evaluation.json` trajectories; final values refer to the selected global checkpoint, not merely
-the last optimizer update. Area-aware pooling is an ablation, not an assumed improvement.
-
-The output is a reviewed shortlist of approximately **2–4 nondominated families**, not a single
-`pooling_winner`. Account for uncertainty: four seeds do not prove a ranking. The current V6
-campaign crosses MAX/LSE/Attention with seven isolated weak priors before a deferred combination.
-It includes contemporary zero controls, preserves the V5c backbone, and never selects a favorable seed.
-
-## Protein reports
-
-Configure presentation directly in each training YAML's `with.visualization` mapping.
-V1a/V1b/V1c and V10 request `mode: report`; other screening studies retain `mode: none` to
-avoid exceeding LF's combined 64 MiB report limit. NONE disables the tab completely.
-
-The default `content: predictions` embeds only probabilities, original logits and available
-soft/hard GT. `maximum_points: 2000` bounds the displayed cloud; `maximum_proteins: 4`
-selects a balanced per-split sample and `report_budget_mib: 4.0` caps the document.
-Metrics and optional numerical exports retain all points and full precision.
-`content: full` restores the structural inspector. `mode: viewer` adds standalone HTML/PLY;
-`mode: full` also writes prediction NPZ. See both READMEs for every option/default.
-
-Reports are generated once after restoring each completed Run's best protein-selected checkpoint,
-not every epoch. Numerical surface metric frequency remains independent. Failed Runs cannot
-publish unfinished reports; failed Studies may still contain reports from successful seeds.
-Historical exported HTML is not rewritten by changing configuration.
-
-Separate VVAL YAMLs have been removed. There is no verified public LF post-Study callback to
-forward only a final winning candidate/seed. Do not implement a project-owned ranker, hidden
-runner, seed cleanup process or training `steps` to imitate that unsupported lifecycle.
-
-## Formal scientific roadmap after V1
-
-The following are future decision-gated generations, not completed campaign stages:
-
-1. **V2 — multi-view signal audit:** use the existing correspondence and consistency machinery to
-   measure oracle headroom, aggregation gain, and disagreement as an error signal. It also requires
-   a shortcut/identifiability audit and invariance to surface discretization.
-2. **V3 — view-robust training:** sample physically equivalent views during training only if V2
-   shows useful signal rather than unstructured variance.
-3. **V4 — formal pooling comparison:** repeat pooling on the frozen backbone, including a future
-   area-aware probabilistic link candidate.
-4. **V5 — surface-encoder comparison:** compare DiffusionNet and alternative encoders while every
-   preceding V1 decision remains frozen.
-5. **V6 — SSL plus protein-specific test-time training:** proceed only after an SSL loss predicts
-   surface quality or cross-view consistency without local targets.
-6. **V7 — recurrent TTC:** proceed only after a non-recurrent refinement operation is useful and
-   stable, then test shared-weight recurrent refinement.
-
-The implemented `SurfaceViewCorrespondence` and `ViewConsistencyMetricSuite` are infrastructure for
-future V2. No current YAML exercises them because the view-generation contract and frozen V1 do not
-yet exist. Likewise, implemented alternative surface encoders are capability code, not evidence that
-formal V5 has been run.
-
-## Validation
-
-Validate an individual stage before submission:
+Validate/list the complete native design, or author a subset without executing anything:
 
 ```bash
-lf validate experiments/v4/wisdom_v4.yaml
-lf explain experiments/v4/wisdom_v4.yaml
-lf run experiments/v4/wisdom_v4.yaml --dry-run
+lf validate experiments/v9/wisdom_v9f.yaml
+lf explain experiments/v9/wisdom_v9f.yaml
+lf run experiments/v9/wisdom_v9f.yaml --on YOUR_CLUSTER --dry-run
+python scripts/configure_schnet_campaign.py --block B --output .lambdaforge/v9f-block-b.yaml
+python scripts/configure_schnet_campaign.py --cells 2 4 --output .lambdaforge/v9f-direct-vs-rbf16.yaml
 ```
 
-The dataset selector must resolve on the target cluster. The interpretability YAML additionally
-requires a real reviewed `best-model.pt`; never create a placeholder checkpoint for an actual run.
-Use `lf config resolve experiments/v4/wisdom_v4.yaml` to inspect the exact automatic policies before
-submission; omitted execution ceilings mean that ARI derives safe concurrency from allocated
-CPUs, GPUs, live GPU memory, and measured Run envelopes.
+Keep generated YAMLs inside this project so LF resolves its dataset Registry. A block B/C subset
+adds cell 01 as its contemporary control; all four seeds remain. A cell-only selection needs
+`--cells 4` and still runs all four seeds. These are configuration authoring tools, not extra runners.
+Names distinguish subsets; completed coverage of a subset does not establish full-matrix coverage.
+Do not silently reuse a historical V9d mean as a new control or combine unrelated seeds.
+
+When ready, launch **one** intended design, then use native LF evidence and reporting:
+
+```bash
+lf run experiments/v9/wisdom_v9f.yaml --on YOUR_CLUSTER
+lf inspect execution-EXACT --json
+lf logs execution-EXACT
+lf retry execution-EXACT --dry-run
+lf export --help
+lf results analyze execution-EXACT --json
+lf results report execution-EXACT --output schnet-report.html
+lf results table execution-EXACT --metric val_wisdom_hpo_surface --format csv --output schnet-scalars.csv
+python scripts/analyze_schnet_campaign.py execution-EXACT --output schnet-audit
+```
+
+The native report owns seed aggregation, paired reference differences, coverage, parameter discovery,
+curves and Study decisions. Its reference is contemporary baseline cell 01. The optional standalone
+SchNet audit reads only native metadata from that exact registered/imported Execution. It implements
+the predeclared cell-04 paired contrasts, width comparisons (02–05 versus 06–09), metadata pairs
+(02/04/06/08 versus 10/11/12/13), Gaussian-versus-direct width interactions, and relative-cost tables.
+It preserves per-seed signs, mean/sample SD and matched support; missing/failed seeds are not zero.
+Positive deltas favor larger S/G but not smaller costs or negative-protein activation: interpret
+each metric's direction rather than treating every positive sign as a favorable seed.
+Its PNG contains radial S/G curves, quality/cost scatter and width/metadata contrasts; JSON/CSV
+retain coverage and descriptive two-coordinate dominance only for complete four-seed cells. This
+does not fit an explanatory model, search for new effects, choose a winner or change StudyDecision.
+For Gaussian-count curves keep direct as a separate category; stratify by internal width. Compare
+raw/operational S, top-5% enrichment, negative mass, G, C/W and regret, not only an aggregate mean.
+Positive-protein AP SD/quartiles describe heterogeneity between proteins, not seed uncertainty.
+Inspect whether the full-attribute Gaussian-count×width contrasts interact before discussing the
+sparser metadata contrast. Four seeds support descriptive comparisons, not universal conclusions.
+
+Each Run exports exact common-initialization hashes and capacity under `atomic-encoder-audit/`.
+At its best G checkpoint it samples both filter relations/layers with distinct declared metadata
+profiles, recording pre/post-support responses, amplitudes, sensitivity and channel correlation in
+`radial-filters.json/.npz/.png`. This does not save all edges or use GT, and is not a physical-potential
+analysis. Whole-model CUDA peaks and complete-epoch medians are not isolated encoder costs. Optional
+isolated timing uses an explicit short synthetic benchmark:
+
+```bash
+python scripts/benchmark_schnet.py --mode direct --width 64 --device cpu --output benchmarks/schnet-direct-64.json
+```
+
+No real H100 improvement or total-memory saving is asserted before measurement. Concurrent study
+timings include contention. No encoder-only production-memory attribution, full-model FLOP estimate
+or capacity-matched extra filter-width cell is claimed. The scientific PDF is externally authored;
+this code/configuration update does not rewrite it or mark this unexecuted design as a result.
+
+### 2.2. Frozen V10 backbone from V9f
+
+Current V10a–h configurations inherit full-metadata SchNet with Gaussian RBF-16, 64 internal
+channels and 128 output channels, frozen from `full_rbf16_64` (V9f cell 08,
+`execution-d384d8f6b5064a26`). The source comparison completed 13 cells and four paired seeds per
+cell. [backbone_selection.json](v10/backbone_selection.json) records the chosen parameters, exact
+external evidence digests, four Run IDs and paired comparisons against the original control and
+the strongest surface/compact alternatives. No historical results or registered decisions change.
+
+The selection prioritizes a small surface-quality gap (S 0.2932 versus 0.2966 for restricted direct
+128), fewer parameters (87,488 versus 281,728 in the encoder), lower false activation on negative
+proteins, and lower observed allocated/reserved peaks. Full edge metadata remain available while
+V10 changes atomic input sources. It is not a speed winner: mean complete-epoch medians were 119.5
+versus 103.2 seconds on shared H200 NVL hardware, not isolated encoder measurements. Its G 0.7030
+also falls below the contemporary original baseline's 0.7134 in all four paired seeds. Treat this
+as an explicit provisional development choice needing new-seed confirmation, not non-inferiority.
+
+All V10 controls and interventions use the same frozen SchNet and train from scratch with the
+existing V10 seeds; none loads a chosen V9f seed's weights. The empty `atomic_representation: {}`
+control now means this SchNet without added input sources. Changing the choice later requires
+changing all matched controls together; historical baseline means cannot substitute for them.
+The enriched @8 selector remains a publication prerequisite, not a silent switch back to @6 or
+a claim that their geometry/GT match. New source projections preserve the actual 64-channel atomic
+state before the final 64→128 projection. The explicitly superseded legacy confirmation template
+is not modified or treated as a current V10 representation experiment.
+
+### 2.3. V10f Hard-Concrete source selection
+
+V10a–e are frozen. The new [V10f](v10/wisdom_v10f.yaml) tests grouped source selection;
+the formerly planned physical-initialization V10f is now [V10g](v10/wisdom_v10g.yaml), the external
+representation V10g is [V10h](v10/wisdom_v10h.yaml), and the future confirmation template is
+[V10i](v10/wisdom_v10i.yaml), now a compact pooling recheck after contextual-input selection.
+Historical execution identities and their files are not renamed.
+The frozen V10e comment naming confirmation V10h describes its old numbering, not a new execution.
+
+V10f uses V10e's actual executed fixed configuration, checked against its submitted YAML and
+full-source checkpoint (48 gates), not a generic template. The native sweep enumerates scalar
+scientific coordinates because LF's explicit candidates reject mappings. It declares exactly
+20 profiles and four fresh paired seeds, 269/271/277/281: **80 mandatory Runs**, no pruning or test.
+The single native reference is the full-source immediate 0.04/0.04 condition.
+
+| Profiles | Changed scientific controls | Count |
+|---|---|---:|
+| A1–A9 | S/C coefficients: each pair from {0.04, 0.16, 0.64}; O stays 0.04 | 9 |
+| B1–B3 | Initial S/C activity: (0.50,0.95), (0.95,0.50), (0.50,0.50); S/C cost 0.16 | 3 |
+| C1–C3 | S/C warm-up/ramp fractions: (0,0.02), (0,0.04), (0.01,0.02); S/C cost 0.16 | 3 |
+| G1–G2 | Uniform global coefficients 0.16 or 0.64, including O | 2 |
+| All-on / all-off / compact | Seven chemical gates fixed open/closed, or only the two identity sources present | 3 |
+
+At initial analytic activity 0.95, expected path sums are S=19, C=6.3175 and O=18.684125.
+Thus their direct penalties are respectively `19*lambda_S/41`, `6.3175*lambda_C/41` and
+`18.684125*lambda_O/41`. Uniform 0.04 totals about 0.0429284; uniform 0.16 about 0.1717137;
+uniform 0.64 about 0.6868546. These are expected costs, not sampled gate values or prediction
+metrics. Global and grouped conditions are not automatically penalty-budget matched. Fixed
+chemical gates have zero direct penalty; compact has only two chemical gates and different capacity.
+Localized warm-up makes the actual first-epoch S/C costs zero, not their nominal final values.
+
+The [preparation record](v10/gate_study.json) records all 20 profiles, their initial group budgets,
+source V10e identity, local seed-conflict check, Git HEAD/dirty qualification and frozen YAML digests.
+The `gate-audit` manifest records actual initial budgets per group for every Run. Its epoch JSONL
+and separate final/selected records prevent confusing last-epoch gates with the G-selected model.
+Analyze feature selection and localization separately: paired S/G changes, negative evidence,
+closure/attenuation, seed variability and resource costs. The 3×3 A block supports paired main
+effects and interaction contrasts; a statistical interaction is not itself biological causality.
+No surface target enters gradients or epoch selection; none of these controls proves universality
+beyond this dataset. See both main READMEs §4.4 for the public parameter and inference contract.
+
+### 2.4. Continuation after V10g/V10h
+
+The [selection record](v10/representation_selection.json) fixes habitual (`current`) table
+initialization plus frozen ESM-2 35M context projected to 32 channels. Keep name and residue-atom
+identity at eight channels each, learned gates, uniform cost 0.04/41 and SchNet 64→128. The residue
+table is neither externally initialized nor removed. No cross-extractor table/context mixture
+was selected. The same explicit baseline now appears in every V11/V13 training YAML.
+
+Run [V10i](v10/wisdom_v10i.yaml) to compare MAX, fixed LSE beta 0.25/area and simple Attention
+256/area under that baseline. It has three settings and four fresh seeds, **12 mandatory Runs**,
+with the same Heat6, single head and regional prior 0.3. This is a conditional pooling comparison,
+not a new optimization sweep or a confirmation of six external extractors. MAX remains provisional
+for downstream designs until these results are reviewed. Cost comparison includes memory,
+complete seconds per epoch and completed epochs; S stays the scientific priority.
+
+V12 selects ESM-2 context from the completed imported V10h study and restores its checkpoint
+configuration without fitting. Isolated protocols rebuild surfaces from the exact base; only the
+legacy published protocol needs a surface-view asset. V11f/V13f confirmation
+seeds are disjoint from V10i so its pooling choice is not confirmed on its own selection seeds.
+Historical V10g/V10h inputs and results are unchanged. YAML edits never start a computation.
+
+## 3. Reviewing saved models
+
+`v*/visualization/*.yaml` and `reviews/*.yaml` run checkpoint reviews, not hidden training. Declare
+the imported execution or typed model set, exact dataset, saved seed and desired parameter filter.
+The automatic protein panel includes favorable, unfavorable and inconsistent cases. Metrics use
+the complete declared evaluation scope, independently of display sampling.
+
+Ordinary training reports belong in `with.visualization` on the training YAML. They are generated
+at that Run's restored best checkpoint; they are not a Study-wide best-seed callback. Missing
+checkpoints require LF recovery. No project reviewer silently retrains or revises Study decisions.
+
+## 4. Preflight and execution
+
+From the repository root, substitute the intended file and configured target:
+
+```bash
+lf validate experiments/v9/wisdom_v9d.yaml
+lf explain experiments/v9/wisdom_v9d.yaml
+lf run experiments/v9/wisdom_v9d.yaml --dry-run
+lf run experiments/v9/wisdom_v9d.yaml --on YOUR_CLUSTER
+```
+
+Dry runs do not train. Inspect the current dataset placements and granted resources before the
+last command. Leave held-out test disabled during development unless the protocol explicitly
+authorizes final evaluation. Compare global and surface outcomes separately, including missing
+support, seed variance and cost; the report, not this catalogue, interprets the resulting evidence.

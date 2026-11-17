@@ -5,8 +5,8 @@ import copy
 import torch
 from torch import Tensor
 
-from wisdom.models.GatedAtomicEncoder import GatedAtomicEncoder
-from wisdom.models.SurfaceAtomTransfer import SurfaceAtomTransfer
+from wisdom.models.atomic.GatedAtomicEncoder import GatedAtomicEncoder
+from wisdom.models.communication.SurfaceAtomTransfer import SurfaceAtomTransfer
 
 
 def _atomic_reference(

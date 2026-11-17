@@ -1,0 +1,153 @@
+# POLICY: Explicit provisional representatives; inspect earlier evidence before promotion.
+# OBJECTIVE: Feasibility-gated comparison of existing surface-encoder adaptations.
+# POLICY: current initialization, ESM-2 35M context(32), name+pair(8), SchNet 64->128; MAX provisional.
+# RECORD: experiments/v10/representation_selection.json; frozen development policy, no universal winner.
+# PREREQUISITES: publish enriched @8 and review the common ledger before submission.
+# FIXED: data, G-selected checkpoints, local GT evaluation-only, no held-out test.
+# VARIES: existing diffusion, DeltaConv and dMaSIF adaptations only; no serialized PTv3 alias.
+# DECISION: paired S differences, G non-inferiority, negative evidence, seeds and costs.
+name: wisdom-v13e  # Independent finite Study; never a steps composition.
+run: wisdom.Training.Training  # Existing public training lifecycle and native LF analysis.
+
+with:  # Reviewed MAX R Single / Heat6 ledger; change upstream choices explicitly here.
+  dataset: {dataset: wisdom-dna-reduced@8}  # Enriched publication must preserve reviewed members, splits, base geometry and GT.
+  model_version: 3  # Deliberate campaign override, not a constructor default.
+  subset: full  # Complete reduced train population; validation stays fixed.
+  surface_representation_mode: learned  # Preserve the learned surface route; new sources are declared below.
+  surface_encoder_type: diffusion  # Keep DiffusionNet fixed while comparing atomic encoders.
+  initialization_profile: baseline  # No profile override of the explicit V10g initialization choice.
+  embedding_initialization: current  # V10g retained the habitual start; true default current.
+  optimization_profile: baseline  # Fixed AdamW policy; do not reopen HPO.
+  hidden_dim: 128  # Common scalar atom output and surface width D.
+  embedding_dim: 32  # Original element embedding width.
+  residue_embedding_dim: 64  # Original residue embedding width.
+  atomic_layers: 2  # Two interactions; triplet/global reach is explicitly not equal to two local hops.
+  projection_depth: 3  # Freeze atom-to-surface projection depth.
+  surface_layers: 4  # Freeze DiffusionNet.
+  atom_spatial_k: 8  # Same nested spatial topology; never generate new neighbors.
+  surface_atom_k: 16  # Same atom-to-surface candidates.
+  diffusion_spectral_modes: 32  # Same surface spectral budget.
+  surface_atom_radius: 4.0  # Same transfer radius, in angstroms.
+  atomic_edge_distance_scale: 6.0  # Baseline scalar edge normalization in angstroms.
+  dropout: 0.2  # Fixed common dropout.
+  learning_rate: 0.001  # Fixed V7 AdamW rate.
+  weight_decay: 0.0005  # Fixed V7 decay.
+  gate_lambda: 0.04  # Same per-source cost coefficient and baseline denominator.
+  gate_policy:  # Frozen post-V10f development policy; no source selection claim.
+    lambda_surface: 0.04  # Keep curvature pressure at the validated reference value.
+    lambda_chemical: 0.04  # Keep added chemical-source pressure at the reference value.
+    lambda_other: 0.04  # Preserve all other historical direct costs.
+    initial_active_surface: 0.95  # Analytic P(active), not the deterministic multiplier.
+    initial_active_chemical: 0.95  # Avoid the unvalidated low-activity-start regime.
+    initial_active_other: 0.95  # Preserve historical initialization.
+    warmup_fraction: 0.0  # Immediate penalty; no forced-open warm-up.
+    ramp_fraction: 0.0  # No progressive schedule in downstream comparisons.
+  # GatePolicy true defaults are the eight values above; baseline_count keeps denominator 41.
+  # This term is already weighted: Training does not multiply it again by gate_lambda.
+  # Do not mix this mapping with scalar gate-group controls or legacy gate schedules.
+  atomic_representation:  # Frozen post-V10h context/input policy, trained from scratch.
+    sources: ["atom_name", "residue_atom"]  # Keep both shared atom name and residue-atom identity.
+    identity_dim: 8  # Existing default width per table; no dimension search.
+    force_sources: learned  # Gates modulate available sources; none is forced open or closed.
+    external_model: esm2  # Frozen ESM-2 35M residue context selected after V10h.
+    external_mode: context  # Keep the habitual residue table; no static external initialization.
+    context_dim: 32  # Same learned residue-context width as V10h; true default 32.
+  # Representation true defaults: sources=(), identity_dim=8, force_sources=learned;
+  # external_model=null, external_mode=none, context_dim=32, standard_deviation_floor=1e-6.
+  pooling_type: max  # Provisional reference until V10i compares poolings with ESM-2 context.
+  pooling_area_mode: point  # Same point-based MAX pipeline.
+  surface_refiner_type: heat  # Same operational evidence refiner.
+  surface_refiner_heat_length: 6.0  # Heat6, in angstroms.
+  weak_loss_profile: custom  # Apply the exact reviewed weak coefficients.
+  negative_surface_lambda: 0.0  # No negative suppression in line A.
+  positive_existence_lambda: 0.0  # No point-existence term.
+  regional_positive_lambda: 0.3  # R is regional existence, not ranking.
+  regional_ranking_lambda: 0.0  # K remains disabled.
+  regional_loss_length: 2.5  # Existing auxiliary regional scale, angstroms.
+  regional_ranking_margin: 0.5  # Frozen, inactive ranking margin.
+  cardinality_lambda: 0.0  # Disabled.
+  total_variation_lambda: 0.0  # Disabled.
+  dirichlet_lambda: 0.0  # Disabled.
+  head_type: single  # Exact original single-head protein BCE; no FiLM parameters.
+  head_implementation: controlled  # Preserve the corrected V7 contract.
+  architecture_spike: baseline  # No geometry-conditioned transfer, feedback or post-hoc V8 vectors.
+  surface_geometry_transfer: false  # V8a is not adopted; keep the reviewed transfer scorer.
+  interaction_round: single  # No second DiffusionNet pass or surface-to-atom return.
+  vector_atomic_channels: 0  # No V8c augmentation; V9e's own vector encoders remain the tested factor.
+  feedback_propagation: none  # No V8d post-feedback GNN/MLP or extra surface stage.
+  architecture_implementation: controlled  # Paired initialization of the common surface route.
+  gate_cost_normalization: baseline_count  # No dilution when a family omits attributes.
+  atomic_encoder_type: schnet  # Preserve the V10g/V10h encoder while studying the next mechanism.
+  atomic_radial_encoding: gaussian  # Same full-metadata RBF input encoding; true default gaussian.
+  atomic_radial_count: 16  # Same radial channels; true default 16, not another sweep.
+  atomic_hidden_dim: 64  # Selected internal width; true default null inherits hidden_dim.
+  atomic_output_dim: 128  # Shared surface interface; true default null inherits hidden_dim.
+  atomic_spatial_cutoff: 6.0  # Fixed atomic radial support, not the 4-Angstrom transfer radius.
+  batch_size: 16  # Unchanged optimization batch; do not shrink silently for expensive variants.
+  epochs: 500  # Existing safety ceiling.
+  patience: 30  # G-based within-Run stopping; no competitive pruning.
+  minimum_delta: 0.001  # Existing checkpoint improvement tolerance.
+  precision: auto  # Hardware-safe mixed precision with invariant numerical checks.
+  surface_metrics: true  # Evaluation-only local GT; never a gradient input.
+  surface_metrics_interval: 1  # Retain original/operational S and temporal G-S coupling/regret.
+  visualization:  # Saved checkpoints can be reviewed after the fixed comparison.
+    mode: none  # No per-seed gallery generation during training.
+  faithfulness_audit: false  # Vertex-deletion interventions are incompatible with fixed Heat6 operators.
+  evaluate_test: false  # Held-out test remains sealed.
+  optimization_diagnostics: true  # Retain optimization, activation and gate diagnostics.
+  data_workers: 4  # Persistent training decoding, not a scientific factor.
+
+
+# Actual new mapping defaults (Training defaults all three to null; omission is historical):
+# atomic_representation: sources=(), identity_dim=8>0, external_model=null (esm2|esmc|saprot),
+# external_mode=none (none|static|context|both|replace), context_dim=32>0,
+# standard_deviation_floor=1e-6>0, force_sources=learned (learned|open|closed).
+# Sources: atom_name/residue_atom/backbone_torsions/sidechain_torsions/covalent_statistics/
+# functional_groups/atomic_sasa; continuous statistics fit selected train only and persist in weights.
+# transfer_options: candidates=base (base|extended); summary=mean (mean_std|mean_max|mean_std_max|
+# mean_support|duplicate_mean), message=atom (pair|point_pair|low_rank), rank=16>0, heads=1 divides D,
+# shared_head_weights=false, channel_attention=false, normalization=softmax (softmax|entmax15),
+# normalization_radius=null (>0 Å), learned_radius=false, radius_bounds=[1,12] Å,
+# radius_initial=6 (strictly inside bounds), radius_temperature=.5>0 Å, epsilon=1e-8>0,
+# summary_repeats=2>0, support=effective (effective|count), active_radius=null, active_k=null.
+# Active radius/K must be positive and <= declared consumer support; never invent missing candidates.
+# surface_options: readout_mode=single (single|concat|mixture|duplicate), readouts=1 (1|2|3),
+# scale_multipliers=[.5,2] (one positive TIME multiplier per multiple read),
+# use_gradient=true, local_mode=none (none|distance|attention), local_sigma=2>0 Å,
+# local_area=false, local_initial_scale=0, local_chunk_size=65536>0, spectral_source=base (base|extension).
+# All dependencies load explicitly; missing assets fail, never silently fall back to old geometry.
+# Baseline Training defaults: model_version=1, subset=full, hidden=128, element=32, residue=null,
+# atomic=2, projection=1, surface=2, atom K=16, transfer J=16/radius=6 Å, spectral Q=128.
+# pooling=max/area=legacy; refiner=none/length=3 Å; profile defaults=custom; weak coefficients=0.
+# lr=3e-4, decay=1e-4, dropout=.2, gate_lambda=.001; gate denominator=historical_mean.
+# batch=2, epochs=100, patience=30, minimum_delta=.001; precision=auto; diagnostics=false.
+# surface_metrics=true/interval=0; evaluate_test=true; data_workers=4; visualization=null => none.
+# This campaign selects baseline_count (41 gates at five scales), G-selected checkpoints, no test.
+
+seeds: [211, 223, 227, 229]  # Four fixed paired replications shared by every candidate.
+# Defaults: native shared seed blocks apply only when seeds are omitted.
+sweep:  # Finite explicit configurations; no nested study or adaptive pruning.
+  space:  # Only this declared scientific choice varies.
+    surface_encoder_type:  # Constructor value, retained in the native checkpoint.
+      values:  # Each item is one complete intervention, never a hidden parameter product.
+        - "diffusion"  # contemporary intrinsic baseline
+        - "dmasif"  # existing dMaSIF-like local adaptation, NOT the original network
+        - "deltaconv"  # existing DeltaConv-related adaptation, NOT an exact literature reproduction
+# sweep.space required; reference optional; no search or competitive pruning.
+objective:  # Descriptive LF utility; NEVER local-GT epoch selection.
+  metric: val_wisdom_hpo_score  # Retain separate G, original/operational S and regret.
+  mode: max  # W indexes development candidates; scientific priority remains localization.
+  range: [0.0, 1.0]  # Mathematical bounds, not an empirical confidence interval.
+  practical_margin: 0.015  # Existing composite utility margin, not the .005 S decision margin.
+# Objective defaults: mode=max; metric required; range/practical_margin optional.
+# No execution limits authored: native LF admits independent Runs on the granted GPUs.
+# Execution defaults: max_parallel/runs_per_gpu/max_runs/max_time=null, failure_retries=1.
+resources:  # Shared Study envelope, never a guarantee of per-Run feasibility.
+  gpu: 2  # Two accelerators with native resource-aware concurrent admission.
+  cpu: 36  # Total CPUs shared by admitted Runs.
+  memory: 96GiB  # Total host RAM, not per-Run VRAM.
+  time: 168h  # Operational ceiling; use native recovery for interrupted mandatory cells.
+# Resource defaults: cpu=1, gpu=0, processes=1, memory/gpu_memory/storage=0, time=null.
+
+
+

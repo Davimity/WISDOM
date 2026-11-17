@@ -1,0 +1,453 @@
+{
+  "decision_date": "2026-11-03",
+  "status": "frozen development baseline; independent confirmation pending",
+  "embedding_initialization": "current",
+  "initialization_profile": "baseline",
+  "atomic_representation": {
+    "sources": [
+      "atom_name",
+      "residue_atom"
+    ],
+    "identity_dim": 8,
+    "force_sources": "learned",
+    "external_model": "esm2",
+    "external_mode": "context",
+    "context_dim": 32
+  },
+  "atomic_encoder": {
+    "atomic_encoder_type": "schnet",
+    "atomic_radial_encoding": "gaussian",
+    "atomic_radial_count": 16,
+    "atomic_hidden_dim": 64,
+    "atomic_output_dim": 128,
+    "atomic_layers": 2
+  },
+  "gate_policy": {
+    "lambda_surface": 0.04,
+    "lambda_chemical": 0.04,
+    "lambda_other": 0.04,
+    "initial_active_surface": 0.95,
+    "initial_active_chemical": 0.95,
+    "initial_active_other": 0.95,
+    "warmup_fraction": 0.0,
+    "ramp_fraction": 0.0
+  },
+  "gate_cost_normalization": "baseline_count",
+  "other_fixed_context": {
+    "head_type": "single",
+    "surface_layers": 4,
+    "surface_refiner_type": "heat",
+    "surface_refiner_heat_length": 6.0,
+    "regional_positive_lambda": 0.3,
+    "pooling_type": "max"
+  },
+  "context_is_not_table_initialization": true,
+  "pretrained_table_initialization": "none",
+  "cross_extractor_combination": "not selected; ESM-2 context plus SaProt static table was not evaluated",
+  "initialization_evidence": [
+    {
+      "configuration": "current",
+      "S": {
+        "n": 4,
+        "mean": 0.2826413867540609,
+        "sd": 0.05338704177589536,
+        "median": 0.3038765960056266,
+        "minimum": 0.2033991606474635,
+        "maximum": 0.3194131943575271
+      },
+      "G": {
+        "n": 4,
+        "mean": 0.6990285009145736,
+        "sd": 0.024442413795982016,
+        "median": 0.7081497877836227,
+        "minimum": 0.6630965709686278,
+        "maximum": 0.7167178571224212
+      }
+    },
+    {
+      "configuration": "physical_norm",
+      "S": {
+        "n": 4,
+        "mean": 0.2701077971937861,
+        "sd": 0.006590164180222013,
+        "median": 0.2705573007962598,
+        "minimum": 0.2618258493295049,
+        "maximum": 0.2774907378531198
+      },
+      "G": {
+        "n": 4,
+        "mean": 0.6906330034136772,
+        "sd": 0.004652386363825996,
+        "median": 0.6918661803007126,
+        "minimum": 0.6843348324298858,
+        "maximum": 0.6944648206233979
+      }
+    },
+    {
+      "configuration": "physical_random",
+      "S": {
+        "n": 4,
+        "mean": 0.29529401199611394,
+        "sd": 0.021772879066457917,
+        "median": 0.3020906077915296,
+        "minimum": 0.2644499166978194,
+        "maximum": 0.3125449157035773
+      },
+      "G": {
+        "n": 4,
+        "mean": 0.7006371214985847,
+        "sd": 0.013503713442211938,
+        "median": 0.700348874926567,
+        "minimum": 0.686757469177246,
+        "maximum": 0.7150932669639587
+      }
+    }
+  ],
+  "external_evidence": [
+    {
+      "configuration": "control",
+      "S": {
+        "n": 4,
+        "mean": 0.2954471605360809,
+        "sd": 0.006239623939751156,
+        "median": 0.2950733890132088,
+        "minimum": 0.2883157313061768,
+        "maximum": 0.3033261328117292
+      },
+      "G": {
+        "n": 4,
+        "mean": 0.6969495192170143,
+        "sd": 0.00592022765918333,
+        "median": 0.6974936097860336,
+        "minimum": 0.6894325256347655,
+        "maximum": 0.7033783316612243
+      }
+    },
+    {
+      "configuration": "esm2_static",
+      "S": {
+        "n": 4,
+        "mean": 0.2983987673283349,
+        "sd": 0.006439816296406231,
+        "median": 0.2989391116904752,
+        "minimum": 0.2901877041303498,
+        "maximum": 0.30552914180203944
+      },
+      "G": {
+        "n": 4,
+        "mean": 0.7016911834478379,
+        "sd": 0.015566185273590511,
+        "median": 0.6991962730884551,
+        "minimum": 0.6867215871810913,
+        "maximum": 0.7216506004333496
+      }
+    },
+    {
+      "configuration": "esm2_context",
+      "S": {
+        "n": 4,
+        "mean": 0.3306896395275972,
+        "sd": 0.011042224288720957,
+        "median": 0.3310266762547305,
+        "minimum": 0.3193903925130144,
+        "maximum": 0.3413148130879135
+      },
+      "G": {
+        "n": 4,
+        "mean": 0.9177035883069038,
+        "sd": 0.009425482777346509,
+        "median": 0.9195163369178772,
+        "minimum": 0.9060060620307921,
+        "maximum": 0.9257756173610687
+      }
+    },
+    {
+      "configuration": "esm2_both",
+      "S": {
+        "n": 4,
+        "mean": 0.31984797505292056,
+        "sd": 0.0198117626477469,
+        "median": 0.3156428881047759,
+        "minimum": 0.3017701122786521,
+        "maximum": 0.3463360117234783
+      },
+      "G": {
+        "n": 4,
+        "mean": 0.9184687688946723,
+        "sd": 0.004516066276115626,
+        "median": 0.918663927912712,
+        "minimum": 0.9130315721035003,
+        "maximum": 0.923515647649765
+      }
+    },
+    {
+      "configuration": "esm2_replace",
+      "S": {
+        "n": 4,
+        "mean": 0.32863798759268215,
+        "sd": 0.02139506934845335,
+        "median": 0.3296369793585173,
+        "minimum": 0.3020876508192433,
+        "maximum": 0.3531903408344506
+      },
+      "G": {
+        "n": 4,
+        "mean": 0.9188964486122131,
+        "sd": 0.004235035396654723,
+        "median": 0.9193082869052887,
+        "minimum": 0.913427060842514,
+        "maximum": 0.923542159795761
+      }
+    },
+    {
+      "configuration": "esmc_static",
+      "S": {
+        "n": 4,
+        "mean": 0.2935110644564916,
+        "sd": 0.028118498136829626,
+        "median": 0.29292909397404665,
+        "minimum": 0.25986255810815184,
+        "maximum": 0.3283235117697212
+      },
+      "G": {
+        "n": 4,
+        "mean": 0.7055930092930793,
+        "sd": 0.020346375383680237,
+        "median": 0.7050910592079163,
+        "minimum": 0.6829617142677307,
+        "maximum": 0.7292282044887543
+      }
+    },
+    {
+      "configuration": "esmc_context",
+      "S": {
+        "n": 4,
+        "mean": 0.31723534205743553,
+        "sd": 0.014250902199912388,
+        "median": 0.3199193552804097,
+        "minimum": 0.29752351625082907,
+        "maximum": 0.33157914141809347
+      },
+      "G": {
+        "n": 4,
+        "mean": 0.9067127272486686,
+        "sd": 0.007649327771190714,
+        "median": 0.9047332733869551,
+        "minimum": 0.8999142706394195,
+        "maximum": 0.9174700915813445
+      }
+    },
+    {
+      "configuration": "esmc_both",
+      "S": {
+        "n": 4,
+        "mean": 0.32929022854788104,
+        "sd": 0.019199634502037575,
+        "median": 0.3280689405416043,
+        "minimum": 0.3070637313922977,
+        "maximum": 0.353959301716018
+      },
+      "G": {
+        "n": 4,
+        "mean": 0.9082241311669349,
+        "sd": 0.005588595744038167,
+        "median": 0.906683725118637,
+        "minimum": 0.9033321619033814,
+        "maximum": 0.9161969125270842
+      }
+    },
+    {
+      "configuration": "esmc_replace",
+      "S": {
+        "n": 4,
+        "mean": 0.3229199210751069,
+        "sd": 0.008481892376099089,
+        "median": 0.32038700562021827,
+        "minimum": 0.3157029768301393,
+        "maximum": 0.33520269622985166
+      },
+      "G": {
+        "n": 4,
+        "mean": 0.9121773496270179,
+        "sd": 0.007915559943619043,
+        "median": 0.9147288590669631,
+        "minimum": 0.9009662389755249,
+        "maximum": 0.9182854413986206
+      }
+    },
+    {
+      "configuration": "saprot_static",
+      "S": {
+        "n": 4,
+        "mean": 0.30363058058206016,
+        "sd": 0.01917782498992927,
+        "median": 0.3022570910312318,
+        "minimum": 0.28372965000487643,
+        "maximum": 0.32627849026090083
+      },
+      "G": {
+        "n": 4,
+        "mean": 0.7079112246632575,
+        "sd": 0.012619243364224006,
+        "median": 0.7087113499641418,
+        "minimum": 0.6928813755512238,
+        "maximum": 0.7213408231735229
+      }
+    },
+    {
+      "configuration": "saprot_context",
+      "S": {
+        "n": 4,
+        "mean": 0.3331035567800213,
+        "sd": 0.010521325810024008,
+        "median": 0.332304016847903,
+        "minimum": 0.3210853601614123,
+        "maximum": 0.3467208332628669
+      },
+      "G": {
+        "n": 4,
+        "mean": 0.8690673515200614,
+        "sd": 0.010371786161116938,
+        "median": 0.8698314130306244,
+        "minimum": 0.8563699066638946,
+        "maximum": 0.8802366733551025
+      }
+    },
+    {
+      "configuration": "saprot_both",
+      "S": {
+        "n": 4,
+        "mean": 0.3312624711479122,
+        "sd": 0.018788447382486154,
+        "median": 0.3304220784065204,
+        "minimum": 0.3100079545367728,
+        "maximum": 0.35419777324183516
+      },
+      "G": {
+        "n": 4,
+        "mean": 0.8726911753416061,
+        "sd": 0.01783667008533271,
+        "median": 0.8644548714160918,
+        "minimum": 0.8624688386917114,
+        "maximum": 0.8993861198425293
+      }
+    },
+    {
+      "configuration": "saprot_replace",
+      "S": {
+        "n": 4,
+        "mean": 0.3343002266851459,
+        "sd": 0.032989713314630624,
+        "median": 0.34506060569957997,
+        "minimum": 0.28614361473592,
+        "maximum": 0.3609360806055038
+      },
+      "G": {
+        "n": 4,
+        "mean": 0.881011925637722,
+        "sd": 0.005042754237394146,
+        "median": 0.8800642222166062,
+        "minimum": 0.8764830648899078,
+        "maximum": 0.8874361932277679
+      }
+    }
+  ],
+  "reasons": [
+    "V10g retains current: physical initialization lowers S; the random scale-matched advantage depends on seed 227.",
+    "ESM-2 context gives a reproducible S gain and a large G gain over its own control.",
+    "SaProt context has only +.0024 mean S over ESM-2 in two seeds and lower G in all four.",
+    "ESM-2 table+context does not improve S consistently; keep the habitual residue table.",
+    "Preserve the tested SchNet64->128 instead of silently returning later phases to a different relational encoder."
+  ],
+  "limitations": [
+    "Validation-development selection, not test generalization.",
+    "V10h contains two recorded WisdomV1 versions; fresh phase controls are mandatory.",
+    "ESM-2 local S falls in the largest atomic quartile; retain subgroup diagnostics.",
+    "Full external-cache provenance and extraction cost are not in the result export."
+  ],
+  "pooling_v10i": {
+    "status": "planned, no winner inferred",
+    "families": [
+      "max",
+      "log_sum_exp",
+      "attention"
+    ],
+    "configurations": 3,
+    "seeds": [
+      307,
+      311,
+      313,
+      317
+    ],
+    "mandatory_runs": 12,
+    "lse": {
+      "mode": "fixed",
+      "beta": 0.25,
+      "measure": "area"
+    },
+    "attention": {
+      "variant": "simple",
+      "hidden_dim": 256,
+      "measure": "area"
+    },
+    "max": {
+      "measure": "point"
+    },
+    "common_regional_prior": 0.3,
+    "no_additional_hpo": true,
+    "downstream_pooling": "MAX provisional until V10i results"
+  },
+  "v12": {
+    "source_execution": "execution-6c675d5c9f10d971",
+    "exact_parameter_filter": {
+      "atomic_representation": {
+        "sources": [
+          "atom_name",
+          "residue_atom"
+        ],
+        "identity_dim": 8,
+        "force_sources": "learned",
+        "external_model": "esm2",
+        "external_mode": "context",
+        "context_dim": 32
+      }
+    },
+    "role": "Inference only: restore the selected saved context, initializer, gates and pooling; no training overrides."
+  },
+  "confirmation_seeds": {
+    "v11f": [
+      401,
+      409,
+      419,
+      421
+    ],
+    "v13f": [
+      503,
+      509,
+      521,
+      523
+    ]
+  },
+  "modified_training_files": [
+    "experiments/v10/wisdom_v10i.yaml.example",
+    "experiments/v11/wisdom_v11a.yaml",
+    "experiments/v11/wisdom_v11b.yaml",
+    "experiments/v11/wisdom_v11c.yaml",
+    "experiments/v11/wisdom_v11d.yaml",
+    "experiments/v11/wisdom_v11f.yaml.example",
+    "experiments/v13/wisdom_v13a.yaml",
+    "experiments/v13/wisdom_v13b.yaml",
+    "experiments/v13/wisdom_v13c.yaml",
+    "experiments/v13/wisdom_v13e.yaml.example",
+    "experiments/v13/wisdom_v13f.yaml.example",
+    "experiments/v10/wisdom_v10i.yaml"
+  ],
+  "historical_v10g_v10h_configs_modified": false,
+  "training_or_submission_started": false,
+  "evidence_sha256": {
+    "data/experimental/v10g-final/initialization-aggregates.json": "dc7e4186a1c544da4cec14dea7eb9e73fda56a5c1f2fe4b2b062cb0722a97150",
+    "data/experimental/v10h-final/external-aggregates.json": "425daa4ce7ca58befb0afe3a5709b26080e5a1279f260e0ab489c31c34c44722",
+    "data/experimental/v10h-final/external-contrasts.json": "541d09517810d3e32b5bbc853a02034128b0a84186218d2a1d9bb6f20b9c8f7b",
+    "data/experimental/v10h-final/audit.json": "2af6fa3da03af4abff52159580e2bea796b5f855b4364a49a4ba5883f9df243e"
+  }
+}

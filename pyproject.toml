@@ -11,30 +11,73 @@ requires-python = ">=3.10"
 dependencies = [
   "biopython>=1.84,<2",
   "gemmi>=0.7,<0.8",
-  "lambdaforge[clustering,cluster-password,analysis-report,graph-directional]>=0.19.0",
+  "lambdaforge[clustering,cluster-password,analysis-report,graph-directional,optimal-transport]>=0.19.0",
   "matplotlib>=3.7",
   "numpy>=1.24,<2.5",
   "plotly>=7,<8",
   "robust-laplacian>=1.1,<2",
   "scipy>=1.10",
   "scikit-learn>=1.3,<2",
-  "torch>=2.1",
+  "torch>=2.6",
+  "transformers>=5.20.2",
+  "safetensors>=0.8",
 ]
 
 [project.optional-dependencies]
 dev = ["mypy>=1.10", "pytest>=8", "ruff>=0.9"]
+protein-representations = ["transformers>=5.20.2", "safetensors>=0.8"]
+esmc = ["transformers>=5.20.2"]
+physics = ["openmm>=8.2,<9", "pdb2pqr>=3.7.1,<4", "GridDataFormats>=1,<2"]
 
 [tool.lambdaforge.environment]
 manager = "conda"
 file = "environment.yml"
-required_executables = ["mmseqs", "foldseek"]
+required_executables = ["mmseqs", "foldseek", "apbs", "pdb2pqr"]
+
+# Independent scientific tool: neither WISDOM nor its Transformers 5 dependency is installed here.
+# Native bootstrap/submission provisions this prefix; no package installation occurs in a Work.
+[tool.lambdaforge.tool_runtimes.slae]
+python = "3.11" # Supported minor; LF records the selected exact interpreter and package inventory.
+requirements = [
+  "torch==2.6.0+cu124", # CUDA 12.4 build; does not change the enclosing Work's Torch version.
+  "torchvision==0.21.0+cu124", # Matching Torch companion required by upstream ESM imports.
+  "numpy==1.26.4", # SLAE's reviewed NumPy <2 contract.
+  "esm==3.2.1", # Known compatible inference dependency, independent of WISDOM's ESM-C backend.
+  "transformers==4.48.1", # Compatible with this ESM release; isolated from Transformers 5.
+  "torch-geometric==2.7.0", # Official SLAE graph API, not PyG 2.8's changed radius backend.
+  "torch-scatter==2.1.2+pt26cu124", # Precompiled for Torch 2.6 / CUDA 12.4.
+  "torch-cluster==1.6.3+pt26cu124", # Same ABI; never compile a replacement silently.
+  "torch-sparse==0.6.18+pt26cu124", # Same ABI and reviewed public wheel source.
+  "torch-runstats==0.2.0", # Scalar statistics dependency used by the official encoder.
+  "e3nn==0.6.0", # Equivariant primitives internal to frozen SLAE, not WISDOM architecture.
+  "atomworks==3.0.4", # Pin the upstream parser dependency; WISDOM itself still uses Gemmi.
+  "lightning==2.6.6", # Upstream import dependency; not a second training loop.
+  "antlr4-python3-runtime==4.9.3", # Pure-Python source-only dependency of OmegaConf.
+  "SLAE @ git+https://github.com/ProteinDesignLab/SLAE.git@078b94e436b8eceb02251a254c3c224358ec6ee2", # Reviewed immutable source.
+]
+torch_index = "https://download.pytorch.org/whl/cu124" # Official Torch binary origin.
+torch_cuda = "12.4" # Requires an actual provider GPU grant at Work preflight; no CPU fallback.
+extra_index_urls = ["https://download.pytorch.org/whl/cu124"] # Matching torchvision binary origin.
+source_packages = ["antlr4-python3-runtime"] # Only this pinned root and the pinned VCS may build.
+imports = ["SLAE", "torch_cluster", "torch_scatter", "torch_sparse"] # Bootstrap/import/ABI preflight.
+entrypoints = {extract = "src/wisdom/preprocessing/common/structure/assets/external/SLAEExtraction.py"} # Standalone file; no sibling imports.
+
+[[tool.lambdaforge.tool_runtimes.slae.wheel_sources]]
+url = "https://data.pyg.org/whl/torch-2.6.0+cu124.html" # Explicit ABI-qualified public wheel table.
+packages = ["torch-scatter", "torch-cluster", "torch-sparse"] # Compiled roots owned by this source.
+build_tag = "pt26cu124" # Must match every pinned compiled package's local-version suffix.
+# Tool schema: python/requirements are required; roots use exact == or full HTTPS Git commits.
+# index_url defaults to https://pypi.org/simple; extra_index_urls, wheel_sources, source_packages,
+# imports and entrypoints default empty. Torch requires torch_index/torch_cuda (cpu or major.minor).
+# All dependencies default binary-only except explicitly pinned source_packages/VCS roots.
+# Every declared tool is prepared by bootstrap/submission; script changes have a separate identity.
 
 [tool.setuptools.packages.find]
 where = ["src"]
 include = ["wisdom*"]
 
 [tool.setuptools.package-data]
-wisdom = ["visualization/*.js", "visualization/*.css", "preprocessing/common/structure/*.js"]
+wisdom = ["visualization/*.js", "visualization/*.css", "preprocessing/common/structure/viewer/*.js"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

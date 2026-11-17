@@ -22,6 +22,8 @@ from scipy.optimize import linear_sum_assignment
 from wisdom.data.WisdomDataset import WisdomDataset
 from wisdom.data.WisdomCollator import WisdomCollator
 from wisdom.interpretability.EmbeddingScaler import EmbeddingScaler
+from wisdom.models.atomic.AtomicEncoderType import AtomicEncoderType
+from wisdom.data.AtomicStructuralInputs import AtomicStructuralInputs
 from wisdom.Training import _create_model, _device_batch, _model_inputs
 from wisdom.interpretability.SparseConceptModel import SparseConceptModel
 
@@ -454,6 +456,9 @@ class SparseConceptDiscovery(lf.Work):
             raise ValueError("checkpoint did not reconstruct a WisdomV1 predictor")
         predictor = predictor_module
         predictor.load_state_dict(state["state_dict"])
+        if "semantic_gate_state" in state.get("inference_state", {}):
+            predictor.semantic_gates.restore_inference_state(
+                state["inference_state"]["semantic_gate_state"])
         predictor.to(device).eval()
         predictor.requires_grad_(False)
         data_parameters = state.get("data_parameters", {})
@@ -495,6 +500,11 @@ class SparseConceptDiscovery(lf.Work):
         if split not in {"train", "val"}:
             raise ValueError("concept extraction is restricted to train and validation")
         source   = WisdomDataset(dataset, split, subset=subset, include_surface_geometry=True)
+        if predictor.atomic_encoder_type is AtomicEncoderType.STRUCTURAL_GLOBAL:
+            source.atomic_structure_paths = AtomicStructuralInputs(
+                int(data_parameters.get("atom_spatial_k", 16)),
+                predictor.atomic_encoder.maximum_pairwise_bytes,
+            ).prepare(self, (record[0] for record in source.records))
         collator = WisdomCollator(
             atom_spatial_k=int(data_parameters.get("atom_spatial_k", 16)),
             surface_atom_k=int(data_parameters.get("surface_atom_k", 16)),

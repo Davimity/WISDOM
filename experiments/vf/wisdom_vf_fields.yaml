@@ -1,0 +1,97 @@
+# OBJECTIVE: VF1d pilot -- isolate which already computed physical target teaches the encoder.
+# PREREQUISITES: review the strict @1 field coverage and the VF1c reconstruction controls.
+# No APBS, PDB2PQR, OpenMM or structural preprocessing is repeated by this Training Study.
+# The ordinary all-field VF1c branch is the paired reference; it must finish before comparison.
+# Do not compare weighted validation losses between distinct target subsets as if they
+# were the same scientific quantity.
+# The physical pilot matches the atomic path of V16b's replicated no-ESM 1/1/6 candidate.
+# V16b optimized functional S/G, not physical reconstruction; transfer remains a hypothesis.
+# POLICY: No pretrained protein-language or atomic descriptors; stored assets stay intact.
+# Functional labels and local binding GT do not contribute to loss, early stopping or selection.
+name: wisdom-vf-fields  # Separate three-branch physical-target ablation Study.
+run: wisdom.Training.Training  # Same native Work; physical mode executes the atomic path only.
+with:  # All field subsets receive the same proteins, query bank and maximum epoch budget.
+  dataset: {dataset: wisdom-dna-reduced-physics@1}  # Strict physical pilot; external inputs stay off.
+  model_version: 2  # Reuse the current scalar atom encoder; no new model generation.
+  architecture_implementation: controlled  # Required scalar SchNet backbone; no V8 feedback.
+  architecture_spike: baseline  # Match the functional pilot's single-pass architecture.
+  head_implementation: controlled  # Paired controlled layout; functional heads are not trained here.
+  atomic_encoder_type: schnet  # Public LF SchNet layers through the existing WISDOM encoder.
+  hidden_dim: 128  # Match the functional pilot's common atom-output width.
+  atomic_hidden_dim: 64  # Explicit compact pilot state, configurable after V16 review.
+  atomic_output_dim: 128  # Shared output width; no physics-only encoder enlargement.
+  atomic_layers: 1  # V16b 1/1/6 candidate; hold message depth fixed across field subsets.
+  projection_depth: 1  # Match the joint candidate; the surface projection is not run here.
+  surface_layers: 6  # Match the joint candidate; DiffusionNet is not run in physical pretraining.
+  atom_spatial_k: 8  # Exact V16b atomic neighborhood for transferable encoder states.
+  atomic_edge_distance_scale: 6  # Exact V16b geometric message scale.
+  atomic_radial_count: 16  # Exact V16b SchNet radial expansion.
+  atomic_radial_encoding: gaussian  # Exact V16b scalar radial basis.
+  atomic_spatial_cutoff: 6  # Å; exact V16b atom-interaction cutoff.
+  atomic_representation:  # Keep existing local chemistry, not pretrained protein descriptors.
+    sources: [atom_name, residue_atom]  # Two existing observed-atom categorical sources.
+    identity_dim: 8  # Match V16b's learned identity-table width.
+    force_sources: learned  # Keep identity tables trainable.
+    external_model: null  # ESM/SaProt assets are retained but never read by this experiment.
+    external_mode: none  # No contextual, static or replacement external representation.
+    context_dim: 16  # Inactive without ESM; retain V16b's declared atomic signature.
+    atomic_external_model: null  # SLAE stays in the dataset, not in the VF predictor input.
+  initialization_profile: baseline  # Contemporary paired functional initialization policy.
+  embedding_initialization: current  # Match V16b's learned-table initialization.
+  optimization_profile: baseline  # Ordinary AdamW, no averaging or auxiliary functional objective.
+  gate_lambda: 0.04  # Match the functional pilot's grouped gate cost.
+  gate_policy: {lambda_surface: 0.04, lambda_chemical: 0.04, lambda_other: 0.04, initial_active_surface: 0.95, initial_active_chemical: 0.95, initial_active_other: 0.95, warmup_fraction: 0, ramp_fraction: 0}  # Same atomic gate layout and initial activity as the joint pilot.
+  gate_cost_normalization: baseline_count  # Same grouped gate penalty normalization.
+  negative_mining: null  # Physical-only pretraining uses no functional negative-bag signal.
+  batch_size: 4  # Proteins per optimizer step; queries are sampled separately for each protein.
+  epochs: 100  # Physical-only safety ceiling, not a claim of adequate scientific convergence.
+  patience: 20  # Stop on normalized physical-validation loss, not protein or surface GT.
+  minimum_delta: 0.001  # Required patience-reference improvement; best loss is saved exactly.
+  learning_rate: 0.001  # AdamW learning rate for this declared pilot.
+  weight_decay: 0.0005  # Physical reconstruction optimizer, not inferred from functional V16b.
+  dropout: 0.2  # V16b candidate dropout and shared atomic forward behavior.
+  gradient_clip_norm: 5.0  # Reject nonfinite gradients and bound their global norm.
+  precision: float32  # Physical-only pilot is explicitly FP32, including original-unit evaluation.
+  surface_metrics: false  # No functional localization pass during physical pretraining.
+  visualization: {mode: none}  # No meaningless functional viewers from untrained surface heads.
+  evaluate_test: false  # The functional test split is never loaded.
+  data_workers: 2  # Existing bounded native loader workers.
+# Training defaults: physics=null/physics_checkpoint=null leave all existing experiments unchanged;
+# physics.mode=joint (joint|pretrain), objective={} (fields=potential,lj1,lj2; weight=.1;
+# weights=null alternatively gives individual coefficients; never both), queries=512,
+# sampling=stratified (uniform|boundary|stratified), loss=huber (huber|mse), beta=1, seed=2026.
+# Decoder defaults: hidden_dim=64/radial_count=16/radius=12 Å/chunk_size=65536,
+# output_mode=three (three|conditioned), state_control=normal (normal|zero|permuted|detached).
+# physics.freeze_encoder=false/no_messages=false, validation_interval=1 (joint; 0 means final only),
+# evaluation_queries=4096, gradient_diagnostics=true, sign_band=.1 kBT/e,
+# pretraining_task=fields (fields|masked_element), mask_fraction=.15 for the nonphysical control.
+# Fixed training statistics use inherited train only; physical validation inherits the existing
+# group-disjoint validation partition. This is an in-domain physical split, not an external corpus.
+# Training constructor defaults remain hidden=128/element=32/residue=null, atom K=16,
+# radial_count=16/gaussian/spatial_cutoff=6 Å, dropout=.2; surface=DiffusionNet/MAX (not executed).
+# Physical-only learning rate and decay remain a reconstruction pilot; V16b did not optimize them.
+# AtomicRepresentation defaults: sources=(), identity_dim=8, force_sources=learned,
+# external_model=null/external_mode=none/context_dim=32, atomic_external_model=null,
+# atomic_context_dim=32; residue/communication extras remain disabled.
+seeds: [1103, 1109, 1117, 1123]  # Match the VF1c all-field reference seeds exactly.
+sweep:  # Three single-field branches; reuse the VF1c all-field control.
+  space:  # Only the supervised target subset varies; model, queries and optimizer remain fixed.
+    physics:  # A channel absent from fields is still evaluated, but receives zero field loss.
+      values:  # Three target sets and twelve Runs with the four explicit seeds.
+        - {mode: pretrain, objective: {fields: [potential], weight: 0.1}}  # Electrostatics alone.
+        - {mode: pretrain, objective: {fields: [lj1], weight: 0.1}}  # Small neutral probe alone.
+        - {mode: pretrain, objective: {fields: [lj2], weight: 0.1}}  # Larger neutral probe alone.
+# VF1c's {mode: pretrain} branch already uses all three fields at weight 0.1 per field.
+# The coefficient is per active field; total gradient magnitude is measured, not assumed equal.
+# Compare a field's original-unit validation error only where that field was supervised and valid.
+# The Study objective is operational; no cross-subset winner is inferred from its scalar value.
+objective:  # Required LF objective; compare per-field physical metrics in the scientific analysis.
+  metric: val_physics_loss  # Weighted normalized loss within each target subset only.
+  mode: min  # Lower is better within a fixed subset, not across different field subsets.
+# LF objective requires metric; mode defaults to max; range/practical_margin are optional.
+resources:  # Native LF admission respects the granted logical GPUs and shared host resources.
+  gpu: 2  # No physical ordinal selection or hidden additional GPUs.
+  cpu: 36  # Shared Study CPU allocation.
+  memory: 96GiB  # Shared host RAM, not per-Run VRAM.
+  time: 168h  # Compatible recovery restores completed physical optimizer epochs.
+# LF resource defaults: gpu=0/cpu=1/processes=1, memory/storage/gpu_memory=0, time=null.

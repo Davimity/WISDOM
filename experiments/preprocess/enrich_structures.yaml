@@ -1,20 +1,65 @@
-# Enrich an existing immutable placement; no selection, surface build or Laplacian solve.
+# Enrich an immutable placement; preserve selection/base bytes and build only requested assets.
 run: wisdom.preprocessing.common.StructuralEnrichment.StructuralEnrichment  # Shared DNA/Zn Work.
 with:  # Parameters of StructuralEnrichment.run; data membership remains unchanged.
-  dataset: {dataset: wisdom-dna-reduced@6}  # Existing source placement; select wisdom-zinc@1 for Zn.
+  dataset: {dataset: wisdom-dna-reduced@8}  # Preserve all existing geometry, annotations and external representations.
   dataset_name: wisdom-dna-reduced  # Use wisdom-zinc when enriching that independent task.
-  dataset_version: "8"  # New destination; choose another unused version if already published.
+  dataset_version: "9"  # Same destination as full preprocessing: choose ONE route per release.
   atomic_context: true  # Compact canonical chemistry and masked residue torsions.
   source_quality: true  # Observed metadata only when original source bytes can be verified.
   extended_surface_atom: true  # Independent CSR candidate sidecar, not new model inputs.
   extended_radius: 12.0  # Inclusive protein atom-center cutoff in Å.
   extended_k_max: 96  # Positive cap; record all truncations and allow empty rows.
+  sequence_context: false  # Opt in to physical residue/observed/full sequence correspondence.
+  covalent_environment: false  # Opt in to neighbour element/bond-order counts.
+  atomic_sasa: false  # Opt in to absolute per-atom solvent-accessible area.
+  sasa_probe: 1.4  # Solvent probe radius in Å; independent of normalized surface point weights.
+  sasa_samples: 960  # Deterministic Fibonacci quadrature directions per atom, at least 24.
+  residue_graph: true  # Retain heavy-contact semantics and add an independently constructed CA graph.
+  residue_contact_radius: 8.0  # Positive residue-pair minimum atom distance threshold, in Å.
+  residue_surface_radius: 12.0  # Positive point-to-residue threshold; no truncated atom proxy.
+  residue_ca_radius: 12.0  # Optional independent CA support, default null; positive Angstrom cutoff.
+  residue_ca_k_max: 32  # Directed neighbor storage budget, positive; true default 32.
+  surface_environment: true  # Optional protein-only free-space features, true Work default false.
+  environment_options: null  # SurfaceEnvironment defaults: h=1 A, probe=1.4 A, rays=64, horizons=[4,15] A,
+  # offset=.2 A, association_radius=8 A, maximum_voxels=18000000, hull_directions=96.
+  # Invalid values are masked; no hidden ligand input, task label, resolution change or GPU allocation.
+  surface_local_graph: false  # Opt in to the existing normal/chord-filtered sparse surface graph.
+  surface_graph_resolution: 1.0  # Existing surface graph length scale in Å.
+  spectral_modes: null  # Optional positive fixed eigenmode budget; reuses an available prefix.
+  surface_view: false  # Opt in to ONE separate cloud with all matching point-dependent operators.
+  view_id: 1  # Nonnegative deterministic phase/grid ID; zero reproduces historical sampling.
+  view_resolution: null  # Positive optional spacing in Å; null keeps the base spacing.
+  structure_tokens: false  # Opt in to official Foldseek 3Di; ESM alone never requires Foldseek.
+  external_model: null  # null, esm2 (35M), esmc (300M), or saprot (35M); never auto-download.
+  external_checkpoint: null  # Typed local directory: {file: ../../data/models/STAGED_CHECKPOINT}.
+  external_identifier: ""  # Required original repository identity when external_model is enabled.
+  external_revision: ""  # Required staged immutable model revision, not a moving branch.
+  external_layer: -1  # Selected hidden-state layer; -1 uses the final representation.
+  external_maximum_length: 1022  # Positive disjoint chunk length; excludes CLS/EOS tokens.
+  external_device: cpu  # Explicit cpu/cuda device; request GPU resources if selecting CUDA.
+  external_sequence_policy: fragments  # fragments or complete; complete needs verified label_seq.
+  static_embedding_table: false  # Also export actual input-table prototypes; requires a model.
   workers: 4  # Independent file workers; does not enter the scientific identity.
 # True Work defaults: atomic_context=true, source_quality=true, extended_surface_atom=true,
 # extended_radius=12 Å (>0 finite), extended_k_max=96 (>0 integer), workers=4 (>0).
 # dataset/name/version have no defaults. Original IDs, splits, targets and assets are retained.
 # Disabled families generate nothing; any already present source assets are preserved.
-# This publishes the same @8 destination as the full DNA recipe: choose ONE route per release.
-resources: {cpu: 4, memory: 16GiB}  # No GPU; surfaces and operators are read, never regenerated.
+# New-family constructor defaults: all booleans false (this recipe enables residue_graph and
+# surface_environment), CA radius=null, CA K=32, environment_options=null; probe=1.4 Å,
+# samples=960>=24, contact=8 Å>0, residue surface=12 Å>0, graph resolution=1 Å>0,
+# spectral_modes=null or integer>=1, view_id=1>=0, view_resolution=null or positive Å.
+# external_model/checkpoint=null; identifier/revision=""; layer=-1; maximum_length=1022>0;
+# device=cpu; sequence_policy=fragments (or complete). SaProt requires official observed 3Di.
+# Set workers=1 for a single GPU extractor. Models remain frozen and run only when requested.
+# Existing complete assets are validated/reused; parameters and checkpoint/sequence hashes scope
+# each native checkpoint independently. Changing pooling/learning rate never changes these keys.
+# maximum_voxels is only an allocation ceiling: increasing it retains exact earlier results.
+# Historical 2000000-cell keys are recognized; physical settings and file hashes still validate.
+# Native recovery must restore the original Run; a fresh Job with a new checkpoint root cannot
+# recover these files. Confirm an explicit LF recovery plan before applying Retry to a failed Work.
+# Additional Work defaults: atomic_checkpoint=null, atomic_device=cpu; optional reviewed SLAE
+# extraction requires an explicit typed checkpoint and workers=1, and never installs packages.
+# This publishes the same @9 destination as the full DNA recipe: choose ONE route per release.
+resources: {cpu: 4, memory: 96GiB}  # Larger free-space domains need host RAM; no GPU is requested.
 # LF resource defaults: cpu=1 (>0), gpu=0 (>=0); memory/storage/time/processes optional.
 # This is a single Work with no search, sweep, seeds or objective: it never fits a predictor.

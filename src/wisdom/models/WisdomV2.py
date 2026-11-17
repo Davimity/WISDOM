@@ -6,13 +6,14 @@ from torch import Tensor, nn
 from typing import Any, ClassVar
 from lambdaforge.nn import Scatter
 from collections.abc import Sequence
-from wisdom.models.HeadType import HeadType
 from wisdom.models.WisdomV1 import WisdomV1
-from wisdom.models.PoolingType import PoolingType
-from wisdom.models.GlobalSurfaceHeads import GlobalSurfaceHeads
-from wisdom.models.ProteinPoolingHead import ProteinPoolingHead
+from wisdom.models.heads.HeadType import HeadType
+from wisdom.models.pooling.PoolingType import PoolingType
 from wisdom.models.refinement import build_surface_evidence_refiner
-from wisdom.models.HeadType import HeadImplementation, LocalHeadInitialization
+from wisdom.models.heads.GlobalSurfaceHeads import GlobalSurfaceHeads
+from wisdom.models.heads.HeadImplementation import HeadImplementation
+from wisdom.models.pooling.ProteinPoolingHead import ProteinPoolingHead
+from wisdom.models.heads.LocalHeadInitialization import LocalHeadInitialization
 from wisdom.models.refinement.SurfaceEvidenceContext import SurfaceEvidenceContext
 from wisdom.models.refinement.SurfaceEvidenceRefinerType import SurfaceEvidenceRefinerType
 
@@ -313,8 +314,10 @@ class WisdomV2(WisdomV1):
             self.head_implementation is HeadImplementation.CONTROLLED
             and self.head_type in {HeadType.GLOBAL_CONTEXT, HeadType.FILM}
         )
+        atomic_outputs: dict[str, Tensor] = {}
         evidence_features, surface_logits = self.encode_surface(
             **inputs, compute_logits=not replace_local, surface_area_weights=area_weights,
+            atomic_outputs=atomic_outputs,
         )
         protein_count = len(surface_ptr) - 1
         head_output: dict[str, Tensor] = {}
@@ -365,6 +368,7 @@ class WisdomV2(WisdomV1):
         )
 
         output = {
+            **atomic_outputs,
             "logits": pooled["logits"],
             "surface_logits": surface_logits,
             "raw_surface_logits": raw_surface_logits,

@@ -1,0 +1,1 @@
+"""WISDOM assets components."""

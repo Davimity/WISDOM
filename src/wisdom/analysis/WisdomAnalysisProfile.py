@@ -102,7 +102,10 @@ class WisdomAnalysisProfile:
             self._subgroups(prefix, split, global_phenotypes, local_phenotypes)
             self._views(prefix, split)
         self._coupling()
+        self._view_audit()
         self._operational()
+        self._negative_supervision()
+        self._physics()
         self._questions()
         return {
             "metrics":  self.metrics,
@@ -110,6 +113,34 @@ class WisdomAnalysisProfile:
             "families": self.families,
             "questions": self.questions,
         }
+
+    def _physics(self) -> None:
+        """Declare VF reconstruction units and support without changing functional objectives.
+
+        Physical pretraining may minimize its own normalized validation loss. Joint functional
+        Runs continue selecting checkpoints by G; these declarations only expose native curves.
+        """
+        for split in ("train", "val"):
+            self._metric(f"{split}_physics_loss",
+                "Weighted masked field reconstruction in training-only normalized units; not a functional score.",
+                "physics/reconstruction", direction="min", priority=60)
+        self._metric("val_physics_unweighted_loss",
+            "Sum of normalized field errors without auxiliary coefficients; compare this rather than weighted loss across lambda sweeps.",
+            "physics/reconstruction", direction="min", priority=60)
+        for field, unit in (("potential", "kBT/e"), ("lj1", "kJ/mol"), ("lj2", "kJ/mol")):
+            for suffix in ("", "_region_0", "_region_1", "_region_2", "_region_3"):
+                for metric in ("mae", "rmse", "pearson", "spearman", "sign_accuracy"):
+                    if metric == "sign_accuracy" and field != "potential":
+                        continue
+                    correlation = metric in {"pearson", "spearman", "sign_accuracy"}
+                    self._metric(f"val_physics_{field}{suffix}_{metric}",
+                        "Macro-protein physical reconstruction; undefined constant-field correlations remain unavailable, with explicit support counts.",
+                        "physics/" + field, direction="max" if correlation else "min",
+                        priority=60 if not suffix else 30,
+                        unit="dimensionless" if correlation else unit)
+        self.defaults.append({"pattern": "*physics*gradient*", "metadata": {
+            "description": "Shared atomic-encoder gradient norms/cosine; diagnostic, not loss reweighting.",
+            "category": "physics/gradients", "visibility": "normal", "discovery": True}})
 
     def _metric(
         self,
@@ -149,6 +180,38 @@ class WisdomAnalysisProfile:
         if bounds is not None:
             entry["range"] = list(bounds)
         self.metrics[name] = entry
+
+    def _negative_supervision(self) -> None:
+        """Declare VN01's selector diagnostics separately from G/S and post-hoc admission.
+
+        Returns:
+            None; extends only LF metric semantics, never the objective or stopping policy.
+        """
+        meanings = {
+            "loss": "Batch-normalized auxiliary negative loss, using current operational logits; a small value alone does not establish better localization.",
+            "active_batches": "Optimizer batches with nonzero auxiliary loss; a global K can leave most updates untouched.",
+            "components": "Current lower-threshold connected components across every training negative, including isolated points.",
+            "candidates": "Components reaching the higher activation threshold; weak remembered components need not reach it.",
+            "selected": "Strong global-per-Run region priorities, not a per-protein or per-GPU K.",
+            "remembered": "Current tracked components assigned weaker loss; old archived supports are never penalized.",
+            "selected_proteins": "Distinct training negatives represented among this review's strong priorities.",
+            "selected_area": "Sum of whole-protein-normalized proxy area fractions over strong supports; not physical SASA or a region-normalized mean.",
+            "review_seconds": "Full-negative inference, graph detector, tracking and optional current FGW/HDBSCAN wall time; additional to optimizer/validation timing.",
+            "complete_epoch_seconds": "Complete epoch wall time including ordinary training/validation, VN01 review and native continuation checkpoint serialization; do not omit this cost when comparing strategies.",
+            "fgw_fallback": "One if current FGW families failed numerical or resource checks and this epoch used pure top-K; never interpret frequent fallback as a clean N2 comparison.",
+            "task_gradient_norm": "Unscaled protein-loss gradient L2 norm on the common local-head parameters, before clipping, measured on the first active mining batch of each epoch.",
+            "auxiliary_gradient_norm": "Actual coefficient-weighted mining gradient L2 norm on the same local-head parameters and batch; not a whole-network gradient norm.",
+            "gradient_ratio": "Auxiliary/task local-head gradient norm ratio on the first active batch, unavailable for zero task gradient; a pilot diagnostic, not adaptive lambda fitting.",
+        }
+        for name, description in meanings.items():
+            self._metric(f"train_negative_mining_{name}", description,
+                "training/negative-supervision", priority=40, split="train",
+                role="diagnostic", aggregation="latest")
+        self.defaults.append({"pattern": "val_negative_admission_*", "metadata": {
+            "description": "Frozen-checkpoint VN01 F0/F1/F2 decision metric. F2 requires an explicitly independent negative reserve; no model/ranking score is changed.",
+            "category": "validation/negative-admission", "role": "diagnostic", "split": "validation",
+            "visibility": "normal", "discovery": True, "aggregation": "terminal",
+        }})
 
     def _global(self, prefix: str, split: str) -> None:
         """Describe binary rankings and thresholded outcomes at the G-selected checkpoint.
@@ -231,6 +294,18 @@ class WisdomAnalysisProfile:
         self._metric(f"{prefix}_surface_positive_macro_normalized_auprc",
                      "Mean (AUPRC-prevalence)/(1-prevalence) per positive protein. Zero is the random-ranking baseline; negative values are possible without a universal finite lower bound.",
                      f"{split}/surface/ranking", "max", split=split, aggregation="selected_epoch")
+        for suffix, meaning in (
+            ("std", "Sample SD across evaluable positive proteins; unavailable below two proteins"),
+            ("q25", "Linearly interpolated 25th percentile across evaluable positive proteins"),
+            ("median", "Median across evaluable positive proteins"),
+            ("q75", "Linearly interpolated 75th percentile across evaluable positive proteins"),
+        ):
+            for variant in ("", "raw_"):
+                self._metric(f"{prefix}_surface_{variant}positive_auprc_{suffix}",
+                             meaning + "; not variation across seeds. " +
+                             ("Before refinement." if variant else "Operational refined maps."),
+                             f"{split}/surface/dispersion", bounds=(0, 1), priority=25,
+                             split=split, aggregation="selected_epoch")
 
         # Numeric fractions use explicit members because persisted names contain percentages.
 
@@ -536,6 +611,50 @@ class WisdomAnalysisProfile:
             "members": {f"{prefix}_{name}": {"component": name} for name in definitions},
         }
 
+    def _view_audit(self) -> None:
+        """Describe frozen V12 evidence without making it a training/HPO selector.
+
+        Review prefixes identify a recorded model/split, so pattern declarations retain those
+        namespaces rather than pretending they are epochs or independent training replications.
+        Support stays visible beside interpolation error; low coverage is not stable prediction.
+        """
+        for suffix, description, direction, bounds, role in (
+            ("area_coverage", "Fraction of represented destination area with compatible interpolation support.", "max", (0, 1), "support"),
+            ("supported_points", "Number of destination points with compatible interpolation support; not independent proteins.", None, None, "support"),
+            ("logit_mae", "Area-weighted absolute logit error on the supported destination domain.", "min", None, "diagnostic"),
+            ("logit_rmse", "Area-weighted root mean squared logit error on supported points.", "min", None, "diagnostic"),
+            ("probability_mae", "Area-weighted absolute probability interpolation error; probabilities interpolate before comparison.", "min", (0, 1), "diagnostic"),
+            ("probability_rmse", "Area-weighted root mean squared probability error on supported points.", "min", (0, 1), "diagnostic"),
+            ("spearman", "Unweighted rank correlation across supported points; unavailable for constant maps.", "max", (-1, 1), "diagnostic"),
+            ("top_5_area_iou", "Intersection/union of the highest-scoring 5% of supported represented area, including fractional boundary points.", "max", (0, 1), "diagnostic"),
+            ("top_10_area_iou", "Intersection/union of the highest-scoring 10% of supported represented area, including fractional boundary points.", "max", (0, 1), "diagnostic"),
+        ):
+            self.defaults.append({"pattern": f"view_*_{suffix}", "metadata": {
+                "description": description + " Mean over audited proteins; frozen inference, not accuracy or an epoch selector.",
+                "category": "diagnostics/frozen-view", "role": role, "visibility": "normal",
+                "aggregation": "terminal", "discovery": False,
+                **({"direction": direction} if direction else {}),
+                **({"range": list(bounds)} if bounds else {}),
+            }})
+        self.defaults.append({"pattern": "view_*_rigid_tensor_max_logit_error", "metadata": {
+            "description": "Mean per-protein maximum logit change under a fixed rigid tensor transform; does not audit sampler regeneration.",
+            "category": "diagnostics/frozen-view", "role": "diagnostic", "direction": "min",
+            "visibility": "normal", "discovery": False, "aggregation": "terminal",
+        }})
+        self._metric("final_transfer_radius", "Learned effective radius in angstroms inside fixed cached transfer support.",
+                     "diagnostics/transfer", unit="angstrom", aggregation="terminal",
+                     role="diagnostic", discovery=False)
+        for name, meaning in (
+            ("empty_fraction", "Fraction of training surface rows without an active candidate."),
+            ("effective_support", "Mean inverse sum of squared attention weights per supported point and head."),
+            ("entropy", "Mean candidate attention entropy per supported point and head, in natural-log units."),
+            ("head_divergence", "Mean Jensen-Shannon divergence across heads per supported point; shared heads are zero."),
+            ("attended_distance", "Mean attention-weighted physical center distance in angstroms per supported point and head."),
+        ):
+            self._metric(f"train_transfer_{name}", meaning + " Counts aggregate over all chunks/batches in the training epoch, not a final-chunk sample; not an accuracy metric.",
+                         "diagnostics/transfer", split="train", role="diagnostic", discovery=False,
+                         aggregation="latest")
+
     def _operational(self) -> None:
         """Separate costs, optimization, schedules, capacity, and integrity from outcomes."""
         for name, description in {
@@ -545,7 +664,7 @@ class WisdomAnalysisProfile:
             "direct_task_loss": "Protein binary cross entropy of the direct global head.",
             "surface_task_loss": "Protein binary cross entropy of the surface-derived global head; no local ground truth is optimized.",
             "negative_surface_loss": "Weak negative-bag penalty from protein labels, never from surface targets.",
-            "gate_regularization": "Expected semantic path cost under the saved normalization policy, before effective_gate_lambda. Historical mean is in [0,1]; baseline_count preserves common-gate coefficients and can exceed one.",
+            "gate_regularization": "Expected semantic path cost under the saved policy, before effective_gate_lambda. Historical mean is in [0,1]; baseline_count preserves common-gate coefficients. With grouped gate_policy this is already weighted by group coefficients and effective_gate_lambda is one, not another L0 multiplier.",
         }.items():
             self._metric(f"train_{name}", description, "training/loss", "min", priority=15,
                          split="train", role="optimization", aggregation="latest", visibility="advanced",
@@ -578,6 +697,17 @@ class WisdomAnalysisProfile:
             self._metric(f"train_{name}", "Expected L0 activity fraction." if "expected" in name else "Fraction of semantic gates with a deterministic clipped value greater than zero.",
                          "model/gating", bounds=(0, 1), priority=20, split="train", role="diagnostic",
                          visibility="advanced", aggregation="latest")
+        for stage in ("initial", "epoch", "final", "selected"):
+            self.defaults.append({"pattern": f"gate_{stage}_*", "metadata": {
+                "description": (
+                    "Grouped S/C/O gate audit: direct expected weighted L0 cost over 41, "
+                    "effective coefficient, path activity, exact clipping and sampling/gradient "
+                    "diagnostics. Initial/final/selected are distinct states; selected uses the "
+                    "G-chosen checkpoint including saved overrides. Not prediction quality."),
+                "category": "model/gating", "role": "diagnostic", "direction": "unknown",
+                "visibility": "advanced", "discovery": False,
+                "aggregation": "latest" if stage == "epoch" else "terminal",
+            }})
         for name in ("parameter_count", "trainable_parameter_count", "gate_parameter_count", "semantic_gate_count",
                      "evidence_head_parameter_count", "evidence_head_added_parameter_count", "evidence_input_width"):
             self._metric(name, "Static capacity: " + name.replace("_", " ") + "; may vary with HPO architecture, not an accuracy measure.",
@@ -590,6 +720,42 @@ class WisdomAnalysisProfile:
             "model/capacity", priority=20, role="model-size", unit="count",
             visibility="advanced", discovery=False, aggregation="terminal",
         )
+        for name in ("atomic_encoder_total_parameter_count", "atomic_encoder_trainable_parameter_count",
+                     "atomic_filter_parameter_count", "atomic_hidden_dim", "atomic_output_dim"):
+            self._metric(name, "Atomic capacity: " + name.replace("_", " ") +
+                         "; filter parameters are only the LF radial-generator MLPs, not update MLPs.",
+                         "model/capacity", priority=25, role="model-size", unit="count",
+                         visibility="advanced", aggregation="terminal")
+        self._metric(
+            "atomic_encoder_parameter_count",
+            "Historical identity alias of atomic_encoder_trainable_parameter_count, not total "
+            "encoder parameters. Frozen compatibility parameters are counted only by the total metric.",
+            "model/capacity", priority=0, role="alias", unit="count", visibility="hidden",
+            discovery=False, derived_from=["atomic_encoder_trainable_parameter_count"],
+            transformation="identity", aggregation="terminal",
+        )
+        self._metric(
+            "median_complete_epoch_seconds_excluding_first",
+            "Median end-to-end epoch time after epoch one, including scheduled global/local "
+            "validation but excluding post-training filter diagnostics; unavailable with one epoch. "
+            "Concurrent Runs share hardware: not isolated encoder latency.",
+            "runtime/training", "min", priority=25, role="resource", unit="seconds",
+            aggregation="terminal",
+        )
+        self._metric(
+            "train_cuda_peak_reserved_gib", "CUDA allocator peak reserved bytes divided by 2^30; "
+            "includes cached blocks, unlike allocated live tensor bytes. Not encoder-only memory.",
+            "runtime/training", "min", priority=15, role="resource", unit="GiB",
+            split="train", aggregation="latest", visibility="advanced",
+        )
+        for allocation in ("allocated", "reserved"):
+            self._metric(
+                f"peak_cuda_{allocation}_gib",
+                f"Maximum {allocation} CUDA epoch peak observed in this complete training Run, "
+                "including validation; not encoder-only memory or post-training diagnostic cost.",
+                "runtime/training", "min", priority=20, role="resource", unit="GiB",
+                aggregation="terminal",
+            )
         self._metric(
             "train_post_feedback_scale",
             "Learned V8d residual gamma at the end of the training epoch; zero is exact identity. "
@@ -620,6 +786,9 @@ class WisdomAnalysisProfile:
         # prefixing produces train_train_seconds and train_train_proteins_per_second.
 
         resources = {
+            "dataset_setup_seconds": ("Run-local manifest and requested structural-sidecar validation; excludes framework staging and model fitting. Surface target views reuse validated bindings.", "seconds", "min", "data"),
+            "representation_fit_seconds": ("Training-only atomic-input normalization and optional static-table initialization; absent when no atomic representation is configured.", "seconds", "min", "data"),
+            "startup_seconds": ("Application startup from split loading to the training-ready log, including input validation, model construction and normalization; excludes framework queueing, staging and environment setup.", "seconds", "min", "time"),
             "resource.duration_seconds": ("Framework median duration across comparable screening Runs, not the final epoch duration.", "seconds", "min", "time"),
             "resource.gpu_seconds": ("Framework median allocated GPU-seconds per comparable screening Run; not a CUDA utilization measurement.", "seconds", "min", "time"),
             "resource.cpu_seconds": ("Framework median CPU cost per comparable screening Run as recorded by its resource evidence.", "seconds", "min", "time"),
@@ -689,6 +858,7 @@ class WisdomAnalysisProfile:
             {"id": "quality_resource_tradeoff", "kind": "tradeoff", "metrics": [core[3], "parameter_count", "train_epoch_seconds", "train_cuda_peak_gib"], "optional": True},
             {"id": "quality_whole_run_cost", "kind": "tradeoff", "metrics": [core[3], "resource.gpu_seconds", "resource.duration_seconds", "resource.peak_vram"], "optional": True},
             {"id": "surface_quality_hardware", "kind": "tradeoff", "metrics": ["val_surface_positive_macro_auprc", "train_cuda_peak_gib", "train_train_proteins_per_second"], "optional": True},
+            {"id": "radial_width_surface_cost", "kind": "tradeoff", "metrics": ["val_wisdom_hpo_surface", "atomic_filter_parameter_count", "atomic_encoder_trainable_parameter_count", "median_complete_epoch_seconds_excluding_first", "train_cuda_peak_gib"], "optional": True},
             {"id": "localization_negative_control", "kind": "tradeoff", "metrics": ["val_surface_positive_macro_auprc", "val_surface_negative_positive_mass", "val_surface_negative_peak"], "optional": True},
             {"id": "attention_local_evidence", "kind": "relationship", "x": "val_surface_attention_positive_macro_auprc", "y": "val_surface_positive_macro_auprc", "expected": "positive", "optional": True},
             {"id": "surface_view_robustness", "kind": "relationship", "x": "val_view_surface_consistency", "y": "val_surface_positive_macro_auprc", "optional": True},

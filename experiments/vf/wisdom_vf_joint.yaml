@@ -1,0 +1,113 @@
+# OBJECTIVE: initial VF auxiliary-loss pilot, with a paired zero-pressure functional control.
+# This is from-scratch joint learning, NOT the report's final pretrained VF1f transfer conclusion.
+# FIXED PILOT: V16b's replicated no-ESM 1/1/6 candidate, including its optimizer tuple.
+# V16b used a different dataset version and no physical loss; the weight-zero row is the
+# contemporary reference on this physical dataset, not a claim of transferred performance.
+# NEGATIVE MINING: disabled in every row because VN1c lacks a same-code no-mining control.
+# POLICY: No pretrained protein-language or atomic descriptors; stored assets stay intact.
+# After VF1/V16 review, explicitly bind physics_checkpoint to a reviewed physical-encoder.pt
+# and freeze the common backbone before interpreting a post-pretraining VF1e/VF1f comparison.
+name: wisdom-vf-joint  # Standalone native Study; never starts a hidden pretraining job.
+run: wisdom.Training.Training  # Global protein supervision plus optional physical reconstruction.
+with:  # Replicated V16b no-ESM candidate fixed for all physical-pressure comparisons.
+  dataset: {dataset: wisdom-dna-reduced-physics@1}  # Strict physical pilot; labels/splits/SLAE intact.
+  model_version: 2  # Existing scalar atom-to-surface model with pooling capability.
+  surface_representation_mode: learned  # Same learned point representation as V16b.
+  surface_encoder_type: diffusion  # Same DiffusionNet family as V16b.
+  architecture_implementation: controlled  # Required single-pass SchNet backbone, no V8 feedback.
+  architecture_spike: baseline  # Disable exploratory V8 architectural variants.
+  head_implementation: controlled  # Same fixed controlled head layout in every coefficient row.
+  head_type: single  # Same one-logit local head as the V16b candidate.
+  atomic_encoder_type: schnet  # Existing public LF SchNet-backed encoder.
+  hidden_dim: 128  # V16b common atom-output and surface width.
+  atomic_hidden_dim: 64  # V16b compact atomic state; shared with the physical-only pilot.
+  atomic_output_dim: 128  # Unchanged atom-to-surface interface.
+  atomic_layers: 1  # Replicated V16b candidate: one SchNet interaction.
+  projection_depth: 1  # Replicated V16b candidate: one surface-input projection stage.
+  surface_layers: 6  # Replicated V16b candidate: six DiffusionNet blocks.
+  atom_spatial_k: 8  # Match the selected V16b atomic neighborhood.
+  surface_atom_k: 16  # Match the V16b atom-to-surface candidate count.
+  diffusion_spectral_modes: 32  # Match the V16b surface operator width.
+  surface_atom_radius: 4  # Å; match the V16b atom-to-surface support.
+  atomic_edge_distance_scale: 6  # Match the V16b geometric message scale.
+  atomic_radial_count: 16  # Match the V16b SchNet radial expansion.
+  atomic_radial_encoding: gaussian  # Match the V16b scalar radial basis.
+  atomic_spatial_cutoff: 6  # Å; match the V16b SchNet spatial cutoff.
+  transfer_options: {message: low_rank, rank: 16}  # Same rank-16 atom-to-surface messages.
+  surface_options: {use_gradient: true, readout_mode: single, readouts: 1, local_mode: none, spectral_source: base}  # Same single-readout DiffusionNet.
+  atomic_representation:  # No external neural descriptor may bypass learning the atomic field.
+    sources: [atom_name, residue_atom]  # Existing observed-atom chemical identities.
+    identity_dim: 8  # Match the V16b learned identity-table width.
+    force_sources: learned  # Keep identity tables learnable, not fixed vectors.
+    external_model: null  # Preserve ESM data, but do not consume it.
+    external_mode: none  # No pretrained residue context.
+    context_dim: 16  # Inactive while external_mode is none; V16b's declared value.
+    atomic_external_model: null  # Preserve SLAE data, but do not consume it.
+  initialization_profile: baseline  # Matched initialization, including the zero-pressure control.
+  embedding_initialization: current  # Match V16b's learned-table initialization.
+  optimization_profile: baseline  # Same AdamW policy across all coefficients.
+  gate_lambda: 0.04  # Match the V16b grouped gate cost.
+  gate_policy: {lambda_surface: 0.04, lambda_chemical: 0.04, lambda_other: 0.04, initial_active_surface: 0.95, initial_active_chemical: 0.95, initial_active_other: 0.95, warmup_fraction: 0, ramp_fraction: 0}  # Match V16b gate costs and initial activity.
+  gate_cost_normalization: baseline_count  # Match V16b's normalization of active gate costs.
+  weak_loss_profile: custom  # Match V16b's positive regional prior alongside protein BCE.
+  regional_positive_lambda: 0.3  # Same fixed positive prior in the weight-zero control and every VF row.
+  negative_mining: null  # VN1c is not sufficient to add this second intervention to VF.
+  pooling_type: max  # Fixed provisional MIL reference; no pooling search mixed into VF.
+  pooling_area_mode: point  # Match V16b's point-measure convention.
+  surface_refiner_type: heat  # Match V16b's operational post-logit refinement.
+  surface_refiner_heat_length: 6  # Å; use the same operational S as V16b.
+  batch_size: 8  # Bound simultaneous graph and query activations.
+  epochs: 500  # Functional safety ceiling.
+  patience: 30  # Existing protein-G patience policy.
+  minimum_delta: 0.001  # Existing patience-reference improvement threshold.
+  dropout: 0.2  # Joint member of V16b's replicated 1/1/6 optimizer tuple.
+  learning_rate: 0.0007542867271657824  # Exact V16b candidate rate; fixed across every VF row.
+  weight_decay: 0.05  # V16b candidate's decoupled AdamW decay, not an isolated optimum.
+  gradient_clip_norm: 5.0  # Explicit finite-gradient safeguard.
+  precision: auto  # Existing granted-GPU BF16/FP32 policy; physics loss is accumulated in FP32.
+  surface_metrics: true  # Local GT is diagnostic only, never an auxiliary field or model input.
+  surface_metrics_interval: 1  # Record G/S coupling and regret during the comparison.
+  visualization: {mode: none}  # Avoid duplicate per-seed viewers during initial screening.
+  evaluate_test: false  # Functional test remains sealed.
+  data_workers: 2  # Existing host-side decoding workers.
+  # physics_checkpoint: {file: ../../data/physics/physical-encoder.pt}  # Optional explicit reviewed transfer.
+# Training/decoder/objective defaults and controls are documented in wisdom_vf1.yaml and README 4.7.
+# physics=null/physics_checkpoint=null are the true defaults; enabling physics adds the existing
+# physical_queries family automatically. mode=joint, objective weight=.1, queries=512,
+# sampling=stratified, fields=all three, loss=huber/beta=1, seed=2026; weights cannot coexist with weight.
+# decoder hidden=64/radial=16/radius=12 Å/chunk=65536/output=three/state_control=normal.
+# freeze_encoder=false/no_messages=false/gradient_diagnostics=true, validation_interval=1,
+# evaluation_queries=4096, sign_band=.1 kBT/e; final metrics use every stored bank row at best G.
+# Training constructor defaults remain hidden=128/element=32/residue=null, projection=1/surface=2,
+# spatial K=16/surface J=16/radius=6 Å/spectral=128, dropout=.2; gate_lambda=.001.
+# The fixed overrides above reproduce V16b's no-ESM candidate, except the physics dataset,
+# batch size and auxiliary loss. Physical fields are targets only, never input descriptors.
+# AtomicRepresentation sources=()/identity_dim=8/force_sources=learned/context_dim=32;
+# external modes none/static/context/both/replace are intentionally none here; atom external=null.
+# negative_mining=null is the Training default; the explicit override blocks accidental
+# comparison of physical-loss rows with a moving mining policy. Negative calibration is also null.
+seeds: [1103, 1109, 1117, 1123]  # Four paired seeds shared with the physical pilot.
+sweep:  # Mandatory finite contrast, no adaptive pruning or private project HPO.
+  space:  # Exactly one factor varies: the physical loss coefficient.
+    physics:  # Targets stay supervision-only in every row.
+      values:  # Explicit maps keep scientific weights visible in LF and checkpoints.
+        - {mode: joint, objective: {weight: 0.0}}  # Matched heads present but no auxiliary gradients.
+        - {mode: joint, objective: {weight: 0.01}}  # Very weak physical pressure.
+        - {mode: joint, objective: {weight: 0.03}}  # Low physical pressure.
+        - {mode: joint, objective: {weight: 0.1}}  # Default pilot physical pressure.
+        - {mode: joint, objective: {weight: 0.3}}  # Intermediate physical pressure.
+        - {mode: joint, objective: {weight: 1.0}}  # Unit normalized field-loss coefficient.
+        - {mode: joint, objective: {weight: 3.0}}  # Strong physical pressure; inspect gradient conflict.
+        - {mode: joint, objective: {weight: 10.0}}  # Deliberate extreme, not an assumed optimum.
+# LF sweep.space executes all eight rows and four seeds; no optional reference or pruning.
+objective:  # Preserve the project's development score; checkpoints still use global G only.
+  metric: val_wisdom_hpo_score  # Existing joint G/S/coupling diagnostic for development comparisons.
+  mode: max  # Higher composite utility is better; physical metrics remain independently visible.
+  range: [0.0, 1.0]  # Mathematical bounds of W, not a physical reconstruction score.
+# LF objective defaults mode=max; metric required; range/practical_margin optional.
+resources:  # LF chooses resource-aware concurrent admission inside the granted allocation.
+  gpu: 2  # Only the two granted logical devices.
+  cpu: 36  # Shared host CPU budget.
+  memory: 96GiB  # Shared host RAM.
+  time: 168h  # Operational wall-time safety ceiling.
+# LF resource defaults: gpu=0/cpu=1/processes=1, memory/storage/gpu_memory=0, time=null.

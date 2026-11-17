@@ -5,19 +5,19 @@ import lambdaforge as lf
 from typing import Any
 from pathlib import Path
 from collections.abc import Sequence
-from wisdom.preprocessing.common.audit import audit_dataset
-from wisdom.preprocessing.common.splits import assign_splits
 from wisdom.preprocessing.dna.selection.report import write_design
-from wisdom.preprocessing.common.dilutions import create_dilutions
-from wisdom.preprocessing.common.shortcut import shortcut_baseline
-from wisdom.preprocessing.common.population import select_population
+from wisdom.preprocessing.common.auditing.audit import audit_dataset
+from wisdom.preprocessing.common.sampling.splits import assign_splits
 from wisdom.preprocessing.dna.selection.evidence import load_evidence
-from wisdom.preprocessing.common.leakage import assign_leakage_groups
-from wisdom.preprocessing.common.similarity import compute_similarity
-from wisdom.preprocessing.common.snapshots import snapshot_structures
+from wisdom.preprocessing.common.auditing.shortcut import shortcut_baseline
+from wisdom.preprocessing.common.sampling.dilutions import create_dilutions
 from wisdom.preprocessing.dna.selection.phenotypes import assign_phenotypes
 from wisdom.preprocessing.dna.selection.structures import analyse_structures
-from wisdom.preprocessing.common.functional_metadata import annotate_functions
+from wisdom.preprocessing.common.sampling.population import select_population
+from wisdom.preprocessing.common.independence.leakage import assign_leakage_groups
+from wisdom.preprocessing.common.independence.similarity import compute_similarity
+from wisdom.preprocessing.common.independence.snapshots import snapshot_structures
+from wisdom.preprocessing.common.auditing.functional_metadata import annotate_functions
 
 
 class Selection(lf.Work):

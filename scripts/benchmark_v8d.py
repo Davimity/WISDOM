@@ -14,8 +14,8 @@ from inspect import signature
 from wisdom.Training import _create_model
 from wisdom.models.WisdomV1 import WisdomV1
 from wisdom.models.WisdomV2 import WisdomV2
-from wisdom.models.ProteinTaskLoss import ProteinTaskLoss
-from wisdom.models.WeakSurfaceLoss import WeakSurfaceLoss
+from wisdom.models.losses.ProteinTaskLoss import ProteinTaskLoss
+from wisdom.models.losses.WeakSurfaceLoss import WeakSurfaceLoss
 
 
 def synthetic_batch(

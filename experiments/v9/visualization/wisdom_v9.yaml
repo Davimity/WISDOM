@@ -1,4 +1,4 @@
-# Review one explicitly selected V9a–V9f atomic-encoder Study, without fitting models.
+# Review one explicitly selected V9a–V9g atomic-encoder Study, without fitting models.
 # Post-hoc inspection does not fit models or replace paired-study decisions.
 run: wisdom.visualization.StudyReview.StudyReview  # Native inference-only Work.
 

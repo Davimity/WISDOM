@@ -1,0 +1,59 @@
+# OBJECTIVE: audit frozen tensor invariance and the published alternate surface discretization.
+# SOURCE: import the completed V10h Study before review; no optimizer or hidden training.
+# PREREQUISITES: import the exact V10h checkpoints and resolve their immutable @8 dataset.
+# POLICY: select ESM-2 context with habitual tables; restore its saved initialization and gates.
+# VARIES: isolated rigid, phase, grid and resolution perturbations; checkpoint weights fixed.
+# FIXED: original checkpoint weights, source selection and held-out-test policy.
+# DECISION: report stability with physical correspondence, analytic calibration and coverage.
+name: wisdom-v12  # One independent inference-only audit Work, not a training Study.
+run: wisdom.visualization.StudyReview.StudyReview  # Reuse native checkpoint selection and reports.
+
+with:  # Explicit saved evidence; no best-seed callback, hidden ranking or fallback fitting.
+  source_execution: execution-6c675d5c9f10d971  # Completed V10h; native lf import must register it first.
+  dataset: {dataset: wisdom-dna-reduced@8}  # Same immutable content identity as source training.
+  parameter_filter:  # Exact native recorded configuration, no favorable-seed or metric ranking.
+    atomic_representation:  # Match the whole nested mapping in V10h's submitted parameters.
+      sources: ["atom_name", "residue_atom"]  # Same selected identity tables.
+      identity_dim: 8  # Same per-table width.
+      force_sources: learned  # Same learned gates.
+      external_model: esm2  # ESM-2 35M context only, not SaProt or a static initializer.
+      external_mode: context  # Preserve the habitual residue table.
+      context_dim: 32  # Exact selected context width.
+  seed_selection:  # Preserve seed variability instead of selecting a favorable replication.
+    mode: explicit  # Review the same four saved training replications for every protocol.
+    seeds: [211, 223, 227, 229]  # Existing V10h checkpoints; never launch replacement training.
+  splits: [val]  # Test remains sealed; train is available only through an explicit override.
+  maximum_proteins: 4  # Display ceiling only; ordinary review metrics cover the full split.
+  view_audit:  # Opt-in audit; absence/null preserves historical review behavior.
+    protocols: [identity, rigid_tensor, rigid_rebuild, phase, grid, resolution_0.8, resolution_1.25]  # Separate numerical causes; no conflation with conformation changes.
+    view_seeds: [2026, 2027]  # Two fixed view replications, not training seeds.
+    maximum_proteins: 16  # Deterministic dataset-order audit prefix; zero audits every member.
+    maximum_distance: 1.5  # Physical correspondence cutoff in angstroms.
+    minimum_normal_cosine: 0.5  # Reject opposite-facing surfaces before selecting neighbors.
+    query_neighbors: 32  # Bounded physical candidates before normal compatibility filtering.
+    interpolation_neighbors: 3  # Inverse-square compatible neighbors; exact matches take all mass.
+  save_predictions: false  # Publish audit JSON and normal HTML, not duplicate prediction NPZ.
+
+# Actual defaults: source_execution/dataset required; results_root=null uses native ResultStore.
+# trial_selection=null => all; seed_selection=null => median by checkpoint wisdom_score, max.
+# source_seed=null or an explicit recorded seed; parameter_filter=null accepts AND/OR field mappings.
+# selection/ranking uses artifact-bound validation metrics only and cannot change StudyDecision.
+# evaluation_scope=full (explicit requires protein_selection explicit identifiers).
+# protein_selection=null => automatic diagnostic mixture; strategies diagnostic/best/worst/mixed.
+# splits=[val], allow_test=false, content=predictions (features|full), maximum_surface_points=2000>0,
+# maximum_proteins=12>=0 (zero=all), prediction_threshold=.5 in [0,1], report_maximum_mib=14 in (0,16],
+# save_predictions=false, batch_size=1>0, data_workers=0>=0, strict_checkpoints=true.
+# view_audit=null; constructor defaults maximum_distance=1.5 Å, minimum_normal_cosine=.5,
+# query_neighbors=32, interpolation_neighbors=3; 1<=interpolation_neighbors<=query_neighbors.
+# Its maximum_proteins=16 is separate from HTML display coverage. Unavailable correlations stay null.
+# Regenerated protocols require the exact universal base; legacy published requires surface_view. Extended transfer/spectra/local graphs need fresh view-bound assets;
+# incompatible reuse FAILS instead of indexing original point arrays onto another discretization.
+# Old @6 checkpoints cannot be paired with @8 by ignoring DatasetRegistry identity checks.
+
+resources:  # Frozen FP32 inference; no optimizer, SSL preparation, or new training.
+  gpu: 2  # Set zero to use CPU-only execution; no remote job is submitted by editing this file.
+  cpu: 4  # CPU geometry and report assembly budget.
+  memory: 24GiB  # Host memory distinct from GPU VRAM.
+  time: 24h  # Operational ceiling; audit cost is reported, not treated as prediction quality.
+# Defaults: cpu=1, gpu=0, processes=1, memory/gpu_memory/storage=0, time=null.
+

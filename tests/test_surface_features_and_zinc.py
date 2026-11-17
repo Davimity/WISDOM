@@ -22,9 +22,9 @@ from wisdom.features.SurfaceFeatureSchema import SurfaceFeatureSchema
 from wisdom.features.SurfaceFeatureSidecar import SurfaceFeatureSidecar
 from wisdom.models.WisdomV1 import WisdomV1
 from wisdom.models.WisdomV2 import WisdomV2
-from wisdom.preprocessing.common.snapshots import snapshot_structures
-from wisdom.preprocessing.zinc.audit import write_diversity_report
-from wisdom.preprocessing.zinc.evidence import load_evidence
+from wisdom.preprocessing.common.independence.snapshots import snapshot_structures
+from wisdom.preprocessing.zinc.stages.audit import write_diversity_report
+from wisdom.preprocessing.zinc.stages.evidence import load_evidence
 from wisdom.preprocessing.zinc.ZincAnnotation import ZincAnnotation
 from wisdom.preprocessing.zinc.ZincCoordination import ZincCoordination
 from wisdom.preprocessing.zinc.ZincValidation import ZincValidation

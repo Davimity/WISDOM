@@ -23,11 +23,11 @@ from typing import Any
 import torch
 from torch import Tensor
 
-from wisdom.models.DeltaConvSurfaceEncoder import DeltaConvSurfaceEncoder
-from wisdom.models.DiffusionBlock import DiffusionBlock
-from wisdom.models.DiffusionSurfaceEncoder import DiffusionSurfaceEncoder
-from wisdom.models.GatedAtomicEncoder import GatedAtomicEncoder
-from wisdom.models.SurfaceAtomTransfer import SurfaceAtomTransfer
+from wisdom.models.atomic.GatedAtomicEncoder import GatedAtomicEncoder
+from wisdom.models.communication.SurfaceAtomTransfer import SurfaceAtomTransfer
+from wisdom.models.surface.backends.DeltaConvSurfaceEncoder import DeltaConvSurfaceEncoder
+from wisdom.models.surface.DiffusionBlock import DiffusionBlock
+from wisdom.models.surface.DiffusionSurfaceEncoder import DiffusionSurfaceEncoder
 from wisdom.models.WisdomV1 import WisdomV1
 
 

@@ -1,0 +1,28 @@
+{
+  "scope": "Synthetic CPU microbenchmark, one protein and one relation; not a full epoch or H100 measurement",
+  "date": "2026-10-25",
+  "torch": "2.13.0+cu130",
+  "nodes": 320,
+  "hidden_dim": 128,
+  "heads": 2,
+  "threads": 1,
+  "repetitions": 3,
+  "fixture": "Undirected chain edges (i,i+1); both relations use the same chain; spatial K=8; torch seed=42; no_grad evaluation",
+  "comparison": "Legacy: public LF from_edges plus public structural attention. Prepared: AtomicGraphEncoder._global with the exact managed code pack. Same weights and hidden states, no approximation.",
+  "preparation_seconds_both_relations": 0.5984783380117733,
+  "restore_seconds_both_relations": 0.0015698250208515674,
+  "legacy_forward_seconds": [
+    0.3112073639931623,
+    0.2975444770127069,
+    0.2951826250064187
+  ],
+  "prepared_forward_seconds": [
+    0.005156832019565627,
+    0.005445733986562118,
+    0.004771833977429196
+  ],
+  "median_forward_speedup": 57.69908267009439,
+  "outputs_bitwise_equal": true,
+  "excludes": "DataLoader decoding, disk/device transfer, backward, optimizer, surface encoder and validation metrics",
+  "limitation": "Initial graph preparation remains expensive and LF currently scopes these managed files to each Run/seed. Dense GPU attention remains quadratic. No real-data epoch speedup has been measured."
+}

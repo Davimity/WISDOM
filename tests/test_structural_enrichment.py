@@ -17,19 +17,26 @@ from test_wisdom_v1 import _sample, _write_npz
 
 from wisdom.data.WisdomDataset import WisdomDataset
 from wisdom.preprocessing.common.StructuralEnrichment import StructuralEnrichment
-from wisdom.preprocessing.common.structure.AtomicContext import AtomicContext
-from wisdom.preprocessing.common.structure.AtomicStructureBuilder import AtomicStructureBuilder
-from wisdom.preprocessing.common.structure.context_chemistry import CHI_PATHS, EXACT_ATOMS
-from wisdom.preprocessing.common.structure.ExtendedSurfaceAtom import ExtendedSurfaceAtom
-from wisdom.preprocessing.common.structure.PreprocessConfig import PreprocessConfig
-from wisdom.preprocessing.common.structure.ProteinArchive import ProteinArchive
-from wisdom.preprocessing.common.structure.ProteinPreprocessor import ProteinPreprocessor
-from wisdom.preprocessing.common.structure.ProteinReader import ProteinReader
-from wisdom.preprocessing.common.structure.StructuralSidecars import StructuralSidecars
-from wisdom.preprocessing.common.structure.StructureResolver import StructureResolver
-from wisdom.preprocessing.common.structure.SurfaceAtomNeighborhoodBuilder import (
+from wisdom.preprocessing.common.structure.assets.context.AtomicContext import AtomicContext
+from wisdom.preprocessing.common.structure.assets.external.AtomicProteinExtractor import (
+    AtomicProteinExtractor,
+)
+from wisdom.preprocessing.common.structure.assets.graphs.ExtendedSurfaceAtom import (
+    ExtendedSurfaceAtom,
+)
+from wisdom.preprocessing.common.structure.assets.StructuralSidecars import StructuralSidecars
+from wisdom.preprocessing.common.structure.chemistry.context_chemistry import CHI_PATHS, EXACT_ATOMS
+from wisdom.preprocessing.common.structure.geometry.AtomicStructureBuilder import (
+    AtomicStructureBuilder,
+)
+from wisdom.preprocessing.common.structure.geometry.SurfaceAtomNeighborhoodBuilder import (
     SurfaceAtomNeighborhoodBuilder,
 )
+from wisdom.preprocessing.common.structure.io.ProteinReader import ProteinReader
+from wisdom.preprocessing.common.structure.io.StructureResolver import StructureResolver
+from wisdom.preprocessing.common.structure.PreprocessConfig import PreprocessConfig
+from wisdom.preprocessing.common.structure.ProteinPreprocessor import ProteinPreprocessor
+from wisdom.preprocessing.common.structure.storage.ProteinArchive import ProteinArchive
 from wisdom.preprocessing.dna.preprocessing import publication
 from wisdom.preprocessing.zinc import ZincPreprocessing as zinc_module
 from wisdom.utils.structure.models.Atom import Atom
@@ -147,6 +154,49 @@ def test_context_hash_schema_quality_and_source_correspondence(tmp_path):
     _save(base, wrong)
     with pytest.raises(ValueError, match="hash mismatch"):
         context.validate(output, base)
+
+
+def test_context_reconstruction_never_decompresses_unrelated_surface_arrays(tmp_path, monkeypatch):
+    """Selective decoding preserves every context field and whole-archive integrity checks.
+
+    Args:
+        tmp_path: Disposable exact base and context archives.
+        monkeypatch: Guard array decoding, without weakening file hashing or reconstruction.
+    """
+    protein, arrays = _chemistry()
+    base, output = tmp_path / "base.npz", tmp_path / "context.npz"
+    arrays["unused_surface"] = np.ones((100, 3), dtype=np.float32)
+    _save(base, arrays)
+    context = AtomicContext()
+    expected = context.build(arrays, protein)
+    native = np.lib.npyio.NpzFile.__getitem__
+
+    def guarded(archive, name):
+        """Allow all scientific context inputs but reject irrelevant surface decompression.
+
+        Args:
+            archive: Open NumPy ZIP archive.
+            name: Requested array name forwarded to NumPy.
+
+        Returns:
+            Unmodified stored array.
+        """
+        assert name != "unused_surface"
+        return native(archive, name)
+
+    monkeypatch.setattr(np.lib.npyio.NpzFile, "__getitem__", guarded)
+    context.write(base, output, protein)
+    assert context.validate(output, base, protein)
+    with np.load(output, allow_pickle=False) as stored:
+        for name, values in expected.items():
+            np.testing.assert_array_equal(stored[name], values, strict=True)
+
+    # Even unused arrays remain covered by the exact base digest.
+
+    arrays["unused_surface"] *= 2
+    _save(base, arrays)
+    with pytest.raises(ValueError, match="hash mismatch"):
+        context.validate(output, base, protein)
 
 
 @pytest.mark.parametrize("radius,maximum", [(6, 32), (12, 96), (12, 3)])
@@ -402,7 +452,7 @@ def test_source_order_repeated_chains_and_independent_quality_flag():
 def test_both_task_yaml_enrichment_contract():
     """Shared families are deliberately enabled without changing the historical base settings."""
     root = Path(__file__).parents[1]
-    for task, version in (("dna", "8"), ("zinc", "2")):
+    for task, version in (("dna", "9"), ("zinc", "3")):
         settings = yaml.safe_load(
             (root / f"experiments/preprocess/{task}/{task}_preprocess.yaml").read_text()
         )
@@ -414,6 +464,16 @@ def test_both_task_yaml_enrichment_contract():
         assert preprocess["atomic_context"] and preprocess["extended_surface_atom"]
         assert preprocess.get("surface_atom_radius", 6) == 6
         assert preprocess.get("surface_atom_k_max", 32) == 32
+        for name in (
+            "sequence_context", "covalent_environment", "atomic_sasa", "residue_graph",
+            "surface_environment", "surface_local_graph", "surface_view",
+        ):
+            assert preprocess[name] is True
+        assert preprocess["spectral_modes"] == 256
+        assert preprocess["protein_models"] == {"file": "../../../data/models"}
+        assert preprocess["protein_model_kinds"] == ["esm2"]
+        assert preprocess["protein_static_tables"] is False
+        assert preprocess["structure_tokens"] is False
 
 
 def _work(tmp_path):
@@ -442,7 +502,8 @@ def _work(tmp_path):
         run_dir=tmp_path,
         log=Mock(),
         outputs=outputs,
-        checkpoints=SimpleNamespace(file=managed_file),
+        checkpoints=SimpleNamespace(file=managed_file,
+            exists=lambda name: (tmp_path / "checkpoints" / name).is_file()),
         metrics=SimpleNamespace(log=Mock()),
         map=lambda rows, fn, **kwargs: [fn(row) for row in rows],
         resume_map=lambda rows, fn, **kwargs: [fn(row) for row in rows],
@@ -506,7 +567,10 @@ def test_dna_publication_attaches_common_assets_before_audit(tmp_path, pdb_path,
     assert base.read_bytes() == original
 
 
-def test_zinc_publication_attaches_identical_universal_families(tmp_path, pdb_path, monkeypatch):
+@pytest.mark.parametrize("complete", [False, True])
+def test_zinc_publication_attaches_identical_universal_families(
+    tmp_path, pdb_path, monkeypatch, complete
+):
     """The real Zn orchestration passes generic options and publishes native optional assets."""
     geometry = tmp_path / "geometry"
     base = _complete_base(geometry, pdb_path)
@@ -542,12 +606,61 @@ def test_zinc_publication_attaches_identical_universal_families(tmp_path, pdb_pa
     monkeypatch.setattr(zinc_module.ZincAnnotation, "write", annotate)
     monkeypatch.setattr(zinc_module.ZincAnnotation, "validate", lambda *args, **kwargs: True)
     monkeypatch.setattr(zinc_module.ZincValidation, "audit_members", audit)
-    zinc_module.ZincPreprocessing.run(
-        work, design=design, workers=1, atomic_context=True, extended_surface_atom=True
-    )
+    options = {} if not complete else {
+        "sequence_context": True, "covalent_environment": True, "atomic_sasa": True,
+        "sasa_samples": 24, "residue_graph": True, "residue_ca_radius": 12.0,
+        "surface_environment": True, "environment_options": {"rays": 8, "hull_directions": 12},
+        "surface_local_graph": True, "surface_view": True, "spectral_modes": 16,
+    }
+    if complete:
+        checkpoint = tmp_path / "weights.ckpt"
+        checkpoint.write_bytes(b"isolated-test-checkpoint-not-production-weights")
+        monkeypatch.setattr(AtomicProteinExtractor, "CHECKPOINT_SHA256",
+                            ProteinArchive.sha256(checkpoint))
+        tool = Mock(binding={"policy": {"torch_cuda": "12.4"}})
+        tool.entrypoint.return_value = tmp_path / "extract.py"
+        work.tools, work.temp_dir = Mock(), tmp_path
+        work.tools.runtime.return_value = tool
+
+        def infer(command, **settings):
+            """Mock external inference only; keep physical alignment and file validation real."""
+            if "--output" not in command:
+                return
+            with np.load(command[command.index("--input") + 1], allow_pickle=False) as stored:
+                assert not np.any(stored["atomic_numbers"] == 30)
+                parents = stored["residue_indices"]
+                names = stored["atom_names"].astype(str)
+                slots = np.asarray([AtomicProteinExtractor.ATOM_NAMES.index(name)
+                    if name in AtomicProteinExtractor.ATOM_NAMES else -1 for name in names])
+                valid = (slots >= 0) & (stored["atomic_numbers"] > 1) & np.isin(
+                    stored["residue_names"], [name for name, _ in EXACT_ATOMS])
+            residue_valid = np.zeros(int(parents.max()) + 1, bool)
+            residue_valid[parents[valid]] = True
+            np.savez(command[command.index("--output") + 1],
+                embedding=np.repeat(valid[:, None], 128, axis=1).astype(np.float32),
+                residue_embedding=np.repeat(residue_valid[:, None], 128, axis=1).astype(np.float32),
+                valid=valid, residue_valid=residue_valid, atom_parent=parents, atom_slot=slots)
+
+        tool.run.side_effect = infer
+        options.update(atomic_checkpoint=checkpoint, atomic_device="cuda")
+    work.map = Mock(wraps=work.map)
+    zinc_module.ZincPreprocessing.run(work, design=design, workers=4, atomic_context=True,
+                                    extended_surface_atom=True, **options)
     member = work.outputs.dataset.call_args.kwargs["members"][0]
     assert member["targets"]["zinc_binding"] == 0
     assert {"atomic_context", "extended_surface_atom"} <= member["assets"].keys()
+    if complete:
+        expected = {"sequence_context", "covalent_environment", "atomic_sasa", "residue_graph",
+                    "surface_environment", "surface_local_graph",
+                    "surface_view", "spectral_extension", "external_atomic_slae"}
+        assert expected <= member["assets"].keys()
+        assert expected <= set(member["metadata"]["required_structural_assets"])
+        assert [call.kwargs["workers"] for call in work.map.call_args_list] == [4, 4, 1]
+        assert work.map.call_args_list[0].kwargs["name"] == "sequence-correspondence-preflight"
+        with np.load(member["assets"]["surface_environment"], allow_pickle=False) as environment:
+            for name in ("travel_depth", "euclidean_depth", "occlusion_near", "occlusion_far",
+                         "empty_radius"):
+                assert environment[name].shape == environment[name + "_valid"].shape
     assert base.read_bytes() == original
 
 

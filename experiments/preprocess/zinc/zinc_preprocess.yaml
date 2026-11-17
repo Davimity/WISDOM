@@ -9,7 +9,10 @@ steps:  # Sequential scientific boundaries visible in LambdaForge.
       negative_evidence_go_terms: ["GO:0008270", "GO:0046872"]  # Experimental NOT of Zn/metal binding; these terms are not negative themselves.
       # negative_evidence: {file: ../../../data/zinc/negative-evidence.jsonl}  # Optional referenced exact-sequence override.
       maximum_entries: 0  # Zero inspects every Zn entry; a positive cap marks a pilot.
-      workers: 12  # Bounded acquisition concurrency, not scientific identity.
+      minimum_negative_sequences: 3  # Stop before bulk downloads if distinct explicit negatives cannot cover three split roles.
+      workers: 42  # Bounded acquisition concurrency, not scientific identity.
+      structure_executor: process  # Inspect assemblies outside the Python thread lock; downloads stay threaded.
+      progress_log_seconds: 120.0  # Phase-liveness logs; native LF progress shows completed entries.
       acquire_functional_metadata: true  # Freeze domains, taxonomy and exact-sequence UniProt annotations.
       output_directory: ../../../data/zinc/raw  # Portable snapshot published only on success.
     # ZincDiscovery defaults: skip=false, existing_raw=null (required when skipped),
@@ -17,12 +20,18 @@ steps:  # Sequential scientific boundaries visible in LambdaForge.
     # workers=8 (>0), maximum_entries=0 (>=0), requests_per_second=2 (>0 per-service ceiling),
     # coordination_cutoff=3 Å (>0), minimum_occupancy=.5 ([0,1]), minimum_donors=2,
     # minimum_residues=2 (>0 selected-copy counts), acquire_functional_metadata=true.
+    # structure_executor="process" ("process" or "thread"), progress_log_seconds=120 (>0).
+    # minimum_negative_sequences=3 (>0); necessary support only, full-RAW groups can still merge later.
+    # Both maps share workers; coordinates download before CPU inspection. Completed native
+    # entries resume independently. Executors/workers/log intervals never enter scientific identity.
     # negative_evidence_go_terms=[GO:0008270,GO:0046872]; reviewed is-a ancestors
     # GO:0043169/GO:0043167 also allowed, never narrower functions or another metal.
     # output_directory="../data/zinc/raw"; null retains only managed outputs.
     # Native checkpoints retain one acquisition session across Attempts; content/policy determines
     # snapshot_id, never label/time/workers. No mapped negatives stops with an audit, no fallback.
-    resources: {cpu: 12, memory: 16GiB}  # Network acquisition and assembly inspection, no GPU.
+    # Public JSON and coordinate bytes are durable per-source checkpoints. LF owns atomic storage.
+    # Legacy cache-only Attempts need verified native migration, not silent public re-query.
+    resources: {cpu: 42, memory: 120GiB, storage: 256GiB}  # Budget durable observations alongside evictable downloads; no GPU.
   - name: select  # Reverify frozen copies, group full RAW, characterize shapes and split once.
     run: wisdom.preprocessing.zinc.ZincSelection.ZincSelection  # Offline scientific design.
     with:  # No current RCSB revision is downloaded here.
@@ -30,7 +39,7 @@ steps:  # Sequential scientific boundaries visible in LambdaForge.
       raw_path: {from: discover.raw}  # Adjacent provenance and structures are part of Discovery.
       # raw_path: {file: ../../../data/zinc/raw/raw.jsonl}  # Independent selection: remove discover and replace from.
       # existing_design: {file: ../../../data/zinc/design}  # With skip=true, remove discover and comment raw_path.
-      workers: 12  # Local workers and specialist-tool threads.
+      workers: 42  # Local workers and specialist-tool threads.
       positive_policy: all  # Keep every eligible positive; evidence quality outranks balance.
       # positive_policy: diverse_quota  # Optional controlled-size selection, reporting coverage loss.
       # positive_negative_ratio: 1.0  # Applies only to diverse_quota, not a biological preference.
@@ -63,7 +72,7 @@ steps:  # Sequential scientific boundaries visible in LambdaForge.
     # train_fraction=.70, validation_fraction=.15, test_fraction=.15 (positive, sum one),
     # dilution_fractions=[1,.75,.5,.25,.1] ((0,1], including 1), dilution_replicates=1 (>0),
     # seed=2026; output_directory="../data/zinc/design" (null disables external copy).
-    resources: {cpu: 12, memory: 32GiB}  # Probe MMseqs2/Foldseek before expensive offline work.
+    resources: {cpu: 42, memory: 120GiB}  # Probe MMseqs2/Foldseek before expensive offline work.
   - name: preprocess  # Never rediscover, rebalance, recluster or repartition.
     run: wisdom.preprocessing.zinc.ZincPreprocessing.ZincPreprocessing  # Universal NPZ and Zn sidecars.
     with:  # TXT alone cannot restore assembly/site provenance.
@@ -71,15 +80,54 @@ steps:  # Sequential scientific boundaries visible in LambdaForge.
       design: {from: select.zinc-design}  # Exact selected coordinates and fixed partitions.
       # design: {file: ../../../data/zinc/design}  # Independent preprocessing: replace from and remove prior steps.
       dataset_name: wisdom-zinc  # Separate managed family; zinc_binding remains compatible.
-      dataset_version: "2"  # Optional common structural assets; published @1 stays immutable.
+      dataset_version: "3"  # Complete universal/residue/SLAE/environment assets; published @1/@2 stay immutable.
       training_subset: full  # Or replicate-00/train-25; evaluation remains fixed.
-      workers: 12  # Bounded geometry processes and annotation threads.
+      workers: 32  # Bounded geometry processes and annotation threads.
       atomic_context: true  # Protein-only identity, masked torsions and covalent context.
       source_quality: true  # Observed source quality metadata, not active neural inputs.
       extended_surface_atom: true  # CSR asset; do not replace the historic 6 Å/K32 base table.
       extended_radius: 12.0  # Protein atom-center cutoff in Å, independent of Zn targets.
       extended_k_max: 96  # Store up to 96 real candidates per point and audit all discarded ones.
-    # ZincPreprocessing defaults: skip=false, design=null (required unless skipped),
+      sequence_context: true  # Physical residue/sequence correspondence, using only protein atoms.
+      covalent_environment: true  # Fixed neighboring element and bond-order counts.
+      atomic_sasa: true  # Per-atom solvent-accessible area on the metal-free protein.
+      sasa_probe: 1.4  # Solvent sphere radius in Å, identical to the DNA recipe.
+      sasa_samples: 960  # Deterministic quadrature directions per atom.
+      residue_graph: true  # Heavy-atom residue contacts and residue-surface candidates.
+      residue_contact_radius: 8.0  # Heavy-atom contact cutoff in Å.
+      residue_surface_radius: 12.0  # Untruncated direct residue-surface cutoff in Å.
+      residue_ca_radius: 12.0  # Independent alpha-carbon graph support in Å.
+      residue_ca_k_max: 32  # Directed CA candidate budget before undirected union.
+      surface_environment: true  # Protein-only depth, occlusion and empty-space geometry.
+      environment_options:  # Same fixed physical approximation as DNA, never consumes Zn sites.
+        spacing: 1.0  # Spatial-grid cell side in Å.
+        probe: 1.4  # Solvent radius in Å.
+        rays: 64  # Deterministic hemispherical angular quadrature.
+        horizons: [4.0, 15.0]  # Near/far occlusion distances in Å.
+        offset: 0.2  # Outward ray-origin offset in Å.
+        association_radius: 8.0  # Maximum center-to-wall association distance in Å.
+        maximum_voxels: 18000000  # Allocation guard; no silent coarsening or truncation.
+        hull_directions: 96  # Expanded-sphere envelope supporting directions.
+      surface_local_graph: true  # Normal/chord-filtered local surface topology.
+      surface_graph_resolution: 1.0  # Physical coherence-rule length in Å.
+      spectral_modes: 256  # Independent fixed spectral extension; base remains at 128.
+      surface_view: true  # Deterministic alternate discretization with its own operators.
+      view_id: 1  # Fixed Fibonacci phase and grid offset.
+      view_resolution: 1.0  # Alternate point spacing in Å.
+      curvature_scales: [1.5, 2.5, 5.0, 7.5, 10.0]  # Same multiscale curvature support as DNA.
+      structure_tokens: false  # ESM-2 needs no 3Di; selecting SaProt enables its required tokens automatically.
+      protein_models: {file: ../../../data/models}  # Pinned manifest; only selected models below are generated.
+      protein_model_kinds: [esm2]  # Selected V14/V15 residue encoder; esmc/saprot remain optional.
+      protein_static_tables: false  # Context-only experiments do not consume input-table prototypes.
+      # protein_model_kinds: [esm2, esmc, saprot]  # Re-enable the full model comparison explicitly.
+      # protein_static_tables: true  # Also export selected models' static input tables when studying initialization.
+      external_device: cuda  # Selected frozen residue models run sequentially on the granted logical GPU.
+      atomic_checkpoint: {file: ../../../data/external-models/slae/autoencoder.ckpt}  # Reviewed base SLAE weights, mirrored unchanged.
+      atomic_device: cuda  # Native isolated SLAE runtime; one atomic extraction at a time after parallel geometry.
+    # ZincPreprocessing defaults: skip=false, design=null (required in this modern protocol),
+    # legacy_train/legacy_validation/legacy_test/legacy_positives/legacy_negatives/legacy_all=null.
+    # The separate zinc_legacy_preprocess.yaml uses those TXT inputs instead of design, preserves
+    # historical labels/splits and requires training_subset=full; this modern recipe does not.
     # dataset_name="wisdom-zinc", dataset_version="1", training_subset="full", workers=8 (>0),
     # surface_resolution=1, probe_radius=1.4, atom_spatial_radius=6, surface_atom_radius=6 Å;
     # atom_spatial_k_max=32, surface_atom_k_max=32, diffusion_spectral_modes_max=128,
@@ -90,7 +138,38 @@ steps:  # Sequential scientific boundaries visible in LambdaForge.
     # extended_surface_atom=false, extended_radius=12 Å (>0), extended_k_max=96 (>0 integer).
     # Empty/short CSR rows are legal; counts and discarded_count make truncation explicit.
     # These independently enabled families do not alter the base schema/configuration hash.
-    resources: {cpu: 12, memory: 64GiB}  # Geometry dominates CPU/memory demand.
+    # Remaining true defaults: residue_graph=false, residue_contact_radius=8 Å,
+    # residue_surface_radius=12 Å, residue_ca_radius=null, residue_ca_k_max=32;
+    # sequence_context=false, covalent_environment=false, atomic_sasa=false, sasa_probe=1.4 Å,
+    # sasa_samples=960 (>=24), surface_environment=false, environment_options=null. When enabled,
+    # SurfaceEnvironment defaults equal the eight values selected above; all lengths are positive,
+    # rays/hull_directions/count ceilings are positive integers; invalid geometry stays masked.
+    # surface_local_graph=false, surface_graph_resolution=1 Å (>0), spectral_modes=null
+    # (positive integer when set), surface_view=false, view_id=1 (>=0), view_resolution=null
+    # (base spacing, otherwise >0 Å). structure_tokens=false; Foldseek is required when enabled.
+    # protein_models=null; protein_model_kinds=null selects all three historical model kinds when
+    # a bundle is supplied; explicit nonempty unique esm2/esmc/saprot lists select a subset.
+    # protein_static_tables=true is the compatibility default; this recipe selects false.
+    # Only selected weights are preflighted. SaProt alone automatically requires 3Di; ESM does not.
+    # The typed manifest directory must already exist identically on the target.
+    # external_model=null (esm2/esmc/saprot); external_checkpoint=null (required for single-model
+    # extraction), external_identifier/revision="", external_layer=-1, external_maximum_length=1022
+    # (>0), external_device="cpu", external_sequence_policy="fragments" (or "complete"),
+    # static_embedding_table=false. The bundle and single-model recipes are mutually exclusive.
+    # atomic_checkpoint=null, atomic_device="cpu" are true defaults; this recipe enables SLAE.
+    # Its inference always uses one native file worker without reducing geometry's workers.
+    # The staged checkpoint and bootstrapped tool_runtimes.slae CUDA policy must match; the
+    # declared runtime needs a real provider GPU grant. No hidden CPU fallback is permitted.
+    # Bundle residue models also run one at a time; single-model external_model shares the
+    # structural map and should use workers=1 on CUDA instead of concurrent calls to one model.
+    # Frozen representations never see Zn/DNA/other non-protein atoms or task targets. Models are
+    # preflighted before geometry; requested missing assets stop publication instead of disappearing.
+    resources:  # Match the complete DNA structural recipe; concurrency remains bounded at twelve.
+      gpu: 1  # Granted logical GPU for serial residue inference and the isolated SLAE runtime.
+      cpu: 48  # Total shared numerical-kernel and protein-worker budget.
+      memory: 200GiB  # Concurrent surfaces, alternate operators, SASA and independent audits.
+      storage: 400GiB  # Full Zn population may be much larger than the reduced DNA benchmark.
+      time: 168h  # Safety ceiling, not a measured production runtime promise.
   - name: validate  # Independent audit after publication and before viewers.
     run: wisdom.preprocessing.zinc.ZincValidation.ZincValidation  # Scientific validation, not just hashes.
     with:  # Resolve publication only after preprocessing succeeds.
@@ -98,12 +177,12 @@ steps:  # Sequential scientific boundaries visible in LambdaForge.
       output_directory: ../../../data/zinc/validation  # Human verdict and ordered member errors.
     # ZincValidation defaults: dataset=null (required unless skipped), fail_on_error=true,
     # skip=false, output_directory=null. Failures register reports before raising.
-    # For validation only, remove prior steps and bind {dataset: wisdom-zinc@1}.
+    # For validation only, remove prior steps and bind {dataset: wisdom-zinc@3}.
     resources: {cpu: 1, memory: 8GiB}  # Sequential member audit, no model fitting.
   - name: visualize  # Runs after successful independent validation.
     run: wisdom.visualization.Visualization.Visualization  # Shared DNA/Zn HTML and PLY viewer.
     with:  # Scientific arrays are unchanged by display sampling.
-      skip: false  # True creates no gallery; data and validation remain available.
+      skip: true  # True creates no gallery; data and validation remain available.
       dataset: {from: preprocess.dataset}  # Native upstream DatasetVersion.
       output_directory: ../../../data/zinc/visualizations  # Offline gallery and full-point PLY.
       maximum_proteins: 12  # Deterministic display sample; zero means every member.

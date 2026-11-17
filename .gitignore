@@ -8,3 +8,8 @@ build/
 runs/
 slurm-*.out
 .lambdaforge/
+/data/models/esm2-35m/
+/data/models/saprot-35m/
+/data/models/esmc-300m/
+# Large external atomic checkpoints are staged separately from tracked provenance manifests.
+data/external-models/**/*.ckpt

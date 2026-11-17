@@ -6,18 +6,26 @@ with:  # Public evidence and exact coordinates, no manual preparation required.
   negative_evidence_go_terms: ["GO:0008270", "GO:0046872"]  # Experimental NOT Zn/metal binding, not absence.
   # negative_evidence: {file: ../../../data/zinc/negative-evidence.jsonl}  # Optional referenced exact-sequence override.
   workers: 8  # Concurrent native acquisition.
+  structure_executor: process  # Spawn pure assembly inspections; downloads use native threads.
+  progress_log_seconds: 120.0  # Parent liveness interval; LF tracks exact map progress.
   maximum_entries: 0  # Zero means all query hits; a cap marks a pilot.
+  minimum_negative_sequences: 3  # Necessary distinct negative sequences before bulk acquisition, not a guarantee of independent leakage groups.
   acquire_functional_metadata: true  # Descriptive domains/taxonomy/EC, never labels or edges.
   output_directory: ../../../data/zinc/raw  # Successful native portable publication.
 # Defaults: skip=false, existing_raw=null (required when skipped), negative_evidence=null,
 # snapshot_label=null (optional human name), workers=8 (>0), maximum_entries=0 (>=0),
 # requests_per_second=2 (>0 per-service ceiling), coordination_cutoff=3 Å (>0),
 # minimum_occupancy=.5 ([0,1]), minimum_donors=2/minimum_residues=2 (>0 selected-copy counts).
+# structure_executor="process" (or "thread"), progress_log_seconds=120 (>0 seconds).
+# minimum_negative_sequences=3 (>0); reduce only for an explicit acquisition pilot, never to bypass Selection's split guard.
+# workers bounds each phase separately; operational settings do not alter scientific identity.
 # negative_evidence_go_terms=[GO:0008270,GO:0046872]; reviewed is-a ancestors
 # GO:0043169/GO:0043167 allowed, never narrower functions or another metal.
 # Canonical full-sequence mapping rejects mutations, tags, truncations, contexts and isoforms.
 # acquire_functional_metadata=true; missing annotations stay missing. Snapshot identity hashes
 # scientific policy and response/coordinate content; native checkpoints retain a resumable session.
+# Mutable public responses and coordinate bytes are durable acquisition checkpoints, not cache-only observations.
+# Legacy cache-only Attempts require verified native migration; never combine saved inspections with fresh source revisions.
 # output_directory="../data/zinc/raw" (null managed only). No mapped negatives stops with an audit.
-resources: {cpu: 8, memory: 16GiB}  # Host acquisition, no training.
+resources: {cpu: 8, memory: 64GiB, storage: 256GiB}  # Durable sources plus temporary cache copies; no GPU.
 # LF resource defaults: cpu=1 (>0), gpu=0 (>=0); memory/storage/time/processes optional.

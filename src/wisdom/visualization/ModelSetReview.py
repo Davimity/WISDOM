@@ -7,8 +7,8 @@ import lambdaforge as lf
 from typing import Any
 from pathlib import Path
 from wisdom.Training import Training
-from lambdaforge.products import ProductInput
 from collections.abc import Mapping, Sequence
+from lambdaforge.products import ProductInput
 from wisdom.visualization.ReviewInference import ReviewInference
 from wisdom.visualization.ReviewSelection import ReviewSelection
 
@@ -37,6 +37,7 @@ class ModelSetReview(lf.Work):
         strict_checkpoints    : bool = True,
         source_seed           : int | None = None,
         parameter_filter      : Mapping[str, Any] | Sequence[Mapping[str, Any]] | None = None,
+        view_audit            : Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Forward promoted models, optionally narrowed by explicit researcher-authored filters.
 
@@ -65,6 +66,8 @@ class ModelSetReview(lf.Work):
                 keeps every promoted seed; no new seed or metric-driven ranking is invented.
             parameter_filter: Optional exact scalar/list choices, or alternative condition mappings,
                 evaluated only against promoted model parameters. None keeps every promoted model.
+            view_audit: Optional SurfaceMapAudit thresholds plus maximum_proteins=16 (zero=all).
+                Audits frozen predictions on the published alternate view, never trains.
 
         Returns:
             Product identity, reviewed model count and HTML presentation summary.
@@ -137,4 +140,5 @@ class ModelSetReview(lf.Work):
             batch_size,
             data_workers,
             strict_checkpoints,
+            view_audit,
         )

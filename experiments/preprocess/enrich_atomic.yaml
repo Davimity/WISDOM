@@ -1,0 +1,51 @@
+# OBJECTIVE: Add frozen observed-atom SLAE vectors to @9 without rebuilding geometry or labels.
+# PREREQUISITES: lf clusters bootstrap citius-ctgpgpu16 --project .; mirror the exact base weights.
+# Bootstrap provisions tool_runtimes.slae from pyproject.toml, separate from WISDOM's dependencies.
+# Run from the repository root after bootstrap succeeds:
+#   lf validate experiments/preprocess/enrich_atomic.yaml
+#   lf run experiments/preprocess/enrich_atomic.yaml --on citius-ctgpgpu16
+# No pip install in framework caches is needed. The old failed initialization produced no proteins.
+# VARIES: no training parameter; one exact frozen extractor and physical atom correspondence.
+# FIXED: original membership, splits, geometry, annotations, external residue sources and byte identities.
+# DECISION: publish only complete masked/aligned assets; report overlap as unknown, never independent.
+name: wisdom-atomic-enrichment  # Explicit optional feasibility/publication action, not hidden training.
+run: wisdom.preprocessing.common.StructuralEnrichment.StructuralEnrichment  # Native managed Work.
+with:  # Runtime dependencies fail before expensive geometry or extraction.
+  dataset: {dataset: wisdom-dna-reduced@9}  # Exact previously enriched immutable parent.
+  dataset_name: wisdom-dna-reduced-slae  # Independent optional family; @9 remains generally usable.
+  dataset_version: "1"  # First reviewed base-SLAE publication; never silently mutate another version.
+  atomic_context: false  # Preserve existing source asset; do not rebuild unrelated chemical fields.
+  extended_surface_atom: false  # Preserve the exact existing candidate sidecar.
+  atomic_checkpoint: {file: ../../data/external-models/slae/autoencoder.ckpt}  # Official pinned base weights.
+  atomic_device: cuda  # Logical granted device; must match the declared CUDA 12.4 tool runtime.
+  workers: 1  # One isolated extraction at a time; successful native file checkpoints are retained.
+# Public StructuralEnrichment.run defaults (selected overrides above are not defaults):
+# dataset/dataset_name/dataset_version are required; the destination must be unpublished.
+# atomic_checkpoint=null disables SLAE; atomic_device=cpu selects the logical extraction device.
+# workers=4 bounds concurrency; SLAE requires workers=1. atomic_context=true, source_quality=true,
+# extended_surface_atom=true generate common context/candidates; extended_radius=12.0 Å and
+# extended_k_max=96 set the positive candidate cutoff/cap. Disabled families preserve old assets.
+# sequence_context=false; atomic_sasa=false, sasa_probe=1.4 Å, sasa_samples=960 (at least 24)
+# generate physical sequence mapping and deterministic atom solvent exposure when enabled.
+# residue_graph=false, residue_contact_radius=8.0 Å, residue_surface_radius=12.0 Å define contacts
+# and point/residue candidates. residue_ca_radius=null preserves old CA graphs; residue_ca_k_max=32.
+# surface_local_graph=false, surface_graph_resolution=1.0 Å define local coherence when requested.
+# surface_view=false, view_id=1 (nonnegative), view_resolution=null retain the original surface;
+# enabling a view constructs a separate geometry; null spacing reuses the original setting.
+# external_model=null (or esm2/esmc/saprot), external_checkpoint=null, external_identifier="",
+# external_revision="", external_layer=-1 (last), external_maximum_length=1022 residues,
+# external_device=cpu, external_sequence_policy=fragments (or complete) control residue extractors.
+# structure_tokens=false requires Foldseek when enabled; static_embedding_table=false exports
+# the selected residue extractor's input weights only when explicitly requested.
+# covalent_environment=false, spectral_modes=null, surface_environment=false,
+# environment_options=null preserve those existing families; explicit settings add/extend assets.
+# No source or checkpoint is downloaded from inside a Work; LF prepares tool packages beforehand.
+# CPU execution requires reviewing tool_runtimes.slae's Torch/vision/PyG pins and sources for CPU,
+# setting torch_cuda="cpu", bootstrapping again, atomic_device=cpu and resources.gpu=0 together.
+resources:  # Actual extraction grant; no physical GPU enumeration or hidden process scheduler.
+  gpu: 1  # Parent and isolated process share this grant; no extra GPU reservation occurs.
+  cpu: 36  # One model/record at a time; bounded sparse radius graph.
+  memory: 32GiB  # Frozen checkpoint plus host representation buffers.
+  time: 72h  # Safety ceiling; no production throughput claim.
+# Native resource defaults cpu=1, gpu=0, memory/storage=0, processes=1, time=null.
+

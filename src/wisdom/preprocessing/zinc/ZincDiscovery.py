@@ -8,7 +8,7 @@ from typing import Any
 from pathlib import Path
 from collections.abc import Sequence
 from datetime import datetime, timezone
-from wisdom.preprocessing.zinc.discovery import discover_candidates
+from wisdom.preprocessing.zinc.stages.discovery import discover_candidates
 
 
 class ZincDiscovery(lf.Work):
@@ -23,6 +23,8 @@ class ZincDiscovery(lf.Work):
         output_directory: str | None = "../data/zinc/raw",
         negative_evidence_go_terms: Sequence[str] = ("GO:0008270", "GO:0046872"),
         acquire_functional_metadata: bool = True,
+        structure_executor: str = "process", progress_log_seconds: float = 120.0,
+        minimum_negative_sequences: int = 3,
     ) -> dict[str, Any]:
         """Query RCSB Zn depositions and freeze sequence/assembly-aware candidate JSONL.
 
@@ -33,7 +35,7 @@ class ZincDiscovery(lf.Work):
             negative_evidence: Optional explicit sequence-bound negative JSONL; null acquires
                 experimental GO NOT annotations and exact UniProt-to-PDB sequence mappings.
             snapshot_label: Optional descriptive researcher label; never the cache identity.
-            workers: Concurrent native cache downloads, default 8.
+            workers: Concurrent native cache downloads or CPU inspections per phase, default 8.
             maximum_entries: Zero keeps the complete query; positive value selects a sorted
                 discovery pilot, which must not be represented as the complete RCSB population.
             requests_per_second: Native shared service rate ceiling, default 2.
@@ -47,6 +49,12 @@ class ZincDiscovery(lf.Work):
                 ion/cation ancestors GO:0043167/GO:0043169 are also accepted.
             acquire_functional_metadata: Freeze optional RCSB/UniProt descriptive metadata,
                 default true; missing metadata never invents a family or a label.
+            structure_executor: Native assembly inspection executor, process (default) or thread;
+                downloads remain threaded. This operational choice never enters snapshot identity.
+            progress_log_seconds: Parent phase-liveness interval in seconds, default 120.
+            minimum_negative_sequences: Necessary number of distinct explicit negative sequences
+                before the bulk positive scan, default 3. Not a guarantee of independent groups;
+                lower only for acquisition pilots that will not publish a three-split benchmark.
 
         Returns:
             Candidate count and frozen raw output. Chosen assembly/copy maximizes accepted-site
@@ -77,6 +85,8 @@ class ZincDiscovery(lf.Work):
             coordination_cutoff, minimum_occupancy, minimum_donors, minimum_residues,
             output_directory, negative_evidence_go_terms, acquire_functional_metadata,
             snapshot_label, identity["started_at"],
+            structure_executor, progress_log_seconds,
+            minimum_negative_sequences,
         )
         return {key: value for key, value in result.items() if key != "raw_path"}
 

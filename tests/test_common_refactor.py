@@ -15,18 +15,20 @@ from wisdom.features.SurfaceFeatureProjector import SurfaceFeatureProjector
 from wisdom.features.SurfaceFeatureSchema import SurfaceFeatureSchema
 from wisdom.features.SurfaceFeatureSidecar import SurfaceFeatureSidecar
 from wisdom.interpretability.SparseConceptDiscovery import SparseConceptDiscovery
-from wisdom.preprocessing.common.functional_metadata import annotate_functions
-from wisdom.preprocessing.common.population import select_population
-from wisdom.preprocessing.common.splits import assign_splits
-from wisdom.preprocessing.common.structure.AtomicStructureBuilder import AtomicStructureBuilder
+from wisdom.preprocessing.common.auditing.functional_metadata import annotate_functions
+from wisdom.preprocessing.common.sampling.population import select_population
+from wisdom.preprocessing.common.sampling.splits import assign_splits
+from wisdom.preprocessing.common.structure.geometry.AtomicStructureBuilder import (
+    AtomicStructureBuilder,
+)
+from wisdom.preprocessing.common.structure.geometry.SurfaceBuilder import SurfaceBuilder
+from wisdom.preprocessing.common.structure.io.ProteinReader import ProteinReader
+from wisdom.preprocessing.common.structure.io.StructureSource import StructureSource
 from wisdom.preprocessing.common.structure.PreprocessConfig import PreprocessConfig
-from wisdom.preprocessing.common.structure.ProteinReader import ProteinReader
-from wisdom.preprocessing.common.structure.StructureSource import StructureSource
-from wisdom.preprocessing.common.structure.SurfaceBuilder import SurfaceBuilder
 from wisdom.preprocessing.dna.DNAValidation import DNAValidation
-from wisdom.preprocessing.zinc import phenotypes
-from wisdom.preprocessing.zinc.evidence import annotate_sites
-from wisdom.preprocessing.zinc.structures import _surface_points
+from wisdom.preprocessing.zinc.stages import phenotypes
+from wisdom.preprocessing.zinc.stages.evidence import annotate_sites
+from wisdom.preprocessing.zinc.stages.structures import _surface_points
 from wisdom.preprocessing.zinc.ZincCoordination import ZincCoordination
 
 

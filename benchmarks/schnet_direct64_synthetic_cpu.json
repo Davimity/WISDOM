@@ -1,0 +1,31 @@
+{
+  "scope": "isolated synthetic encoder; FP32; no optimizer, transfer or surface network",
+  "torch": "2.13.0+cu130",
+  "device": "cpu",
+  "threads": 1,
+  "hardware": "CPU",
+  "radial_encoding": "direct",
+  "gaussian_count": null,
+  "internal_width": 64,
+  "output_width": 128,
+  "input_width": 16,
+  "layers": 2,
+  "nodes": 64,
+  "undirected_edges": 476,
+  "seed": 173,
+  "forward_seconds": [
+    0.004251199999998789,
+    0.006782761000067694,
+    0.006017276999955357
+  ],
+  "backward_seconds": [
+    0.003784518000429671,
+    0.004625134999514557,
+    0.003569154999240709
+  ],
+  "median_forward_seconds": 0.006017276999955357,
+  "median_backward_seconds": 0.003784518000429671,
+  "encoder_parameters": 85568,
+  "peak_cuda_allocated_bytes": null,
+  "peak_cuda_reserved_bytes": null
+}

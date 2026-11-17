@@ -1,9 +1,9 @@
-# OBJECTIVE: compare sparse dot-product attention versus explicitly bounded global structural attention.
-# PREREQUISITES: review the V9 protocol/resource limits; no upstream Study is automatically selected.
-# VARIES: atomic_encoder_type only; each profile fixes its operator and declared controls.
-# FIXED: reviewed MAX R Single, Heat6, original data/topology, common backbone and optimizer.
-# DECISION: compare same-seed S at G-selected checkpoints, G-S trade-offs, stability and cost.
-name: wisdom-v9f  # Independent atomic-encoder Study; not a numerical HPO.
+# OBJECTIVE: separate SchNet radial expansion, internal atomic width and edge metadata effects.
+# PREREQUISITES: same immutable @6 benchmark and frozen V9d training context; no historical means reused.
+# VARIES: thirteen exact contemporary baseline/SchNet cells; shared four-seed block.
+# FIXED: chemical inputs, topology, 128-channel transfer/output, four DiffusionNet blocks, MAX, Heat6, BCE+R.
+# DECISION: paired S at G-selected checkpoints, raw S, G, radial filters and measured quality/cost trade-offs.
+name: wisdom-v9f-schnet  # Distinct identity from historical wisdom-v9f attention; see campaign_migration.json.
 run: wisdom.Training.Training  # One public Work; no steps, nested runner or fallback GNN.
 
 with:  # Frozen surface-oriented line A from reviewed V7; no assumed V8 winner.
@@ -54,13 +54,16 @@ with:  # Frozen surface-oriented line A from reviewed V7; no assumed V8 winner.
   architecture_implementation: controlled  # Paired initialization of the common surface route.
   gate_cost_normalization: baseline_count  # No dilution when a family omits attributes.
   atomic_radial_count: 16  # Fixed radial width; DimeNet uses three spherical orders.
+  atomic_radial_encoding: gaussian  # Original LF expansion; direct uses one d/6 scalar.
+  atomic_hidden_dim: 128  # Internal SchNet width only; sweep overrides to 64.
+  atomic_output_dim: 128  # Fixed transfer width; equals hidden_dim, not another sweep axis.
   atomic_vector_channels: 16  # GVP channels; PaiNN uses D by its public contract.
   atomic_basis_count: 4  # Fixed NNConv basis count; inactive for full matrices.
   atomic_spatial_cutoff: 6.0  # Fixed atomic radial support, not the 4-Angstrom transfer radius.
   atomic_covalent_cutoff: 64.0  # Explicit DimeNet covalent support; out-of-support input fails.
-  atomic_maximum_triplets: 1000000  # Feasibility guard; never truncate typed triplets.
-  atomic_maximum_pairwise_bytes: 134217728  # 128 MiB principal tensor guard, NOT total VRAM.
-  atomic_allow_dense_global: true  # Researcher-approved dense exception ONLY for V9f global candidates.
+  atomic_maximum_triplets: 2000000  # Per-protein guard; measured maximum is 1,323,904 at K8.
+  atomic_maximum_pairwise_bytes: 1073741824  # 1 GiB per-protein principal tensor guard, NOT total VRAM.
+  atomic_allow_dense_global: false  # Dense attention is forbidden here; the approved exception is restricted to V9g.
   batch_size: 16  # Unchanged optimization batch; do not shrink silently for expensive variants.
   epochs: 500  # Existing safety ceiling.
   patience: 30  # G-based within-Run stopping; no competitive pruning.
@@ -85,6 +88,10 @@ with:  # Frozen surface-oriented line A from reviewed V7; no assumed V8 winner.
 # learned surface input and baseline spike; they cannot be silently combined with V8 mechanisms.
 # radial_count=16, vector_channels=16, basis_count=4, spatial_cutoff=6 Å, covalent_cutoff=64 Å.
 # maximum_triplets=1000000, maximum_pairwise_bytes=134217728, allow_dense_global=false.
+# This recipe overrides the guards to 2000000 and 1073741824 bytes per protein. A read-only audit
+# of all 589 @6 graphs at K8 found maximum 1323904 typed triplets / 677838848 principal FP32 bytes.
+# WISDOM evaluates disjoint molecules separately without changing batch_size, the optimizer step,
+# topology, messages, weights or losses. These bounds still do not predict total autograd VRAM.
 # Guards fail explicitly: no topology truncation, batch shrink, sparse/global substitution or fake quality.
 # PNA log-degree means are derived ONLY from the exact training view/topology and saved in checkpoints;
 # they are not tunable YAML inputs. Scalar sources structurally absent from a control are frozen off.
@@ -106,28 +113,103 @@ seeds: [173, 179, 181, 191]  # Four new complete paired seeds, not recycled V7/V
 # Explicit seeds fix every required cell; no automatic growth, racing or favorable-seed selection.
 # Independent confirmation needs a NEW predeclared seed block; these are development replications.
 
-sweep:  # 6 candidates x four seeds = 24 mandatory Runs.
-  space:  # One factor; no crossing operators with pooling, head, optimizer or priors.
-    atomic_encoder_type:  # Every named profile has a documented public-LF operator contract.
-      values:  # Keep all declared alternatives; feasibility failure is not poor prediction.
-        - baseline  # Contemporary unchanged atomic encoder.
-        - baseline_no_attributes  # Exact operator/control profile; see the V9 protocol.
-        - transformer_sparse  # Exact operator/control profile; see the V9 protocol.
-        - transformer_no_attributes  # Exact operator/control profile; see the V9 protocol.
-        - structural_global  # Exact operator/control profile; see the V9 protocol.
-        - global_no_structure  # Exact operator/control profile; see the V9 protocol.
-  reference: {atomic_encoder_type: baseline}  # Unique contemporary same-seed control.
+sweep:  # Thirteen exact configurations x four seeds = 52 mandatory Runs, no pruning.
+  space:  # Domains validate the explicit candidate list; they do not create a Cartesian study.
+    atomic_encoder_type: {values: [baseline, schnet, schnet_radial]}  # Full or five-metadata-masked LF filters.
+    atomic_radial_encoding:  # Direct is a separate category, never Gaussian count zero.
+      values: [direct, gaussian]  # One normalized distance or LF Gaussian expansion.
+      when: {atomic_encoder_type: {in: [schnet, schnet_radial]}}  # Inactive for the baseline.
+    atomic_radial_count:  # Effective direct width is one; Gaussian counts use common overlap.
+      values: [1, 8, 16, 32]  # RBF-16 restores V9d centers and gamma exactly.
+      when: {atomic_encoder_type: {in: [schnet, schnet_radial]}}  # Not a baseline factor.
+    atomic_hidden_dim:  # All atomic interactions use this width; output stays 128.
+      values: [64, 128]  # 96 is supported by code but not part of this predeclared matrix.
+      when: {atomic_encoder_type: {in: [schnet, schnet_radial]}}  # Baseline stays 128.
+  candidates:  # Numbered cell IDs are stable documentation, not additional model inputs.
+    # Cell 01, block A: baseline, gaussian, R=16, atomic=128, output=128.
+    - atomic_encoder_type: baseline  # Exact existing LF interaction/control.
+    # Cell 02, block A: schnet, direct, R=1, atomic=128, output=128.
+    - atomic_encoder_type: schnet  # Exact existing LF interaction/control.
+      atomic_radial_encoding: direct  # Fixed physical distance representation.
+      atomic_radial_count: 1  # Filter input radial channels, not atom-state width.
+      atomic_hidden_dim: 128  # Internal states; identity or learned projection to 128.
+    # Cell 03, block A: schnet, gaussian, R=8, atomic=128, output=128.
+    - atomic_encoder_type: schnet  # Exact existing LF interaction/control.
+      atomic_radial_encoding: gaussian  # Fixed physical distance representation.
+      atomic_radial_count: 8  # Filter input radial channels, not atom-state width.
+      atomic_hidden_dim: 128  # Internal states; identity or learned projection to 128.
+    # Cell 04, block A: schnet, gaussian, R=16, atomic=128, output=128.
+    - atomic_encoder_type: schnet  # Exact existing LF interaction/control.
+      atomic_radial_encoding: gaussian  # Fixed physical distance representation.
+      atomic_radial_count: 16  # Filter input radial channels, not atom-state width.
+      atomic_hidden_dim: 128  # Internal states; identity or learned projection to 128.
+    # Cell 05, block A: schnet, gaussian, R=32, atomic=128, output=128.
+    - atomic_encoder_type: schnet  # Exact existing LF interaction/control.
+      atomic_radial_encoding: gaussian  # Fixed physical distance representation.
+      atomic_radial_count: 32  # Filter input radial channels, not atom-state width.
+      atomic_hidden_dim: 128  # Internal states; identity or learned projection to 128.
+    # Cell 06, block B: schnet, direct, R=1, atomic=64, output=128.
+    - atomic_encoder_type: schnet  # Exact existing LF interaction/control.
+      atomic_radial_encoding: direct  # Fixed physical distance representation.
+      atomic_radial_count: 1  # Filter input radial channels, not atom-state width.
+      atomic_hidden_dim: 64  # Internal states; identity or learned projection to 128.
+    # Cell 07, block B: schnet, gaussian, R=8, atomic=64, output=128.
+    - atomic_encoder_type: schnet  # Exact existing LF interaction/control.
+      atomic_radial_encoding: gaussian  # Fixed physical distance representation.
+      atomic_radial_count: 8  # Filter input radial channels, not atom-state width.
+      atomic_hidden_dim: 64  # Internal states; identity or learned projection to 128.
+    # Cell 08, block B: schnet, gaussian, R=16, atomic=64, output=128.
+    - atomic_encoder_type: schnet  # Exact existing LF interaction/control.
+      atomic_radial_encoding: gaussian  # Fixed physical distance representation.
+      atomic_radial_count: 16  # Filter input radial channels, not atom-state width.
+      atomic_hidden_dim: 64  # Internal states; identity or learned projection to 128.
+    # Cell 09, block B: schnet, gaussian, R=32, atomic=64, output=128.
+    - atomic_encoder_type: schnet  # Exact existing LF interaction/control.
+      atomic_radial_encoding: gaussian  # Fixed physical distance representation.
+      atomic_radial_count: 32  # Filter input radial channels, not atom-state width.
+      atomic_hidden_dim: 64  # Internal states; identity or learned projection to 128.
+    # Cell 10, block C: schnet_radial, direct, R=1, atomic=128, output=128.
+    - atomic_encoder_type: schnet_radial  # Exact existing LF interaction/control.
+      atomic_radial_encoding: direct  # Fixed physical distance representation.
+      atomic_radial_count: 1  # Filter input radial channels, not atom-state width.
+      atomic_hidden_dim: 128  # Internal states; identity or learned projection to 128.
+    # Cell 11, block C: schnet_radial, gaussian, R=16, atomic=128, output=128.
+    - atomic_encoder_type: schnet_radial  # Exact existing LF interaction/control.
+      atomic_radial_encoding: gaussian  # Fixed physical distance representation.
+      atomic_radial_count: 16  # Filter input radial channels, not atom-state width.
+      atomic_hidden_dim: 128  # Internal states; identity or learned projection to 128.
+    # Cell 12, block C: schnet_radial, direct, R=1, atomic=64, output=128.
+    - atomic_encoder_type: schnet_radial  # Exact existing LF interaction/control.
+      atomic_radial_encoding: direct  # Fixed physical distance representation.
+      atomic_radial_count: 1  # Filter input radial channels, not atom-state width.
+      atomic_hidden_dim: 64  # Internal states; identity or learned projection to 128.
+    # Cell 13, block C: schnet_radial, gaussian, R=16, atomic=64, output=128.
+    - atomic_encoder_type: schnet_radial  # Exact existing LF interaction/control.
+      atomic_radial_encoding: gaussian  # Fixed physical distance representation.
+      atomic_radial_count: 16  # Filter input radial channels, not atom-state width.
+      atomic_hidden_dim: 64  # Internal states; identity or learned projection to 128.
+  reference: {atomic_encoder_type: baseline}  # Contemporary four-seed unchanged control.
 
-# sweep.space required; reference optional but must select one candidate; no search/pruning authored.
-# Attribute-masked alternatives also need their matched baseline_no_attributes/baseline_radial control.
-# Report paired differences, coverage and resource failures; never replace missing quality by zero.
-# Defaults for seeds are automatic shared blocks only when omitted; not this design.
+# Native sweep defaults: no competitive pruning; explicit seeds require all candidate/seed cells.
+# space is required; candidates restrict it to these thirteen points; reference selects one point.
+# Block-only authoring: retain the listed complete candidate rows (A=01..05, B=06..09, C=10..13)
+# and add cell 01 to B/C as a contemporary baseline. Keep all four seeds and label the new Study;
+# do not treat an incomplete block as the complete radial/width/metadata interaction.
+# True new Training defaults: atomic_radial_encoding="gaussian", atomic_hidden_dim=null,
+# atomic_output_dim=null. Null widths inherit hidden_dim; output must equal hidden_dim.
+# direct uses d/atomic_spatial_cutoff and one input; atomic_radial_count is inactive numerically
+# in direct mode (set to 1 here for transparent records). Gaussian count is positive; RBF-1
+# is supported by LF but not a scientific cell here. 64/96/128 internal channels are supported.
+# Only SchNet can change internal width/radial encoding. At equal widths no output layer is added.
+# Best-checkpoint radial diagnostics evaluate fixed metadata profiles on [0,6] Å, never task GT.
+# They are latent channel responses, not physical energy potentials. Filter hidden width follows
+# internal channels: counts/width change capacity as well as representation; counts are recorded.
 
-# Execution is intentionally omitted: LF chooses concurrent admission on both granted GPUs.
+# Execution is intentionally omitted: LF chooses concurrent admission on the granted GPU.
 # Defaults: max_parallel/runs_per_gpu=null (automatic), max_runs/max_time=null, failure_retries=1.
 # Auto admission is resource-aware, not a guarantee that every candidate fits or overlaps.
 # Concurrent timings reflect shared hardware; do not interpret them as isolated encoder latency.
-# The six Studies are independent; no stage dependency or implicit winner import exists.
+# The seven Studies are independent; no stage dependency or implicit winner import exists.
 
 objective:  # Existing descriptive development utility; checkpoint epochs remain G-selected.
   metric: val_wisdom_hpo_score  # Preserve W and its G/S/regret/coupling components.
@@ -140,7 +222,7 @@ objective:  # Existing descriptive development utility; checkpoint epochs remain
 # Keep raw S, global AUROC/AUPRC, negative evidence, top-k recall/enrichment, seeds and costs separate.
 
 resources:  # Study-wide budget; target capacity and model fit have NOT been measured.
-  gpu: 2  # Request two accelerators; native LF admits independent Runs automatically.
+  gpu: 2  # Request two accelerators; LF admits independent Runs automatically.
   cpu: 36  # Total study-wide CPU budget, shared by concurrently admitted Runs.
   memory: 96GiB  # Total study-wide host RAM; not a per-Run or GPU-VRAM reservation.
   time: 168h  # Interruption may require native recovery of missing mandatory cells.

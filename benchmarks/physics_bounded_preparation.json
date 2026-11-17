@@ -1,0 +1,20 @@
+{
+  "evidence_kind": "small_real_local_chemical_preparation_not_scientific_validation",
+  "fixture": "Previously downloaded 1CRN technical pilot; one observed ALA9 CB intentionally removed",
+  "policy": "bounded",
+  "observed_heavy_atoms": 326,
+  "reconstructed_heavy": [["A", 9, "CB"]],
+  "reconstructed_fraction": 0.003067484662576687,
+  "affected_residue_fraction": 0.021739130434782608,
+  "prepared_hydrogen_count": 315,
+  "modeled_geometry_guard_passed": true,
+  "observed_coordinates_preserved_within_pdb_rounding": true,
+  "OpenMM_full_forcefield_parameterization_passed": true,
+  "APBS_or_LJ_fields_executed": false,
+  "cluster_work_or_training_executed": false,
+  "limitations": [
+    "Demonstrates the actual public PDB2PQR and OpenMM integration, not mocked imports.",
+    "Does not establish negligible physical-field changes or prospective benchmark coverage.",
+    "Numerical field audits and per-split support review remain mandatory."
+  ]
+}

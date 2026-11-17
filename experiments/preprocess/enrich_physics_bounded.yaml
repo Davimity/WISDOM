@@ -1,0 +1,84 @@
+# OBJECTIVE: admit bounded chemical completion while preserving the strict parent and SLAE.
+# PREREQUISITES: ./install.sh locally, or lf clusters bootstrap <cluster> --project . remotely.
+# The producer checks every protein; unsupported observed chemistry has an empty, qualified VF
+# bank. Insufficient potential coverage masks potential only; audited LJ targets remain usable.
+# Operational/unknown errors still fail. Valid native checkpoints survive compatible recovery.
+# The dataset remains a pilot until coverage, preparation and convergence audits are reviewed.
+name: wisdom-physical-enrichment-bounded  # New scientific preparation protocol, not a retry.
+run: wisdom.preprocessing.common.StructuralEnrichment.StructuralEnrichment  # Native Work.
+with:  # Only new physical reference/query sidecars are generated.
+  dataset: {dataset: wisdom-dna-reduced-physics@1}  # Reuse validated strict fields and every parent asset.
+  dataset_name: wisdom-dna-reduced-physics  # New family; the SLAE parent is never overwritten.
+  dataset_version: "2"  # Bounded completion; never replace or relabel strict references.
+  atomic_context: false  # Preserve inherited chemistry; do not regenerate it.
+  extended_surface_atom: false  # Preserve inherited transfer candidates exactly.
+  workers: 4  # Four protein calculations; each external solver receives one CPU thread.
+  physics_maximum_voxels: 24000000  # Operational ceiling for elongated proteins plus refinement; no coarsening.
+  physics_options:  # Admission changes are scientific and require a new immutable dataset.
+    heavy_atom_policy: bounded  # Admit limited modeled completion; strict forbids added heavy atoms.
+    repair_maximum_atoms: 32  # Absolute ceiling for ALL added heavy atoms, including OXT.
+    repair_maximum_fraction: 0.05  # Added/observed heavy atoms must also remain at or below 5%.
+    repair_maximum_per_residue: 5  # Prevent a large unobserved side chain from dominating a residue.
+    repair_maximum_residue_fraction: 0.1  # At most 10% of observed residues may require completion.
+    repair_minimum_nonbonded_fraction: 0.65  # Reject severe heavy overlaps below this mixed-sigma fraction.
+    repair_exclusion_radius: 3.0  # Å; omit optimizer queries closer to modeled heavy atoms.
+    ph: 7.0  # PDB2PQR/PROPKA protonation pilot, not experimentally measured protein pH.
+    temperature: 298.15  # Kelvin, also fixes the APBS kBT/e-to-volt conversion.
+    salt: 0.15  # mol/L for each of the +1 and -1 ionic species, radius 2 Å.
+    protein_dielectric: 2.0  # Dimensionless interior permittivity, a declared approximation.
+    solvent_dielectric: 78.5  # Dimensionless continuum-water permittivity.
+    solvent_radius: 1.4  # Å; APBS boundary and geometric accessibility probe.
+    nonlinear: false  # Linear Poisson--Boltzmann pilot; true requests the nonlinear solver.
+    forcefield: amber14/protein.ff14SB.xml  # Installed OpenMM force-field XML, never NPZ heuristics.
+    probe_small: ALA:HB1  # Actual protein-HC LJ parameters; the test particle is electrically neutral.
+    probe_large: ALA:CB  # Actual protein-CT LJ parameters; sigma AND epsilon differ and are recorded.
+    spacing: 1.0  # Nominal Å grid spacing; APBS actual origin/delta/shape are saved.
+    margin: 12.0  # Å beyond the prepared protein bounding box on every side.
+    coarse_factor: 1.7  # Focusing coarse-box/fine-box length ratio.
+    boundary_condition: sdh  # APBS single Debye--Huckel outer boundary, not periodic electrostatics.
+    convergence: true  # Require potential agreement at identical actual common coordinates.
+    refinement_factor: 0.75  # Refined nominal spacing relative to the production spacing.
+    margin_convergence: true  # Also compare the original box to an enlarged box.
+    margin_factor: 1.5  # Enlarge the margin by this factor for its sensitivity test.
+    potential_absolute_tolerance: 0.25  # kBT/e; absolute component of the admission tolerance.
+    potential_relative_tolerance: 0.1  # Relative component; this is not a physical-accuracy claim.
+    potential_failure_policy: mask  # Mask unstable voxels; mask all potential if coverage fails.
+    minimum_potential_coverage: 0.95  # Require at least 95% valid exterior-domain potential targets.
+    minimum_region_coverage: 0.8  # Require at least 80% within EVERY present geometric stratum.
+    connectivity: 6  # Face-connected empty voxels; 26 also connects edges/corners.
+    boundary_width: 2.0  # Å signed-distance stratum near the heavy-atom vdW union.
+    exterior_width: 6.0  # Å upper edge of the nearby-exterior stratum.
+    bank_size: 16384  # Offline unique query bank per protein; fewer if the domain is smaller.
+    seed: 2026  # Fixed label-independent sampling/audit seed.
+    decoder_radius: 12.0  # Å; save ALL retained-atom candidates in this radius, without a K cap.
+    overlap_fraction: 0.65  # Mask distances below this fraction of mixed LJ sigma per probe.
+    repulsion_ceiling: 10000.0  # kJ/mol; mask excessive repulsion, retain the finite repulsive band.
+    lj_cutoff: 0.0  # Zero sums the complete finite prepared protein, including new H atoms.
+    audit_queries: 24  # Independent OpenMM comparisons for each LJ probe on each protein.
+    lj_absolute_tolerance: 0.00001  # kJ/mol; vectorized/reference absolute tolerance.
+    lj_relative_tolerance: 0.00001  # Vectorized/reference relative tolerance.
+# PhysicsConfig defaults: heavy_atom_policy=strict; bounded is the selected override. Repair
+# limits default to the six repair values above and are inactive under strict. No N/CA/C/O
+# rebuilding, removed/moved observed atoms, peptide gaps or unverified modeled OXT are admitted.
+# Other PhysicsConfig defaults are exactly the physical values above; PhysicsConfig adds no hidden
+# learned feature or functional label. Optional lj_cutoff>0 selects an audited hard cutoff in Å;
+# no switching/dispersion correction is used. APBS uses mg-auto, spl2 charges, smol boundary,
+# sdens=10, swin=.3 Å, and the exact tool input is archived. Conditions are a pilot to audit.
+# StructuralEnrichment defaults: physics_options=null, physics_maximum_voxels=2000000, workers=4;
+# atomic_context=true/source_quality=true, extended_surface_atom=true/radius=12 Å/Kmax=96.
+# The selected 24-million-voxel guard is operational, not PhysicsConfig: it changes no grid,
+# equation, sampling rule or checkpoint key. Recover this bounded Work with explicit
+# --accept-operational-changes; do not restart the strict producer or change its scientific inputs.
+# Other optional families are disabled: sequence_context, atomic_sasa (probe=1.4/samples=960),
+# residue_graph (contact=8/transfer=12 Å), surface_local_graph (resolution=1 Å), surface_view
+# (view_id=1/view_resolution=null), covalent_environment, spectral_modes=null, residue_ca_radius=null
+# (CA Kmax=32), surface_environment/environment_options=null, structure_tokens/static_embedding_table.
+# external_model/checkpoint=null, identifier/revision="", layer=-1, max_length=1022,
+# external_device=cpu/sequence_policy=fragments; atomic_checkpoint=null/atomic_device=cpu.
+# Disabled means PRESERVE existing assets, including ESM and SLAE, not remove or re-extract them.
+resources:  # CPU physics calculation; no GPU ordinal or undeclared accelerator is inspected.
+  gpu: 0  # APBS and the OpenMM Reference audit are CPU operations.
+  cpu: 36  # Bounded shared allocation; four serial solvers run concurrently.
+  memory: 96GiB  # Includes complete reference grids, chemistry and compression buffers.
+  time: 168h  # Operational ceiling; recover compatible failed work to reuse valid phase files.
+# LF resource defaults: gpu=0/cpu=1/processes=1, memory/storage/gpu_memory=0, time=null.

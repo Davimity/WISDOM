@@ -6,7 +6,7 @@ import torch
 from test_wisdom_v1 import _model, _model_inputs, _sample
 
 from wisdom.data.WisdomCollator import WisdomCollator
-from wisdom.models.PoolingType import PoolingType
+from wisdom.models.pooling.PoolingType import PoolingType
 from wisdom.models.WisdomV2 import WisdomV2
 
 

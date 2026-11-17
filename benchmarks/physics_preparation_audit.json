@@ -1,0 +1,87 @@
+{
+  "evidence_kind": "read_only_failed_attempt_and_immutable_parent_audit",
+  "job_id": "job-20261114083040-03345f81",
+  "execution_id": "execution-f4630e6e5ac4beb8",
+  "run_id": "run-e7840c0cd7e31e9d41d0",
+  "attempt": 1,
+  "cluster": "citius-ctgpgpu16",
+  "parent_dataset": "wisdom-dna-reduced-slae@1",
+  "parent_content_id": "sha256:a9afb4423d5b53013b13dbe27c16dbe29745a431a679e1eac5f4e508c98cda1a",
+  "total_proteins": 589,
+  "completed": 84,
+  "failures": {
+    "terminal_oxygen_only": 251,
+    "other_heavy_changes": 186,
+    "pdb2pqr_chemistry": 12,
+    "potential_coverage": 49,
+    "allocation_guard": 7
+  },
+  "terminal_oxygen_source_audit": {
+    "method": "Gemmi parses the published source_structure; sequence_context maps physical residue ordinals to deposited author identities and complete sequence positions",
+    "OXT_absent_in_original_source": 251,
+    "OXT_present_in_original_source": 0,
+    "deposited_construct_C_terminus_confirmed": 104,
+    "unconfirmed_or_truncated_terminus": 147,
+    "limitation": "A confirmed deposited sequence end is not by itself a validated repair, protonation state or chemical cap. Missing side-chain identities in log messages are truncated to eight examples."
+  },
+  "split_counts": {
+    "train": {
+      "total": 317,
+      "completed": 43,
+      "terminal_oxygen_only": 132,
+      "other_heavy_changes": 101,
+      "pdb2pqr_chemistry": 6,
+      "potential_coverage": 32,
+      "allocation_guard": 3
+    },
+    "validation": {
+      "total": 272,
+      "completed": 41,
+      "terminal_oxygen_only": 119,
+      "other_heavy_changes": 85,
+      "pdb2pqr_chemistry": 6,
+      "potential_coverage": 17,
+      "allocation_guard": 4
+    }
+  },
+  "binary_target_counts": {
+    "negative": {
+      "total": 294,
+      "completed": 50,
+      "terminal_oxygen_only": 127,
+      "other_heavy_changes": 72,
+      "pdb2pqr_chemistry": 9,
+      "potential_coverage": 32,
+      "allocation_guard": 4
+    },
+    "positive": {
+      "total": 295,
+      "completed": 34,
+      "terminal_oxygen_only": 124,
+      "other_heavy_changes": 114,
+      "pdb2pqr_chemistry": 3,
+      "potential_coverage": 17,
+      "allocation_guard": 3
+    }
+  },
+  "retained_native_checkpoints": {
+    "reference_files": 84,
+    "query_files": 84,
+    "registered_bytes": 2930698360,
+    "missing_or_size_invalid_in_recovery_preview": 0,
+    "payload_hashes_verified_by_preview": false,
+    "scientific_validation_required_on_reuse": true
+  },
+  "recovery_preview": {
+    "original_4000000_voxel_guard": "accepted with explicit code-change acknowledgement",
+    "revised_8000000_voxel_guard": "rejected by LF Work-argument identity comparison",
+    "retry_applied": false,
+    "cluster_computation_launched": false
+  },
+  "interpretation_limits": [
+    "The 49 potential coverage failures do not establish a failure or success of their LJ fields: the old producer stopped before their independent LJ audits.",
+    "The seven allocation guard failures are preventive refusals, not observed operating-system out-of-memory failures.",
+    "Masking unsupported chemistry retains benchmark membership but does not establish adequate VF training coverage.",
+    "Repairing only confirmed terminal oxygens is a candidate new preparation protocol; it was not enabled or scientifically validated by this read-only audit."
+  ]
+}

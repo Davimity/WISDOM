@@ -15,10 +15,10 @@ from yaml import safe_load
 
 from wisdom.data.WisdomCollator import WisdomCollator
 from wisdom.evaluation.SurfaceFaithfulnessAudit import SurfaceFaithfulnessAudit
-from wisdom.models.DiffusionSurfaceEncoder import DiffusionSurfaceEncoder
 from wisdom.models.refinement import build_surface_evidence_refiner
 from wisdom.models.refinement.SurfaceEvidenceContext import SurfaceEvidenceContext
 from wisdom.models.refinement.SurfaceEvidenceRefinerType import SurfaceEvidenceRefinerType
+from wisdom.models.surface.DiffusionSurfaceEncoder import DiffusionSurfaceEncoder
 from wisdom.Training import Training, _create_model, _evaluate, _model_inputs
 
 

@@ -3,13 +3,15 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from wisdom.preprocessing.common.structure.AtomicStructureBuilder import AtomicStructureBuilder
-from wisdom.preprocessing.common.structure.PreprocessConfig import PreprocessConfig
-from wisdom.preprocessing.common.structure.ProteinReader import ProteinReader
-from wisdom.preprocessing.common.structure.StructureResolver import StructureResolver
-from wisdom.preprocessing.common.structure.SurfaceAtomNeighborhoodBuilder import (
+from wisdom.preprocessing.common.structure.geometry.AtomicStructureBuilder import (
+    AtomicStructureBuilder,
+)
+from wisdom.preprocessing.common.structure.geometry.SurfaceAtomNeighborhoodBuilder import (
     SurfaceAtomNeighborhoodBuilder,
 )
+from wisdom.preprocessing.common.structure.io.ProteinReader import ProteinReader
+from wisdom.preprocessing.common.structure.io.StructureResolver import StructureResolver
+from wisdom.preprocessing.common.structure.PreprocessConfig import PreprocessConfig
 from wisdom.utils.structure.enums.BondType import BondType
 from wisdom.utils.structure.enums.ConnectionType import ConnectionType
 from wisdom.utils.structure.models.Atom import Atom

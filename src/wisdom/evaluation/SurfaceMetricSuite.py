@@ -262,6 +262,15 @@ class SurfaceMetricSuite:
         for name, values in per_protein.items():
             if values:
                 output[f"surface_positive_macro_{name}"] = math.fsum(values) / len(values)
+        # Protein-to-protein spread is different from seed variability. Only evaluable positive
+        # proteins contribute; sample SD needs two proteins, whereas quartiles need one.
+
+        if per_protein["auprc"]:
+            protein_ap = torch.tensor(per_protein["auprc"], dtype=torch.float64)
+            for suffix, quantile in (("q25", 0.25), ("median", 0.5), ("q75", 0.75)):
+                output[f"surface_positive_auprc_{suffix}"] = float(protein_ap.quantile(quantile))
+            if len(protein_ap) > 1:
+                output["surface_positive_auprc_std"] = float(protein_ap.std(unbiased=True))
         if normalized_auprc:
             output["surface_positive_macro_normalized_auprc"] = (
                 math.fsum(normalized_auprc) / len(normalized_auprc)
@@ -387,6 +396,10 @@ class SurfaceMetricSuite:
             "surface_positive_macro_normalized_auprc": None,
             "surface_negative_positive_mass":          None,
             "surface_negative_peak":                   None,
+            "surface_positive_auprc_std":              None,
+            "surface_positive_auprc_q25":              None,
+            "surface_positive_auprc_median":           None,
+            "surface_positive_auprc_q75":              None,
             "surface_attention_positive_macro_auprc":  None,
             "surface_attention_logit_spearman":        None,
             "surface_attention_entropy":               None,

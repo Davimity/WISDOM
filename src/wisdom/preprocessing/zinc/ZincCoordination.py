@@ -3,8 +3,8 @@
 import numpy as np
 
 from typing import Any
-from collections import Counter
 from scipy.spatial import cKDTree
+from collections import Counter, defaultdict
 from wisdom.utils.structure.BiologicalAssembly import BiologicalAssembly
 
 
@@ -54,32 +54,9 @@ class ZincCoordination:
         # Each chain occurrence is a separate assembly entity even when names are repeated.
 
         selected_index = next(i for i, chain in enumerate(assembly.model) if chain == selected)
-        donors: list[dict[str, Any]] = []
-        metals: list[dict[str, Any]] = []
-        for chain_index, chain in enumerate(assembly.model):
-            peptide = assembly.is_protein(chain)
-            for residue in chain.first_conformer():
-                for atom in residue.first_conformer():
-                    if atom.occ < self.minimum_occupancy:
-                        continue
-                    xyz = [float(atom.pos.x), float(atom.pos.y), float(atom.pos.z)]
-                    if not np.isfinite(xyz).all():
-                        raise ValueError("occupied coordination atom has non-finite coordinates")
-                    record = {"chain_index": chain_index, "chain": chain.name,
-                              "residue": str(residue.seqid), "residue_name": residue.name,
-                              "atom": atom.name, "position": xyz, "occupancy": float(atom.occ),
-                              "element": atom.element.name,
-                              "vdw_radius": float(atom.element.vdw_r)}
-                    if atom.element.atomic_number == 30:
-                        metals.append(record)
-                    elif peptide and atom.element.atomic_number in (7, 8, 16):
-                        donors.append(record)
-        tree = cKDTree(np.asarray([atom["position"] for atom in donors]).reshape(-1, 3))
+        _, environments = self._environments(assembly)
         sites = []
-        for index, metal in enumerate(metals):
-            partners = [{**donors[i], "distance_angstrom": float(np.linalg.norm(
-                np.asarray(donors[i]["position"]) - metal["position"]))}
-                for i in sorted(tree.query_ball_point(metal["position"], self.cutoff))]
+        for index, (metal, partners) in enumerate(environments):
             local = [atom for atom in partners if atom["chain_index"] == selected_index]
             residues = sorted({atom["residue"] for atom in local})
             # Count distinct residues, not donor atoms or unique residue types. Two Cys and
@@ -126,6 +103,92 @@ class ZincCoordination:
             site["confidence_tier"] = ("structural_strong" if strong else "structural_basic"
                                         if site["accepted"] else "not_accepted")
         return sites
+
+    def summarize_assembly(self, assembly: BiologicalAssembly) -> list[dict[str, Any]]:
+        """Compute every copy's Discovery summary with one assembly scan and spatial index.
+
+        Args:
+            assembly: Complete biological assembly, including all protein copies and Zn sites.
+
+        Returns:
+            Ordered records with protein_chain, one-based protein_copy, accepted_sites and
+            donor_count. These are exactly the counts derived from analyse() for each copy.
+            Copies with no accepted site remain present; no RAW leakage bridge is dropped.
+
+        Raises:
+            ValueError: An occupied atom has non-finite coordinates.
+        """
+        copies, environments = self._environments(assembly)
+        result: dict[int, dict[str, Any]] = {
+            index: {"protein_chain": name, "protein_copy": copy,
+                    "accepted_sites": 0, "donor_count": 0}
+            for index, name, copy in copies}
+
+        # Discovery persists only these summaries, not angles or full site records. Accumulate
+        # the identical per-copy acceptance rule directly instead of constructing and discarding
+        # every site's complete evidence once per chain. Selection still computes all evidence.
+
+        for _, partners in environments:
+            local: dict[int, list[dict[str, Any]]] = defaultdict(list)
+            for atom in partners:
+                local[atom["chain_index"]].append(atom)
+            for index, atoms in local.items():
+                if len(atoms) >= self.minimum_donors and len({a["residue"] for a in atoms}) >= (
+                    self.minimum_residues
+                ):
+                    result[index]["accepted_sites"] += 1
+                    result[index]["donor_count"] += len(atoms)
+        return list(result.values())
+
+    def _environments(
+        self, assembly: BiologicalAssembly,
+    ) -> tuple[list[tuple[int, str, int]], list[tuple[dict[str, Any], list[dict[str, Any]]]]]:
+        """Observe occupied atoms once and query the complete donor neighborhood of each Zn.
+
+        Args:
+            assembly: Biological assembly in its deposited transformation frame.
+
+        Returns:
+            Ordered (assembly index, chain name, copy ordinal) protein identities and ordered
+            (metal record, donor records) pairs. Distances are float64 center separations in Å;
+            atom order, first-conformer selection and site numbering match the detailed audit.
+
+        Raises:
+            ValueError: Any occupied atom has non-finite coordinates, including non-donors.
+        """
+        donors: list[dict[str, Any]] = []
+        metals: list[dict[str, Any]] = []
+        copies: list[tuple[int, str, int]] = []
+        occurrences: Counter[str] = Counter()
+        for chain_index, chain in enumerate(assembly.model):
+            peptide = assembly.is_protein(chain)
+            if peptide:
+                occurrences[chain.name] += 1
+                copies.append((chain_index, chain.name, occurrences[chain.name]))
+            for residue in chain.first_conformer():
+                for atom in residue.first_conformer():
+                    if atom.occ < self.minimum_occupancy:
+                        continue
+                    xyz = [float(atom.pos.x), float(atom.pos.y), float(atom.pos.z)]
+                    if not np.isfinite(xyz).all():
+                        raise ValueError("occupied coordination atom has non-finite coordinates")
+                    record = {"chain_index": chain_index, "chain": chain.name,
+                              "residue": str(residue.seqid), "residue_name": residue.name,
+                              "atom": atom.name, "position": xyz, "occupancy": float(atom.occ),
+                              "element": atom.element.name,
+                              "vdw_radius": float(atom.element.vdw_r)}
+                    if atom.element.atomic_number == 30:
+                        metals.append(record)
+                    elif peptide and atom.element.atomic_number in (7, 8, 16):
+                        donors.append(record)
+        tree = cKDTree(np.asarray([atom["position"] for atom in donors]).reshape(-1, 3))
+        environments = []
+        for metal in metals:
+            partners = [{**donors[i], "distance_angstrom": float(np.linalg.norm(
+                np.asarray(donors[i]["position"]) - metal["position"]))}
+                for i in sorted(tree.query_ball_point(metal["position"], self.cutoff))]
+            environments.append((metal, partners))
+        return copies, environments
 
     @staticmethod
     def surface_gaps(

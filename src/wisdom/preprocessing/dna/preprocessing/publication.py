@@ -12,7 +12,12 @@ from dataclasses import replace
 from collections.abc import Iterable, Mapping, Sequence
 from wisdom.preprocessing.dna.DNAValidation import DNAValidation
 from lambdaforge.data import DatasetAsset, DatasetIndex, DatasetMember
-from wisdom.preprocessing.common.structure.StructuralSidecars import StructuralSidecars
+from wisdom.preprocessing.common.structure.assets.external.ProteinModelAssets import (
+    ProteinModelAssets,
+)
+from wisdom.preprocessing.common.structure.storage.ProteinArchive import ProteinArchive
+from wisdom.preprocessing.common.structure.assets.StructuralSidecars import StructuralSidecars
+from wisdom.preprocessing.common.structure.io.VerifiedStructureSource import VerifiedStructureSource
 
 
 def publish_dataset(
@@ -25,6 +30,7 @@ def publish_dataset(
     dataset_version    : str,
     structural_sidecars: StructuralSidecars | None = None,
     workers            : int = 1,
+    protein_models     : ProteinModelAssets | None = None,
 ) -> dict[str, Any]:
     """Create the portable root, run scientific validation, and publish one dataset.
 
@@ -36,8 +42,11 @@ def publish_dataset(
         annotation_report: Ordered DNA sidecar report.
         dataset_name: Stable LambdaForge Registry family.
         dataset_version: Immutable version selected by the researcher.
-        structural_sidecars: Optional common context/candidate families; None preserves legacy data.
+        structural_sidecars: Required common asset inventory when supplied; None preserves legacy
+            data. Every requested family must exist on every member before publication.
         workers: Native bounded sidecar concurrency, default one.
+        protein_models: Optional selected-model extractor. Its requested embeddings and enabled
+            static tables are mandatory; inference is sequential, not fitting.
 
     Returns:
         Dataset record, member/group counts, and scientific validation verdict.
@@ -64,10 +73,51 @@ def publish_dataset(
     # Enrichment reads only fixed universal atoms/points and (if still exact) deposited metadata.
     # The native assets are joined before the independent DNA audit and never enter annotations.
 
+    structural_families: set[str] = set()
+    required_families = set(structural_sidecars.requested_families
+                            if structural_sidecars is not None else ())
+    if protein_models is not None:
+        required_families.update(protein_models.requested_families)
     if structural_sidecars is not None:
         members_in = list(DatasetIndex(final_root / "members.jsonl"))
-        additions = structural_sidecars.generate(work, {member.member_id:
-            final_root / member.assets["universal_npz"].path for member in members_in}, workers)
+        source_metadata = {}
+        for member in members_in:
+            selection = VerifiedStructureSource.selection(member.metadata)
+            if selection is not None:
+                source_metadata[member.member_id] = selection
+
+        # Published source paths/hashes and declared assembly copies are portable dependencies.
+        # An old checkpoint path alone is not a scientific source-recovery contract.
+
+        structural_report = Path(work.outputs.directory(
+            "structural-enrichment-report", role="report"))
+        try:
+            additions = structural_sidecars.generate(
+                work,
+                {member.member_id: final_root / member.assets["universal_npz"].path
+                 for member in members_in},
+                workers,
+                existing = {member.member_id: {name: final_root / asset.path
+                            for name, asset in member.assets.items()} for member in members_in},
+                source_metadata = source_metadata,
+                source_hashes = {member.member_id: str(member.assets["source_structure"].sha256)
+                    for member in members_in if "source_structure" in member.assets
+                    and member.assets["source_structure"].sha256 is not None},
+            )
+        finally:
+            ProteinArchive.write_report(structural_report / "report.json",
+                                        structural_sidecars.report)
+
+        # Each frozen model owns distinct assets and checkpoints. All geometry/sequence/3Di work
+        # is shared; only one model and one member perform inference at any instant.
+
+        if protein_models is not None:
+            neural_assets = protein_models.generate(work, {
+                member.member_id: final_root / member.assets["universal_npz"].path
+                for member in members_in}, additions)
+            for identifier, paths in neural_assets.items():
+                additions[identifier].update(paths)
+
         enriched_members = []
         for member in members_in:
             assets = dict(member.assets)
@@ -78,7 +128,16 @@ def publish_dataset(
                 assets[name] = DatasetAsset(path=destination.relative_to(final_root).as_posix(),
                     sha256="sha256:" + hashlib.sha256(destination.read_bytes()).hexdigest(),
                     size_bytes=destination.stat().st_size, media_type="application/x-npz")
-            enriched_members.append(replace(member, assets=assets))
+            missing = required_families - assets.keys()
+            if missing:
+                raise RuntimeError(f"member {member.member_id!r} lacks required structural assets: "
+                                   f"{sorted(missing)}")
+            structural_families.update(
+                name for name in assets if name in StructuralSidecars.FAMILIES)
+            enriched_members.append(replace(member, assets=assets, metadata={
+                **member.metadata,
+                "required_structural_assets": sorted(required_families),
+            }))
         DatasetIndex.write(final_root / "members.jsonl", enriched_members)
 
     work.log("Running final checksum, NPZ, sidecar, split, group, and dilution validation")
@@ -112,6 +171,8 @@ def publish_dataset(
             "annotation_schema": "1.3",
             "manifest_schema":   "1.0",
             "supervision":       "protein-level-only",
+            "optional_universal_assets": sorted(structural_families),
+            "required_structural_assets": sorted(required_families),
         },
         target_schema = {
             "type": "object",

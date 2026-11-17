@@ -1,0 +1,124 @@
+{
+  "platform": "Linux-7.2.11-1-cachyos-x86_64-with-glibc2.44",
+  "numpy": "2.4.6",
+  "scope": "CPU voxel microbenchmark; no dataset rebuild or training",
+  "clouds": [
+    {
+      "candidates": 1000,
+      "exact_equal": true,
+      "samples_seconds": [
+        [
+          0.008272020000731573,
+          0.00045387599675450474
+        ],
+        [
+          0.007921582000562921,
+          0.0004231670027365908
+        ],
+        [
+          0.007959974987898022,
+          0.00034047999361064285
+        ]
+      ],
+      "median_seconds": [
+        0.007959974987898022,
+        0.0004231670027365908
+      ],
+      "sample_sd_seconds": [
+        0.00019220340938400288,
+        5.8649861211528897e-05
+      ]
+    },
+    {
+      "candidates": 10000,
+      "exact_equal": true,
+      "samples_seconds": [
+        [
+          0.06886575200769585,
+          0.00276330100314226
+        ],
+        [
+          0.06814921600744128,
+          0.002616841986309737
+        ],
+        [
+          0.06730607700592373,
+          0.0023407159897033125
+        ]
+      ],
+      "median_seconds": [
+        0.06814921600744128,
+        0.002616841986309737
+      ],
+      "sample_sd_seconds": [
+        0.0007806934232562842,
+        0.0002145825028579279
+      ]
+    },
+    {
+      "candidates": 100000,
+      "exact_equal": true,
+      "samples_seconds": [
+        [
+          0.31915580299391877,
+          0.028422681003576145
+        ],
+        [
+          0.31382962300267536,
+          0.027971429997705854
+        ],
+        [
+          0.31547020199650433,
+          0.028782606997992843
+        ]
+      ],
+      "median_seconds": [
+        0.31547020199650433,
+        0.028422681003576145
+      ],
+      "sample_sd_seconds": [
+        0.00272773860692506,
+        0.00040644440323993385
+      ]
+    }
+  ],
+  "single_structure_profile": {
+    "identifier": "tests/data/tiny.pdb",
+    "status": "processed",
+    "output": "profile.npz",
+    "atom_count": 21,
+    "residue_count": 4,
+    "atom_edge_count": 108,
+    "surface_point_count": 622,
+    "atom_spatial_candidate_count": 108,
+    "surface_atom_neighbor_count": 4492,
+    "diffusion_spectral_modes": 8,
+    "diffusion_gradient_entries": 15550,
+    "array_bytes": 781583,
+    "seconds": 0.3652772469940828,
+    "stage_seconds": {
+      "source_resolution": 0.0001284850004594773,
+      "read_filter_normalize": 0.0007221080013550818,
+      "atomic_graph": 0.001337380992481485,
+      "chemical_descriptors": 0.00015894300304353237,
+      "sampling": 0.0006165969971334562,
+      "burial": 0.011363978002918884,
+      "voxels": 0.00041186599992215633,
+      "normals": 0.014687208997202106,
+      "curvatures": 0.13588169700233266,
+      "area": 0.0007646690064575523,
+      "filtered_graph": 0.03628062100324314,
+      "surface_atom_neighbors": 0.01771406299667433,
+      "surface_neighbors": 0.04171814399887808,
+      "laplacian": 0.00844633299857378,
+      "spectrum": 0.00459572700492572,
+      "gradients": 0.0875850430020364,
+      "archive_validation": 0.0086176990007516,
+      "archive_compression_sync": 0.02124220300174784,
+      "archive_reopen_validation": 0.013964650002890266,
+      "validate_compress_reopen_publish": 0.04397826601052657
+    },
+    "warnings": [],
+    "file_bytes": 309389
+  }
+}

@@ -3,8 +3,11 @@
 import torch
 import numpy as np
 
+from pathlib import Path
 from torch import Tensor
 from scipy.spatial import cKDTree
+from wisdom.preprocessing.common.structure.assets.StructuralAsset import StructuralAsset
+from wisdom.preprocessing.common.structure.assets.surface.SurfaceView import SurfaceView
 
 
 class SurfaceViewCorrespondence:
@@ -112,3 +115,73 @@ class SurfaceViewCorrespondence:
             "distances":         torch.from_numpy(matched_distances).to(torch.float32)[compatible],
             "normal_cosines":    cosine.to(torch.float32)[compatible],
         }
+
+    def align_assets(
+        self, base: Path, view: Path, maximum_distance: float = 1.5,
+        minimum_normal_cosine: float = 0.5,
+    ) -> dict[str, Tensor]:
+        """Verify shared physical identity before matching a base cloud to an alternate view.
+
+        Args:
+            base: Immutable universal archive defining physical atoms and reference surface.
+            view: Base-bound surface_view asset; a different protein's view is rejected.
+            maximum_distance: Bounded nearest-neighbour threshold in Å.
+            minimum_normal_cosine: Accepted normal cosine in [-1,1].
+
+        Returns:
+            Mutual sparse alignment plus reference/view coverage masks and area-weighted coverage.
+
+        Raises:
+            ValueError: Incompatible base identity or no geometrically compatible pairs.
+        """
+        arrays, header = StructuralAsset.read(view, base, "surface_view")
+        SurfaceView(**header["parameters"]).validate(view, base)
+        with np.load(base, allow_pickle=False) as stored:
+            reference = {name: torch.from_numpy(stored[name]) for name in (
+                "surface_positions", "surface_normals", "surface_area_weights")}
+        result = self.align(reference["surface_positions"], reference["surface_normals"],
+            torch.from_numpy(arrays["surface_positions"]),
+            torch.from_numpy(arrays["surface_normals"]), maximum_distance, minimum_normal_cosine)
+        for prefix, weights, indices in (
+            ("reference", reference["surface_area_weights"], result["reference_indices"]),
+            ("view", torch.from_numpy(arrays["surface_area_weights"]), result["view_indices"]),
+        ):
+            mask = torch.zeros(len(weights), dtype=torch.bool)
+            mask[indices] = True
+            result[prefix + "_covered"] = mask
+            result[prefix + "_area_coverage"] = weights[mask].sum() / weights.sum()
+        return result
+
+    @staticmethod
+    def transport(
+        source_values: Tensor, correspondence: dict[str, Tensor], target_count: int,
+    ) -> tuple[Tensor, Tensor]:
+        """Transport a scalar field by matched nearest-neighbour interpolation, with coverage.
+
+        Args:
+            source_values: Finite scalar reference field [M], independent of any functional label.
+            correspondence: Mutual alignment from align/align_assets, with unique target indices.
+            target_count: Number of points in the other discretization, not the reference count.
+
+        Returns:
+            CPU target field [N] and valid [N]. Uncovered entries are zero placeholders, never
+            observed zero. Constant fields transport exactly on coverage; smooth/localized fields
+            incur sampling error that must be measured separately from neural prediction error.
+
+        Raises:
+            ValueError: Non-finite fields, out-of-range indices or non-mutual many-to-one mapping.
+        """
+        values = source_values.detach().cpu()
+        source = correspondence["reference_indices"].long().cpu()
+        target = correspondence["view_indices"].long().cpu()
+        if values.ndim != 1 or not torch.isfinite(values).all() or len(source) != len(target) \
+                or target_count < 1 or len(torch.unique(target)) != len(target):
+            raise ValueError("scalar transport requires a finite field and one-to-one coverage")
+        if len(source) and (source.min() < 0 or source.max() >= len(values) or target.min() < 0
+                            or target.max() >= target_count):
+            raise ValueError("surface transport index out of range")
+        result = torch.zeros(target_count, dtype=values.dtype)
+        valid = torch.zeros(target_count, dtype=torch.bool)
+        result[target] = values[source]
+        valid[target] = True
+        return result, valid

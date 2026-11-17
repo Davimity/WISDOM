@@ -13,10 +13,10 @@ from test_wisdom_v2 import _v2
 from collections import Counter
 from test_v7_heads import batch as _v7_batch
 from lambdaforge.work import WorkConfig, WorkRunner
-from wisdom.models.WeakSurfaceLoss import WeakSurfaceLoss
-from wisdom.models.ArchitectureSpike import ArchitectureSpike
-from wisdom.models.VectorAtomicState import VectorAtomicState
-from wisdom.models.SurfaceAtomFeedback import SurfaceAtomFeedback
+from wisdom.models.losses.WeakSurfaceLoss import WeakSurfaceLoss
+from wisdom.models.architecture.ArchitectureSpike import ArchitectureSpike
+from wisdom.models.atomic.VectorAtomicState import VectorAtomicState
+from wisdom.models.communication.SurfaceAtomFeedback import SurfaceAtomFeedback
 from wisdom.Training import Training, _create_model, _model_inputs
 
 

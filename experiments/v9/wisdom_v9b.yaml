@@ -60,7 +60,7 @@ with:  # Frozen surface-oriented line A from reviewed V7; no assumed V8 winner.
   atomic_covalent_cutoff: 64.0  # Explicit DimeNet covalent support; out-of-support input fails.
   atomic_maximum_triplets: 1000000  # Feasibility guard; never truncate typed triplets.
   atomic_maximum_pairwise_bytes: 134217728  # 128 MiB principal tensor guard, NOT total VRAM.
-  atomic_allow_dense_global: false  # Dense attention is forbidden here; the approved exception is restricted to V9f.
+  atomic_allow_dense_global: false  # Dense attention is forbidden here; the approved exception is restricted to V9g.
   batch_size: 16  # Unchanged optimization batch; do not shrink silently for expensive variants.
   epochs: 500  # Existing safety ceiling.
   patience: 30  # G-based within-Run stopping; no competitive pruning.
@@ -84,6 +84,9 @@ with:  # Frozen surface-oriented line A from reviewed V7; no assumed V8 winner.
 # atomic_encoder_type=baseline preserves old keys/RNG. Alternative profiles require controlled,
 # learned surface input and baseline spike; they cannot be silently combined with V8 mechanisms.
 # radial_count=16, vector_channels=16, basis_count=4, spatial_cutoff=6 Å, covalent_cutoff=64 Å.
+# New SchNet-only defaults: atomic_radial_encoding=gaussian (or direct), atomic_hidden_dim=null,
+# atomic_output_dim=null. Null widths inherit hidden_dim; output must match the surface width.
+# These omitted options preserve every original operator, weight shape and initialization.
 # maximum_triplets=1000000, maximum_pairwise_bytes=134217728, allow_dense_global=false.
 # Guards fail explicitly: no topology truncation, batch shrink, sparse/global substitution or fake quality.
 # PNA log-degree means are derived ONLY from the exact training view/topology and saved in checkpoints;
@@ -128,7 +131,7 @@ sweep:  # 7 candidates x four seeds = 28 mandatory Runs.
 # Defaults: max_parallel/runs_per_gpu=null (automatic), max_runs/max_time=null, failure_retries=1.
 # Auto admission is resource-aware, not a guarantee that every candidate fits or overlaps.
 # Concurrent timings reflect shared hardware; do not interpret them as isolated encoder latency.
-# The six Studies are independent; no stage dependency or implicit winner import exists.
+# The Studies are independent; no stage dependency or implicit winner import exists.
 
 objective:  # Existing descriptive development utility; checkpoint epochs remain G-selected.
   metric: val_wisdom_hpo_score  # Preserve W and its G/S/regret/coupling components.
@@ -141,7 +144,7 @@ objective:  # Existing descriptive development utility; checkpoint epochs remain
 # Keep raw S, global AUROC/AUPRC, negative evidence, top-k recall/enrichment, seeds and costs separate.
 
 resources:  # Study-wide budget; target capacity and model fit have NOT been measured.
-  gpu: 2  # Request two accelerators; native LF admits independent Runs automatically.
+  gpu: 1  # Request two accelerators; native LF admits independent Runs automatically.
   cpu: 36  # Total study-wide CPU budget, shared by concurrently admitted Runs.
   memory: 96GiB  # Total study-wide host RAM; not a per-Run or GPU-VRAM reservation.
   time: 168h  # Interruption may require native recovery of missing mandatory cells.

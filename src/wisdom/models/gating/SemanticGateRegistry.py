@@ -16,6 +16,7 @@ class SemanticGateRegistry(nn.Module):
         definitions   : Sequence[tuple[str, str | None]],
         initial_active: float = HardConcreteGate.INITIAL_ACTIVE,
         inactive_names: Sequence[str] = (),
+        fixed_values  : Mapping[str, int] | None = None,
     ) -> None:
         """Create gates in a stable declared order.
 
@@ -24,6 +25,9 @@ class SemanticGateRegistry(nn.Module):
             initial_active: Initial analytic activity probability shared by every gate.
             inactive_names: Sources structurally absent from a controlled architecture. Their
                 gates stay closed under all overrides, are frozen, and contribute zero L0 cost.
+            fixed_values: Optional training-design constants 0/1 for named sources. Their own
+                activity probability and gradient are fixed, but ancestor costs remain active.
+                Unlike force(), these are scientific controls, not post-hoc interventions.
 
         Raises:
             ValueError: If names repeat or a parent is missing.
@@ -47,13 +51,20 @@ class SemanticGateRegistry(nn.Module):
         self.parents     = {name: parent for name, parent in definitions}
         self._indices    = {name: index for index, name in enumerate(self.names)}
         self.inactive_names = frozenset(inactive_names)
+        self.fixed_values = dict(fixed_values or {})
         if not self.inactive_names <= set(self.names):
             raise ValueError("inactive gate names must belong to the declared registry")
-        for name in self.inactive_names:
+        if (not self.fixed_values.keys() <= set(self.names)
+            or any(value not in {0, 1} for value in self.fixed_values.values())):
+            raise ValueError("fixed gate values must name declared sources with value zero or one")
+        if any(self.fixed_values.get(name) == 1 for name in self.inactive_names):
+            raise ValueError("an absent source cannot be fixed open")
+        for name in self.inactive_names | self.fixed_values.keys():
             self.gates[self._indices[name]].requires_grad_(False)
         self._override   = "learned"
         self._forced     : dict[str, float] = {}
         self._last_sample: dict[str, Tensor] = {}
+        self.schedule_open: frozenset[str] = frozenset()
 
     def sample(self, training: bool) -> dict[str, Tensor]:
         """Sample each semantic gate exactly once for one model forward.
@@ -71,7 +82,10 @@ class SemanticGateRegistry(nn.Module):
                 values[name] = gate.log_alpha.new_zeros((), dtype=torch.float32)
             elif name in self._forced:
                 values[name] = gate.log_alpha.new_tensor(self._forced[name], dtype=torch.float32)
-            elif self._override == "all_on":
+            elif name in self.fixed_values:
+                values[name] = gate.log_alpha.new_tensor(
+                    self.fixed_values[name], dtype=torch.float32)
+            elif name in self.schedule_open or self._override == "all_on":
                 values[name] = gate.log_alpha.new_ones((), dtype=torch.float32)
             else:
                 values[name] = gate(training=training)
@@ -126,7 +140,9 @@ class SemanticGateRegistry(nn.Module):
         self._forced[name] = float(value)
 
     def probability_active(self, name: str) -> Tensor:
-        """Return one gate's analytic nonzero probability.
+        """Return analytic activity, honoring scientific absence/fixed-design controls.
+
+        Post-hoc force() probes deliberately do not rewrite this prior or its regularizer.
 
         Args:
             name: Stable semantic gate name.
@@ -137,6 +153,8 @@ class SemanticGateRegistry(nn.Module):
         gate = cast(HardConcreteGate, self.gates[self._indices[name]])
         if name in self.inactive_names:
             return gate.log_alpha.new_zeros((), dtype=torch.float32)
+        if name in self.fixed_values:
+            return gate.log_alpha.new_tensor(self.fixed_values[name], dtype=torch.float32)
         return gate.probability_active()
 
     def deterministic_value(self, name: str) -> Tensor:
@@ -153,7 +171,10 @@ class SemanticGateRegistry(nn.Module):
         if name in self._forced:
             gate = cast(HardConcreteGate, self.gates[0])
             return gate.log_alpha.new_tensor(self._forced[name], dtype=torch.float32)
-        if self._override == "all_on":
+        if name in self.fixed_values:
+            gate = cast(HardConcreteGate, self.gates[self._indices[name]])
+            return gate.log_alpha.new_tensor(self.fixed_values[name], dtype=torch.float32)
+        if name in self.schedule_open or self._override == "all_on":
             gate = cast(HardConcreteGate, self.gates[0])
             return gate.log_alpha.new_ones((), dtype=torch.float32)
         gate = cast(HardConcreteGate, self.gates[self._indices[name]])
@@ -175,6 +196,34 @@ class SemanticGateRegistry(nn.Module):
             parent      = self.parents[parent]
         return probability
 
+    def inference_state(self) -> dict[str, object]:
+        """Export runtime overrides separately from tensors, preserving localized warm-up.
+
+        Returns:
+            JSON-compatible global, post-hoc and scheduled overrides. Scientific fixed controls
+            are reconstructed by model_parameters and cannot be enabled by this state.
+        """
+        return {"override": self._override, "forced": dict(self._forced),
+                "schedule_open": sorted(self.schedule_open)}
+
+    def restore_inference_state(self, state: Mapping[str, object]) -> None:
+        """Restore runtime state exactly rather than retaining the final epoch's schedule.
+
+        Args:
+            state: Mapping returned by inference_state and stored beside the selected weights.
+
+        Raises:
+            ValueError: A scheduled gate does not exist in the reconstructed model.
+        """
+        self.set_override(str(state["override"]))
+        self._forced.clear()
+        for name, value in cast(Mapping[str, float], state["forced"]).items():
+            self.force(name, value)
+        names = frozenset(cast(Sequence[str], state["schedule_open"]))
+        if not names <= set(self.names):
+            raise ValueError("checkpoint schedule names do not match the semantic inventory")
+        self.schedule_open = names
+
     def regularization(self) -> Tensor:
         """Return the unit-cost normalized expected L0 penalty in ``[0,1]``."""
         probabilities = [self.effective_probability(name) for name in self.names]
@@ -193,9 +242,15 @@ class SemanticGateRegistry(nn.Module):
             probability = float(self.probability_active(name).detach().cpu())
             deterministic = (
                 0.0 if name in self.inactive_names
+                else float(self.fixed_values[name]) if name in self.fixed_values
                 else float(gate.deterministic_value().detach().cpu())
             )
             effective = float(self.effective_probability(name).detach().cpu())
+            inference = self.deterministic_value(name)
+            parent = self.parents[name]
+            while parent is not None:
+                inference = inference * self.deterministic_value(parent)
+                parent = self.parents[parent]
             family = (
                 "surface_curvature"
                 if name.startswith("surface.curvature")
@@ -211,6 +266,11 @@ class SemanticGateRegistry(nn.Module):
                     "deterministic_value":         deterministic,
                     "effective_path_probability": effective,
                     "available_to_model":          name not in self.inactive_names,
+                    "inference_value": float(self.deterministic_value(name).detach().cpu()),
+                    "effective_inference_value": float(inference.detach().cpu()),
+                    "fixed_value":                 self.fixed_values.get(name),
+                    "posthoc_override":            self._forced.get(name),
+                    "scheduled_open":              name in self.schedule_open,
                 }
             )
 

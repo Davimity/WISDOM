@@ -1,7 +1,7 @@
 import pytest
 import torch
 
-from wisdom.models.WeakSurfaceLoss import WeakSurfaceLoss
+from wisdom.models.losses.WeakSurfaceLoss import WeakSurfaceLoss
 
 
 def _operators() -> list[dict[str, torch.Tensor]]:

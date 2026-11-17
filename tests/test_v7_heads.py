@@ -14,8 +14,8 @@ from test_wisdom_v2 import _v2, _line_operator
 from test_wisdom_v1 import _sample, _model_inputs
 from wisdom.data.WisdomCollator import WisdomCollator
 from wisdom.Training import _calibrate_local_head_bias
-from wisdom.models.ProteinTaskLoss import ProteinTaskLoss
-from wisdom.models.GlobalSurfaceHeads import GlobalSurfaceHeads
+from wisdom.models.losses.ProteinTaskLoss import ProteinTaskLoss
+from wisdom.models.heads.GlobalSurfaceHeads import GlobalSurfaceHeads
 from wisdom.analysis.WisdomAnalysisProfile import WisdomAnalysisProfile
 from wisdom.evaluation.SurfaceFaithfulnessAudit import SurfaceFaithfulnessAudit
 from wisdom.Training import _create_model, _evaluate, _validation_utility, _train_wisdom

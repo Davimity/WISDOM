@@ -1,0 +1,13 @@
+{
+  "evidence_kind": "synthetic_cpu_microbenchmark_not_cluster_prediction",
+  "queries": 8192,
+  "atoms": 512,
+  "block_queries": 32,
+  "scalar_seconds": [0.42687090998515487, 0.4014029670506716, 0.42747974395751953],
+  "blocked_seconds": [0.17874375393148512, 0.17907321394886822, 0.18019656103570014],
+  "median_speedup": 2.383778682316171,
+  "bitwise_equal_values_and_masks": true,
+  "numpy": "2.4.6",
+  "random_seed": 17,
+  "interpretation": "Exact full-protein float64 LJ reductions, not an end-to-end preprocessing speedup. APBS, chemistry, geometry, IO and native recovery were not timed."
+}

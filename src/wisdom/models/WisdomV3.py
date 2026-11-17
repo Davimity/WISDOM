@@ -4,11 +4,11 @@ from typing import Any
 from torch import Tensor
 from wisdom.models.WisdomV2 import WisdomV2
 from collections.abc import Mapping, Sequence
-from wisdom.models.SurfaceEncoderType import SurfaceEncoderType
-from wisdom.models.PTV3SurfaceEncoder import PTV3SurfaceEncoder
-from wisdom.models.DMASIFSurfaceEncoder import DMASIFSurfaceEncoder
-from wisdom.models.DeltaConvSurfaceEncoder import DeltaConvSurfaceEncoder
-from wisdom.models.PointMambaSurfaceEncoder import PointMambaSurfaceEncoder
+from wisdom.models.surface.SurfaceEncoderType import SurfaceEncoderType
+from wisdom.models.surface.backends.PTV3SurfaceEncoder import PTV3SurfaceEncoder
+from wisdom.models.surface.backends.DMASIFSurfaceEncoder import DMASIFSurfaceEncoder
+from wisdom.models.surface.backends.DeltaConvSurfaceEncoder import DeltaConvSurfaceEncoder
+from wisdom.models.surface.backends.PointMambaSurfaceEncoder import PointMambaSurfaceEncoder
 
 
 class WisdomV3(WisdomV2):
@@ -32,6 +32,9 @@ class WisdomV3(WisdomV2):
         """
         super().__init__(**v2_parameters)
         self.surface_encoder_type = SurfaceEncoderType(surface_encoder_type)
+        if (self.surface_encoder_type is not SurfaceEncoderType.DIFFUSION
+            and v2_parameters.get("surface_options")):
+            raise ValueError("surface_options configure DiffusionNet, not a replacement encoder")
 
         if self.surface_encoder_type is SurfaceEncoderType.DMASIF:
             self.surface_encoder = DMASIFSurfaceEncoder(

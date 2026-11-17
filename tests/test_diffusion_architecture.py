@@ -6,14 +6,16 @@ import torch
 from test_wisdom_v1 import _model_inputs, _sample
 
 from wisdom.data.WisdomCollator import WisdomCollator
-from wisdom.models.DeltaConvSurfaceEncoder import DeltaConvSurfaceEncoder
-from wisdom.models.DiffusionBlock import DiffusionBlock
-from wisdom.models.DiffusionSurfaceEncoder import DiffusionSurfaceEncoder
-from wisdom.models.SurfaceAtomTransfer import SurfaceAtomTransfer
+from wisdom.models.communication.SurfaceAtomTransfer import SurfaceAtomTransfer
+from wisdom.models.surface.backends.DeltaConvSurfaceEncoder import DeltaConvSurfaceEncoder
+from wisdom.models.surface.DiffusionBlock import DiffusionBlock
+from wisdom.models.surface.DiffusionSurfaceEncoder import DiffusionSurfaceEncoder
 from wisdom.models.WisdomV1 import WisdomV1
 from wisdom.models.WisdomV3 import WisdomV3
-from wisdom.preprocessing.common.structure.DiffusionOperatorBuilder import DiffusionOperatorBuilder
-from wisdom.preprocessing.common.structure.SurfaceAtomNeighborhoodBuilder import (
+from wisdom.preprocessing.common.structure.geometry.DiffusionOperatorBuilder import (
+    DiffusionOperatorBuilder,
+)
+from wisdom.preprocessing.common.structure.geometry.SurfaceAtomNeighborhoodBuilder import (
     SurfaceAtomNeighborhoodBuilder,
 )
 

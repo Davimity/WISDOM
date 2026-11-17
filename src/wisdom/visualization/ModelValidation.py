@@ -14,11 +14,12 @@ from torch.utils.data import DataLoader
 from collections.abc import Mapping, Sequence
 from wisdom.data.WisdomDataset import WisdomDataset
 from wisdom.data.WisdomCollator import WisdomCollator
-from wisdom.models.AtomicEncoderType import AtomicEncoderType
 from wisdom.Training import Training, _create_model, _evaluate
+from wisdom.models.atomic.AtomicEncoderType import AtomicEncoderType
 from wisdom.visualization.ProteinReportPage import ProteinReportPage
+from wisdom.data.AtomicStructuralInputs import AtomicStructuralInputs
 from wisdom.visualization.ValidationSelection import ValidationSelection
-from wisdom.evaluation.SurfacePredictionReport import SurfacePredictionReport
+from wisdom.visualization.predictions.SurfacePredictionReport import SurfacePredictionReport
 
 
 class ModelValidation(lf.Work):
@@ -216,13 +217,24 @@ class ModelValidation(lf.Work):
                 override = "all_on" if (state["epoch"] - 1) / epochs < warmup else "learned"
                 override = state.get("inference_state", {}).get("gate_override", override)
                 model.semantic_gates.set_override(override)
+                if "semantic_gate_state" in state.get("inference_state", {}):
+                    model.semantic_gates.restore_inference_state(
+                        state["inference_state"]["semantic_gate_state"])
                 for split in splits:
                     data = WisdomDataset(
                         dataset,
                         split,
                         include_surface_targets=True,
+                        structural_assets=tuple(state.get("structural_assets", ())),
+                        extended_asset_radius=(state["model_parameters"]["surface_atom_radius"]
+                            if state["data_parameters"].get("transfer_source") == "extended"
+                            else None),
+                        extended_asset_k=(state["data_parameters"]["surface_atom_k"]
+                            if state["data_parameters"].get("transfer_source") == "extended"
+                            else None),
                         include_surface_geometry=(
                             int(state["model_version"]) == 3
+                            or state["data_parameters"].get("surface_graph_source") == "filtered"
                             or state["model_parameters"].get("surface_refiner_type", "none")
                             not in {"none", "heat", "learned_heat"}
                         ),
@@ -233,11 +245,19 @@ class ModelValidation(lf.Work):
                             ).needs_positions()
                         ),
                     )
+                    if model.atomic_encoder_type is AtomicEncoderType.STRUCTURAL_GLOBAL:
+                        data.atomic_structure_paths = AtomicStructuralInputs(
+                            state["data_parameters"]["atom_spatial_k"],
+                            state["model_parameters"].get(
+                                "atomic_maximum_pairwise_bytes", 134_217_728,
+                            ),
+                        ).prepare(self, (record[0] for record in data.records))
                     loader = DataLoader(
                         data,
                         batch_size=batch_size,
                         shuffle=False,
                         num_workers=data_workers,
+                        worker_init_fn=WisdomCollator.initialize_worker,
                         collate_fn=WisdomCollator(**state["data_parameters"]),
                     )
                     output = report_root / str(len(audits))

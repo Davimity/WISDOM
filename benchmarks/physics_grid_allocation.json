@@ -1,0 +1,31 @@
+{
+  "evidence_kind": "real_local_preparation_and_grid_dimensions_not_solver_validation",
+  "identifier": "8GLV_Ey",
+  "source_dataset": "wisdom-dna-reduced-physics@1",
+  "base_sha256": "5c7ca899851c7fc66096c9c54bc904d12f3de0a39b4a5e63bd3eb642d505e419",
+  "sequence_context_sha256": "d7a6105a13de0cff28de76e99666729d8e50e51aab300b53e4562ba7815455b4",
+  "local_packages": {
+    "pdb2pqr": "3.8.0",
+    "openmm": "8.6.1",
+    "propka": "3.5.1"
+  },
+  "heavy_atom_policy": "bounded",
+  "prepared_extent_angstrom": [346.002, 144.465, 87.348],
+  "reconstructed_heavy_atoms": 1,
+  "grids": {
+    "potential": {"shape": [385, 193, 129], "voxels": 9585345},
+    "refined": {"shape": [513, 257, 161], "voxels": 21226401},
+    "larger-box": {"shape": [417, 225, 161], "voxels": 15105825}
+  },
+  "previous_operational_voxel_ceiling": 8000000,
+  "selected_operational_voxel_ceiling": 24000000,
+  "scientific_parameters_changed": false,
+  "APBS_or_LJ_fields_executed": false,
+  "cluster_work_or_training_executed": false,
+  "limitations": [
+    "Native PDB2PQR execution and full OpenMM parameterization were performed locally.",
+    "Dimensions use the existing PhysicalFields.solve multigrid rules, not a new resolution.",
+    "Passing the allocation guard does not establish solver convergence or peak-memory safety.",
+    "The recovery preview found 1177 retained files with no missing/size-invalid payloads; hashes and scientific validators run on restoration."
+  ]
+}

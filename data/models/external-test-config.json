@@ -1,0 +1,17 @@
+{
+  "esm2": {
+    "checkpoint": "data/models/esm2-35m",
+    "identifier": "facebook/esm2_t12_35M_UR50D",
+    "revision": "6fbf070e65b0b7291e7bbcd451118c216cff79d8"
+  },
+  "saprot": {
+    "checkpoint": "data/models/saprot-35m",
+    "identifier": "westlake-repl/SaProt_35M_AF2",
+    "revision": "316cd4017d29f4657b959365f24b57f1ee278912"
+  },
+  "esmc": {
+    "checkpoint": "data/models/esmc-300m",
+    "identifier": "biohub/ESMC-300M",
+    "revision": "e4bac860f0c502cd80f3aeac3d0ce6524c6627cb"
+  }
+}

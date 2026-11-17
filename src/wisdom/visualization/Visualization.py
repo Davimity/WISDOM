@@ -16,10 +16,10 @@ from collections.abc import Sequence
 from plotly.offline import get_plotlyjs
 from lambdaforge.data import DatasetIndex, DatasetMember
 from wisdom.data.TaskSpecification import TaskSpecification
-from wisdom.evaluation.PointCloudExporter import PointCloudExporter
 from wisdom.visualization.ProteinReportPage import ProteinReportPage
-from wisdom.preprocessing.common.structure.ProteinArchive import ProteinArchive
-from wisdom.preprocessing.common.structure.ProteinVisualizer import ProteinVisualizer
+from wisdom.visualization.predictions.PointCloudExporter import PointCloudExporter
+from wisdom.preprocessing.common.structure.storage.ProteinArchive import ProteinArchive
+from wisdom.preprocessing.common.structure.viewer.ProteinVisualizer import ProteinVisualizer
 
 
 class Visualization(lf.Work):

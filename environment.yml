@@ -10,6 +10,10 @@ dependencies:                # Base non-PyPI tools required before editable WISD
   - biopython>=1.84          # ProteinAnalysis sequence descriptors used by Selection.
   - foldseek                 # Full-RAW protein-structure similarity and leakage edges.
   - mmseqs2                  # Full-RAW protein-sequence similarity and leakage edges.
+  - apbs>=3.4                # VF electrostatic reference solver; executed offline, never per epoch.
+  - pdb2pqr>=3.7.1           # VF protein-only protonation and PQR charges/radii; includes PROPKA.
+  - openmm>=8.2              # VF force-field parameters and independent neutral-probe LJ reference.
+  - griddataformats>=1.0     # Official OpenDX volumetric parser; no project-owned coordinate parser.
 
 # Environment option reference:
 # name may be any valid Conda environment name; install.sh deliberately expects "wisdom" here.
@@ -19,3 +23,5 @@ dependencies:                # Base non-PyPI tools required before editable WISD
 # intentionally not duplicated as a Conda dependency here.
 # their transitive versions are solved by the two channels and exact installed versions are stored
 # in each LambdaForge Work environment/provenance record.
+# VF tools are provisioned once with the native environment. Only physical enrichment probes
+# their versions; ordinary training/preprocessing does not acquire unrelated execution requirements.

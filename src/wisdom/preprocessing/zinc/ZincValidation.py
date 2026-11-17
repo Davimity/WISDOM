@@ -13,15 +13,16 @@ from contextlib import suppress
 from lambdaforge.data import DatasetIndex
 from collections import Counter, defaultdict
 from collections.abc import Mapping, Sequence
-from wisdom.preprocessing.zinc.evidence import load_evidence
-from wisdom.preprocessing.zinc.audit import write_diversity_report
 from wisdom.preprocessing.zinc.ZincAnnotation import ZincAnnotation
+from wisdom.preprocessing.zinc.stages.evidence import load_evidence
+from wisdom.preprocessing.zinc.stages.legacy import read_membership
 from wisdom.utils.structure.ProteinStructure import ProteinStructure
 from wisdom.features.SurfaceFeatureSidecar import SurfaceFeatureSidecar
 from wisdom.preprocessing.zinc.ZincCoordination import ZincCoordination
-from wisdom.preprocessing.common.structure.ProteinArchive import ProteinArchive
+from wisdom.preprocessing.zinc.stages.audit import write_diversity_report
 from wisdom.preprocessing.common.structure.PreprocessConfig import PreprocessConfig
-from wisdom.preprocessing.common.structure.StructuralSidecars import StructuralSidecars
+from wisdom.preprocessing.common.structure.storage.ProteinArchive import ProteinArchive
+from wisdom.preprocessing.common.structure.assets.StructuralSidecars import StructuralSidecars
 
 
 class ZincValidation(lf.Work):
@@ -107,6 +108,31 @@ class ZincValidation(lf.Work):
         normalization_populations: dict[str, dict[str, str]] = {"full": train_sources}
         verified_rows: list[dict[str, Any]] = []
         local_support: list[dict[str, Any]] = []
+        inherited = [member["metadata"].get("zinc_evidence", {}).get(
+            "label_evidence", {}).get("kind") == "legacy_tfg_manifest" for member in members]
+        legacy = bool(inherited) and all(inherited)
+        legacy_members: dict[str, dict[str, Any]] = {}
+        legacy_digest = ""
+        if any(inherited):
+            if not legacy:
+                failures.append({"identifier": "dataset",
+                                 "failure": "mixed legacy/modern protocols"})
+            try:
+                evidence_root = members[0]["assets"]["selection_evidence"]
+                report = json.loads((evidence_root / "legacy-inputs.json").read_text())
+                files = {name: evidence_root / "inputs" / f"{name}.txt"
+                         for name in report["membership_sha256"]}
+                original_rows, verified = read_membership(files)
+                if report["membership_sha256"] != verified["membership_sha256"] or (
+                        report["members"] != original_rows):
+                    raise ValueError("legacy source hashes or recorded membership changed")
+                legacy_members = {row["identifier"]: row for row in original_rows}
+                legacy_digest = hashlib.sha256(json.dumps(verified["membership_sha256"],
+                                                          sort_keys=True).encode()).hexdigest()
+                if set(legacy_members) != {member["id"] for member in members}:
+                    raise ValueError("legacy dataset does not preserve every original member")
+            except (KeyError, ValueError, OSError) as error:
+                failures.append({"identifier": "legacy-inputs", "failure": str(error)})
         if any(member["metadata"].get("optional_surface_feature_assets") for member in members):
             for member in members:
                 base = member["assets"].get("universal_npz")
@@ -144,6 +170,10 @@ class ZincValidation(lf.Work):
                         raise ValueError("invalid train dilution name or percentage")
                     views[str(view)].add(member["id"])
                 paths = member["assets"]
+                required = set(member["metadata"].get("required_structural_assets", ()))
+                missing  = required - paths.keys()
+                if missing:
+                    raise ValueError(f"missing required structural assets: {sorted(missing)}")
                 for name, checksum in member.get("checksums", {}).items():
                     actual = hashlib.sha256(paths[name].read_bytes()).hexdigest()
                     if actual != checksum.removeprefix("sha256:"):
@@ -175,6 +205,11 @@ class ZincValidation(lf.Work):
                     SurfaceFeatureSidecar.validate_statistics(
                         statistics, feature_names, normalization_populations)
                 row = member["metadata"]["zinc_evidence"]
+                if legacy:
+                    original = legacy_members[member["id"]]
+                    if original["label"] != label or original["split"] != split or (
+                            row["label_evidence"]["membership_sha256"] != legacy_digest):
+                        raise ValueError("legacy label, split or original input binding changed")
                 with np.load(annotation, allow_pickle=False) as sidecar:
                     encoded_metadata = str(sidecar["annotation_metadata_json"].item())
                     annotation_metadata = json.loads(encoded_metadata)
@@ -187,7 +222,7 @@ class ZincValidation(lf.Work):
 
                 evidence_path = output / "checked-evidence.jsonl"
                 evidence_path.write_text(json.dumps(row) + "\n")
-                load_evidence(evidence_path)
+                load_evidence(evidence_path, allow_legacy=legacy)
                 if int(row["label"]) != label or row["split"] != split:
                     raise ValueError("selection label/split disagrees with member targets")
                 source = paths["source_structure"].read_bytes()
@@ -214,15 +249,21 @@ class ZincValidation(lf.Work):
                 )
                 if not ZincCoordination.matches(sites, row["sites"]):
                     raise ValueError("assembly coordination evidence does not reproduce")
-                if label == 0 and any(site["selected_donor_count"] for site in sites):
+                contact = any(site["selected_donor_count"] for site in sites)
+                if label == 0 and contact and not legacy:
                     raise ValueError("negative evidence contradicts structural Zn contacts")
-                if label == 1 and not any(site["accepted"] for site in sites):
+                if label == 1 and not any(site["accepted"] for site in sites) and not legacy:
                     raise ValueError("positive protein lacks verified selected-copy coordination")
                 with np.load(annotation, allow_pickle=False) as sidecar:
                     available = bool(sidecar["local_gt_available"].item())
                     if bool(member["targets"]["local_ground_truth"]) != available:
                         raise ValueError("index local GT availability disagrees with sidecar")
-                    if label == 1 and split != "train" and (
+                    if legacy and available and ((label == 0 and contact) or
+                            (label == 1 and not any(site["accepted"] for site in sites)) or
+                            row.get("legacy_coordinate_quality", {}).get(
+                                "occupied_heavy_atoms") == 0):
+                        raise ValueError("unsupported legacy local reference marked available")
+                    if label == 1 and split != "train" and not legacy and (
                         not available or not sidecar["surface_target_hard"].any()
                     ):
                         raise ValueError("positive evaluation member has no positive local GT")
@@ -235,7 +276,8 @@ class ZincValidation(lf.Work):
                             float(sidecar["surface_target_hard"].mean()) if available else None
                         ),
                     })
-                verified_rows.append({**row, "leakage_group": group})
+                verified_rows.append({**row, "leakage_group": group,
+                                      "local_gt_available": available})
             except (KeyError, ValueError, TypeError, OSError, RuntimeError) as error:
                 failures.append({"identifier": member["id"], "failure": str(error)})
         for group, splits in sorted(groups.items()):
@@ -245,7 +287,7 @@ class ZincValidation(lf.Work):
             if set(counts[split]) != {0, 1}:
                 failures.append({"identifier": split, "failure": "split requires both classes"})
         for digest, assigned in sorted(sequence_groups.items()):
-            if len(assigned) > 1:
+            if len(assigned) > 1 and not legacy:
                 failures.append({"identifier": digest,
                                  "failure": "exact sequence spans leakage groups"})
         previous_by_replicate: dict[str, set[str]] = {}
@@ -265,6 +307,20 @@ class ZincValidation(lf.Work):
         diversity = (write_diversity_report(output, verified_rows, verified_rows)
                      if verified_rows else {"warnings": [], "covariates": {}, "coverage": {}})
         warnings = list(diversity["warnings"])
+        if legacy:
+            warnings.append("TFG reproduction preserves inherited labels and partitions. "
+                "No sequence/structure homology independence is certified; unchecked member "
+                "buckets are not scientific leakage groups. Local GT is available only where "
+                "the inherited label is supported by the current coordinate reference.")
+            for row in verified_rows:
+                if row.get("legacy_coordinate_quality", {}).get("occupied_heavy_atoms") == 0:
+                    warnings.append(f"{row['identifier']}: historical chain has no occupied "
+                        "heavy atoms; stored coordinates were retained for TFG membership, "
+                        "not promoted to experimental coordination evidence.")
+            for digest, assigned in sorted(sequence_groups.items()):
+                if len(assigned) > 1:
+                    warnings.append(f"Legacy repeated sequence {digest}: {len(assigned)} members; "
+                                    "original splits were preserved, not repaired.")
         sizes = np.asarray([row["point_count"] for row in local_support], dtype=float)
         if len(sizes) >= 4:
             lower, upper = np.quantile(sizes, [0.25, 0.75])
@@ -280,6 +336,8 @@ class ZincValidation(lf.Work):
                 warnings.append(f"{row['identifier']}: at least half of sampled points are "
                                 "local-positive; inspect thresholds and site extent.")
         result = {"verdict": "FAIL" if failures else "PASS", "member_count": len(members),
+                  "protocol": "legacy_tfg" if legacy else "verified_design",
+                  "homology_independence_verified": not legacy,
                   "failures": failures,
                   "warnings": warnings, "descriptive_member_count": len(verified_rows),
                   "local_support": local_support, "diversity": diversity,

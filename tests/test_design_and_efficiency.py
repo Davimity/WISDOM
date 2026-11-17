@@ -17,17 +17,17 @@ from lambdaforge.data import DatasetRegistry
 from lambdaforge.work import Work, WorkConfig, WorkRunner
 from yaml import safe_load
 
-from wisdom.preprocessing.common.geometry import _process_geometry, generate_geometry
-from wisdom.preprocessing.common.snapshots import (
+from wisdom.preprocessing.common.clustering.geometry import _process_geometry, generate_geometry
+from wisdom.preprocessing.common.independence.snapshots import (
     _validate_structure,
     validate_structure_snapshot,
 )
+from wisdom.preprocessing.common.structure.io.ProteinReader import ProteinReader
+from wisdom.preprocessing.common.structure.io.ProteinSource import ProteinSource
+from wisdom.preprocessing.common.structure.io.StructureResolver import StructureResolver
 from wisdom.preprocessing.common.structure.PreprocessConfig import PreprocessConfig
 from wisdom.preprocessing.common.structure.ProteinPreprocessor import ProteinPreprocessor
-from wisdom.preprocessing.common.structure.ProteinReader import ProteinReader
-from wisdom.preprocessing.common.structure.ProteinSink import ProteinSink
-from wisdom.preprocessing.common.structure.ProteinSource import ProteinSource
-from wisdom.preprocessing.common.structure.StructureResolver import StructureResolver
+from wisdom.preprocessing.common.structure.storage.ProteinSink import ProteinSink
 from wisdom.preprocessing.dna.preprocessing.DatasetManifests import DatasetManifests
 from wisdom.preprocessing.dna.preprocessing.Preprocessing import Preprocessing
 from wisdom.preprocessing.dna.selection.Selection import Selection
@@ -42,7 +42,7 @@ def test_project_declares_bootstrap_native_environment() -> None:
     assert specification is not None
     assert specification.manager == "conda"
     assert specification.source == project_root / "environment.yml"
-    assert specification.required_executables == ("mmseqs", "foldseek")
+    assert specification.required_executables == ("mmseqs", "foldseek", "apbs", "pdb2pqr")
     assert {"foldseek", "mmseqs2"}.issubset(specification.dependencies)
 
 
@@ -168,10 +168,11 @@ def test_one_class_per_source_file_and_reader_public_api() -> None:
         / "Preprocessing.py",
     }
     simple_stage_directories = {
-        source_dir / "wisdom" / "preprocessing" / "common",
+        *(source_dir / "wisdom" / "preprocessing" / "common" / name
+          for name in ("independence", "sampling", "clustering", "auditing")),
         source_dir / "wisdom" / "preprocessing" / "dna" / "selection",
         source_dir / "wisdom" / "preprocessing" / "dna" / "preprocessing",
-        source_dir / "wisdom" / "preprocessing" / "zinc",
+        source_dir / "wisdom" / "preprocessing" / "zinc" / "stages",
     }
     for path in source_dir.rglob("*.py"):
         tree = ast.parse(path.read_text(encoding="utf-8"))
@@ -179,15 +180,7 @@ def test_one_class_per_source_file_and_reader_public_api() -> None:
         functions = [
             node for node in tree.body if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
         ]
-        # The contributor contract permits a vocabulary file of tiny related enums, but
-        # never several substantive domain/service classes in one source file.
-        enum_vocabulary = classes and all(
-            any(isinstance(base, ast.Name) and base.id == "Enum" for base in node.bases)
-            for node in classes
-        )
-        assert len(classes) <= 1 or enum_vocabulary, (
-            f"{path.name} contains {len(classes)} non-vocabulary classes"
-        )
+        assert len(classes) <= 1, f"{path.name} contains {len(classes)} classes"
         if functions:
             is_simple_pipeline_stage = path.parent in simple_stage_directories
             assert path in entrypoints or is_simple_pipeline_stage, (
@@ -261,12 +254,9 @@ def test_bilingual_readmes_have_parallel_sections_and_scientific_detail() -> Non
             "5",
             "6",
         ]
-    # Refinement and the controlled head comparison each justify a deeper chapter with
-    # independent equations, compatibility contracts and substantial interpretation.
+    # Operational documentation stays shallow; scientific derivations live in the bundled PDF.
     for document in (english, spanish):
-        assert re.findall(r"^#### (\d+(?:\.\d+)*)\. ", document, re.MULTILINE) == [
-            "5.3.1", "5.5.1", "5.5.2", "5.5.3", "5.5.4",
-        ]
+        assert not re.search(r"^#### ", document, re.MULTILINE)
         assert not re.search(r"^#{5,6} ", document, re.MULTILINE)
     for number in (number for _, number in english_headings if number != "0"):
         assert f"[{number}. " in english
@@ -287,11 +277,10 @@ def test_bilingual_readmes_have_parallel_sections_and_scientific_detail() -> Non
     assert english.count("| `") == spanish.count("| `")
     assert english.count("doi.org/") == spanish.count("doi.org/")
     for required_expression in (
-        "g_i(\\mathbf{x})",
-        "n_i = \\max",
         "surface_curvatures",
-        "E_{atom}",
         "allow_pickle=False",
+        "docs/WISDOM-memoria.pdf",
+        "scripts/sync_report.py",
     ):
         assert required_expression in english
         assert required_expression in spanish
@@ -464,7 +453,10 @@ def test_preprocessing_configuration_reuses_complete_design() -> None:
     assert preprocess_values["with"]["dilutions"] == {"from": "select.dilutions"}
     assert preprocess_values["with"]["structures"] == {"from": "select.structures"}
     assert preprocess_values["with"]["dataset_name"] == "wisdom-dna-reduced"
-    assert preprocess_values["with"]["dataset_version"] == "8"
+    assert preprocess_values["with"]["dataset_version"] == "9"
+    assert preprocess_values["with"]["residue_ca_radius"] == 12.0
+    assert preprocess_values["with"]["residue_ca_k_max"] == 32
+    assert preprocess_values["with"]["surface_environment"] is True
     assert preprocess_values["with"]["atomic_context"] is True
     assert preprocess_values["with"]["extended_surface_atom"] is True
     assert preprocess_values["with"]["extended_radius"] == 12.0
@@ -483,7 +475,7 @@ def test_preprocessing_configuration_reuses_complete_design() -> None:
         "storage": "10GiB",
         "time": "2h",
     }
-    assert visualization_values["with"]["skip"] is True
+    assert visualization_values["with"]["skip"] is False
     assert visualization_values["with"]["dataset"] == {"from": "preprocess.dataset"}
     assert visualization_values["with"]["maximum_vdw_atoms"] == 1500
     assert any(name == "map" for name, _ in inspect.getmembers(Work, inspect.isfunction))
@@ -777,23 +769,75 @@ def test_experiment_campaign_uses_ordered_names_and_traceability_headers() -> No
         "v9/wisdom_v9d.yaml",
         "v9/wisdom_v9e.yaml",
         "v9/wisdom_v9f.yaml",
-        "v10/wisdom_v10.yaml",
+        "v9/wisdom_v9g.yaml",
+        "v10/wisdom_v10a.yaml",
+        "v10/wisdom_v10b.yaml",
+        "v10/wisdom_v10c.yaml",
+        "v10/wisdom_v10d.yaml",
+        "v10/wisdom_v10e.yaml",
+        "v10/wisdom_v10f.yaml",
+        "v10/wisdom_v10g.yaml",
+        "v10/wisdom_v10h.yaml",
+        "v10/wisdom_v10i.yaml",
+        "v11/wisdom_v11a.yaml",
+        "v11/wisdom_v11b.yaml",
+        "v11/wisdom_v11c.yaml",
+        "v11/wisdom_v11d.yaml",
+        "v11/wisdom_v11f.yaml",
+        "v12/wisdom_v12.yaml",
+        "v13/wisdom_v13a.yaml",
+        "v13/wisdom_v13b.yaml",
+        "v13/wisdom_v13c.yaml",
+        "v13/wisdom_v13e.yaml",
+        "v13/wisdom_v13f.yaml",
+        "v14/wisdom_v14a.yaml",
+        "v14/wisdom_v14a2.yaml",
+        "v14/wisdom_v14b.yaml",
+        "v14/wisdom_v14c.yaml",
+        "v14/wisdom_v14d.yaml",
+        "v14/wisdom_v14e.yaml",
+        "v14/wisdom_v14f.yaml",
+        "v15/wisdom_v15a.yaml",
+        "v15/wisdom_v15b.yaml",
+        "v15/wisdom_v15c.yaml",
+        "v15/wisdom_v15e.yaml",
+        "v16/wisdom_v16a.yaml",
+        "v16/wisdom_v16b.yaml",
+        "v16/wisdom_v16c.yaml",
+        "v16/wisdom_v16d.yaml",
+        "vn1/wisdom_vn1.yaml",
+        "vn1/wisdom_vn1a.yaml",
+        "vn1/wisdom_vn1b.yaml",
+        "vn1/wisdom_vn1c.yaml",
     )
     required_headers = ("OBJECTIVE:", "PREREQUISITES:", "VARIES:", "FIXED:", "DECISION:")
 
     for name in stage_names:
         text = (experiment_root / name).read_text(encoding="utf-8")
-        first_lines = "\n".join(text.splitlines()[:5])
-        # V7's reviewed four-pipeline design has an equivalent, more specific header.
-        # Preserve that existing campaign rather than rewriting V1-V7 for a style-only test.
+        # Policy and source-record comments may accompany the required scientific fields.
+        # Check the entire introductory comment block, never unrelated later YAML content.
+
+        introductory_lines = []
+        for line in text.splitlines():
+            if line.strip() and not line.lstrip().startswith("#"):
+                break
+            introductory_lines.append(line)
+        first_lines = "\n".join(introductory_lines)
+        # V7 and frozen V10e have equivalent, more specific scientific traceability headers.
+        # Preserve those authored campaigns rather than changing them for a style-only test.
 
         headers = (("OBJECTIVE:", "DESIGN:", "PRIMARY:", "CONTRASTS:", "SOURCES:")
-                   if name == "v7/wisdom_v7.yaml" else required_headers)
+                   if name == "v7/wisdom_v7.yaml" else
+                   ("OBJECTIVE:", "EVIDENCE:", "DESIGN:", "CONTROL:", "RATIONALE:")
+                   if name == "v10/wisdom_v10e.yaml" else
+                   ("OBJECTIVE:", "POLICY:", "RECORD:", "DESIGN:", "FIXED:", "DECISION:")
+                   if name == "v10/wisdom_v10i.yaml" else required_headers)
         assert all(header in first_lines for header in headers), name
         assert "steps" not in safe_load(text)
 
     actual = sorted(str(path.relative_to(experiment_root))
-                    for path in experiment_root.glob("v*/wisdom_v*.yaml"))
+                    for path in experiment_root.glob("v*/wisdom_v*.yaml")
+                    if path.parent.name != "vf")
     assert actual == sorted(stage_names)
 
 

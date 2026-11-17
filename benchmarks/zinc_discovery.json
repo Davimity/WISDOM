@@ -1,0 +1,38 @@
+{
+  "python": "3.11.16",
+  "scope": "synthetic CPU assembly inspection, excluding network and parsing",
+  "command": "python scripts/benchmark_zinc_discovery.py",
+  "records": [
+    {
+      "copies": 1,
+      "residues_per_copy": 60,
+      "exact_summary_equality": true,
+      "seconds": {
+        "repeated": [0.0010359800071455538, 0.0010556270135566592, 0.0009989000391215086],
+        "single_index": [0.0007896460010670125, 0.0007726839976385236, 0.0007627059821970761]
+      },
+      "median_speedup": 1.3407550956299281
+    },
+    {
+      "copies": 8,
+      "residues_per_copy": 60,
+      "exact_summary_equality": true,
+      "seconds": {
+        "repeated": [0.049053023976739496, 0.04825268697459251, 0.04858702601632103],
+        "single_index": [0.005519699945580214, 0.005588860018178821, 0.005483252054546028]
+      },
+      "median_speedup": 8.802475948937422
+    },
+    {
+      "copies": 32,
+      "residues_per_copy": 60,
+      "exact_summary_equality": true,
+      "seconds": {
+        "repeated": [1.0066349629778415, 0.9453772869892418, 1.0183386760181747],
+        "single_index": [0.02263210603268817, 0.022676980996038765, 0.02331645501544699]
+      },
+      "median_speedup": 44.39016653732176
+    }
+  ],
+  "limitation": "Synthetic speedups measure only the exact summary optimization, not total Discovery runtime, network, metadata, leakage analysis or geometry."
+}

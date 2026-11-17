@@ -1,0 +1,131 @@
+{
+  "technical_fixture": "1CRN complete heavy-atom snapshot, not a published dataset",
+  "scientific_validation": false,
+  "elapsed_seconds": 38.08999896701425,
+  "reference_bytes": 11903819,
+  "query_bytes": 14891,
+  "bank_size": 256,
+  "grid_shape": [
+    65,
+    65,
+    65
+  ],
+  "prepared_atoms": 642,
+  "provenance": {
+    "apbs": "3.4.1",
+    "combination": "Lorentz--Berthelot",
+    "coordinate_frame": "immutable-parent-NPZ-centered",
+    "electrostatic_forcefield": "AMBER",
+    "forcefield": "amber14/protein.ff14SB.xml",
+    "forcefield_sha256": "d9f9779c09d67cd5f8bc657692f174ffab14c469dfd06d560ac1899fa7e976b8",
+    "openmm": "8.6.1",
+    "openmm_platform": "Reference",
+    "pdb2pqr": "pdb2pqr 3.8.0",
+    "probes": [
+      {
+        "charge_e": 0.0,
+        "epsilon_kj_mol": 0.06568879999999999,
+        "identity": "ALA:HB1",
+        "sigma_nm": 0.2649532787749369,
+        "type": "protein-HC"
+      },
+      {
+        "charge_e": 0.0,
+        "epsilon_kj_mol": 0.4577296,
+        "identity": "ALA:CB",
+        "sigma_nm": 0.3399669508423535,
+        "type": "protein-CT"
+      }
+    ],
+    "protein_probe_exclusions": "none; unbonded test particle"
+  },
+  "lj_audits": [
+    {
+      "configured_cutoff_maximum_error": 0.0,
+      "decoder_radius_truncation_maximum_error": 0.011258808397848874,
+      "field": "lj1",
+      "openmm_maximum_absolute_error": 1.9184653865522705e-13,
+      "queries": 24
+    },
+    {
+      "configured_cutoff_maximum_error": 0.0,
+      "decoder_radius_truncation_maximum_error": 0.05919392008054558,
+      "field": "lj2",
+      "openmm_maximum_absolute_error": 3.979039320256561e-13,
+      "queries": 24
+    }
+  ],
+  "potential_convergence": {
+    "comparisons": [
+      {
+        "common_queries": 258858,
+        "delta": [
+          0.53925,
+          0.7355625,
+          0.5409896
+        ],
+        "grid_shape": [
+          97,
+          65,
+          97
+        ],
+        "input": "read\n mol pqr prepared.pqr\nend\nelec\n mg-auto\n dime 97 65 97\n cglen 88.0056 80.0292 88.2895\n fglen 51.768 47.076 51.935\n cgcent 1.1660000000000004 0.4079999999999995 -0.4215\n fgcent 1.1660000000000004 0.4079999999999995 -0.4215\n mol 1\n lpbe\n bcfl sdh\n chgm spl2\n srfm smol\n sdens 10\n swin 0.3\n pdie 2.0\n sdie 78.5\n srad 1.4\n temp 298.15\n ion charge 1 conc 0.15 radius 2\n ion charge -1 conc 0.15 radius 2\n calcenergy no\n calcforce no\n write pot dx refined\nend\nquit\n",
+        "mae_kbt_e": 0.017349801071872277,
+        "maximum_absolute_error_kbt_e": 16.738665000000445,
+        "name": "refined",
+        "origin": [
+          -24.718000000000004,
+          -23.13,
+          -26.389000000000003
+        ],
+        "outside_common_domain": 8385,
+        "unstable_queries": 1642
+      },
+      {
+        "common_queries": 267243,
+        "delta": [
+          0.808875,
+          0.7355625,
+          0.8114844
+        ],
+        "grid_shape": [
+          97,
+          97,
+          97
+        ],
+        "input": "read\n mol pqr prepared.pqr\nend\nelec\n mg-auto\n dime 97 97 97\n cglen 132.0084 120.0438 132.43425408\n fglen 77.652 70.614 77.9025024\n cgcent 1.1660000000000004 0.4079999999999995 -0.4215\n fgcent 1.1660000000000004 0.4079999999999995 -0.4215\n mol 1\n lpbe\n bcfl sdh\n chgm spl2\n srfm smol\n sdens 10\n swin 0.3\n pdie 2.0\n sdie 78.5\n srad 1.4\n temp 298.15\n ion charge 1 conc 0.15 radius 2\n ion charge -1 conc 0.15 radius 2\n calcenergy no\n calcforce no\n write pot dx larger-box\nend\nquit\n",
+        "mae_kbt_e": 0.0003594676046321171,
+        "maximum_absolute_error_kbt_e": 0.004699720127129964,
+        "name": "larger-box",
+        "origin": [
+          -37.66,
+          -34.899,
+          -39.37275
+        ],
+        "outside_common_domain": 0,
+        "unstable_queries": 0
+      }
+    ],
+    "coverage": 0.9624798404448386,
+    "domain_queries": 267243,
+    "nominal_delta": [
+      0.808875,
+      0.7355625,
+      0.8114844
+    ],
+    "nominal_origin": [
+      -24.718,
+      -23.13,
+      -26.388999999999996
+    ],
+    "passed": true,
+    "performed": true,
+    "policy": "mask",
+    "region_coverage": {
+      "0": 0.8802508751458576,
+      "1": 1.0,
+      "3": 0.9621495959915136
+    },
+    "valid_queries": 257216
+  }
+}

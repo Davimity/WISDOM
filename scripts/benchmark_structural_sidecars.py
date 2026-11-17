@@ -11,12 +11,16 @@ from pathlib import Path
 
 import numpy as np
 
-from wisdom.preprocessing.common.structure.AtomicStructureBuilder import AtomicStructureBuilder
-from wisdom.preprocessing.common.structure.ExtendedSurfaceAtom import ExtendedSurfaceAtom
+from wisdom.preprocessing.common.structure.assets.graphs.ExtendedSurfaceAtom import (
+    ExtendedSurfaceAtom,
+)
+from wisdom.preprocessing.common.structure.geometry.AtomicStructureBuilder import (
+    AtomicStructureBuilder,
+)
+from wisdom.preprocessing.common.structure.geometry.SurfaceBuilder import SurfaceBuilder
+from wisdom.preprocessing.common.structure.io.ProteinReader import ProteinReader
+from wisdom.preprocessing.common.structure.io.StructureResolver import StructureResolver
 from wisdom.preprocessing.common.structure.PreprocessConfig import PreprocessConfig
-from wisdom.preprocessing.common.structure.ProteinReader import ProteinReader
-from wisdom.preprocessing.common.structure.StructureResolver import StructureResolver
-from wisdom.preprocessing.common.structure.SurfaceBuilder import SurfaceBuilder
 
 
 def measure(arrays: dict[str, np.ndarray], identifier: str, maximum: int) -> list[dict]:

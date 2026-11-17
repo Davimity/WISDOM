@@ -13,6 +13,11 @@ project contract, not optional style suggestions.
 - Keep both READMEs structurally equivalent: the same table of contents, commands, equations,
   configuration reference, limitations, and bibliography. A change to one normally requires the
   corresponding change to the other.
+- Keep the READMEs focused on installation, practical use, technical data contracts and source
+  navigation. Put extended scientific derivations, experimental interpretation and results in the
+  externally authored report copied to `docs/WISDOM-memoria.pdf`. Use `scripts/sync_report.py` to
+  refresh/check that copy; do not create per-incident Markdown diaries under `docs/`. Store raw
+  performance evidence under `benchmarks/`. Do not claim automatic report synchronization.
 - Put installation and practical usage before implementation or scientific background.
 - Give every README section and subsection an explicit hierarchical number. Use `1`, `2`, `3` for
   top-level sections, `3.1`, `3.2` for their children, and continue recursively (`3.2.1`,
@@ -86,9 +91,11 @@ project contract, not optional style suggestions.
 
 - Use classes for every reasonable stateful or cohesive source concept. Configuration and immutable
   static data are accepted exceptions.
-- Keep at most one substantive class in each Python file and name that file exactly like its class.
-  Several tiny related enums may share one clearly named vocabulary module when separate files
-  would add navigation without isolating behavior.
+- Keep at most one class in each Python file, including enums, and name the file exactly like its
+  class. Group files into cohesive responsibility packages; keep each source directory small enough
+  to scan, normally at most twelve Python modules. Keep public Work and model-generation entry
+  paths stable; internal model blocks belong in their atomic/surface/communication/pooling/head/
+  initialization/optimization/loss/architecture packages rather than the models root.
 - Expose exactly the cohesive LambdaForge 0.15 Work classes required by public YAML actions:
   `Selection`, `Preprocessing`, `Visualization`, `DNAValidation`, `Training`, and the review Works
   `StudyReview` and `ModelSetReview`; `ModelValidation` is legacy portable-reader compatibility.
@@ -362,7 +369,7 @@ project contract, not optional style suggestions.
   filename and do not accept the old `#`/comma syntax.
 - Keep atom and surface graph construction sparse. Never materialize dense `N x N` or `M x M`
   distance matrices.
-  The researcher-approved V9f `structural_global` and `global_no_structure` atomic attention
+  The researcher-approved V9g `structural_global` and `global_no_structure` atomic attention
   profiles are the sole bounded dense-attention/path-code exception, not a dense-distance graph.
   They require `atomic_allow_dense_global=true`, explicit per-protein ownership and hard byte
   guards. Never extend this exception to another experiment or silently replace global attention

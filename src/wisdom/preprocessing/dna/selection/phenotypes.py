@@ -3,7 +3,7 @@
 
 from typing import Any
 from collections.abc import Mapping, Sequence
-from wisdom.preprocessing.common.phenotypes import GLOBAL_FEATURES, cluster_phenotypes
+from wisdom.preprocessing.common.clustering.phenotypes import GLOBAL_FEATURES, cluster_phenotypes
 
 INTERFACE_FEATURES = (
     "binding_residue_fraction",

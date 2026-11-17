@@ -1,0 +1,141 @@
+# OBJECTIVE: Confirm explicitly reviewed finalist/reference settings on reserved seeds.
+# PREREQUISITES: Keep the V16a-selected 16/64 path; record any V16b numerical choice before launch.
+# VARIES: Reserved confirmation seeds; as shipped, one compact reference row only.
+# FIXED: All reviewed sources/operators/losses and G temporal selection; test remains sealed.
+# DECISION: No absence-of-significance equivalence claim; publish paired quality and costs.
+# V16c: independent-seed confirmation sheet, NOT an automatically selected HPO winner.
+# BEFORE LAUNCH: replace the reference learning rate/depth below with the reviewed V16b
+# numerical choice, if adopted, and record that decision in the external report.
+name: wisdom-v16c  # Full-budget paired confirmation; no test access.
+run: wisdom.Training.Training  # Exactly the architecture and G criterion reviewed before launch.
+
+with:  # Explicit no-residue-graph 16/64 continuation selected after V16a.
+  dataset: {"dataset":"wisdom-dna-reduced@9"}  # Declared enriched @9; verify selected population, labels and asset coverage against @8 before training.
+  model_version: 2  # Existing pooling-capable scalar model; no renamed architecture generation.
+  subset: "full"  # Inherited common scientific setting; held fixed across the authored candidates.
+  surface_representation_mode: "learned"  # Inherited common scientific setting; held fixed across the authored candidates.
+  surface_encoder_type: "diffusion"  # Inherited common scientific setting; held fixed across the authored candidates.
+  initialization_profile: "baseline"  # Inherited common scientific setting; held fixed across the authored candidates.
+  embedding_initialization: "current"  # Inherited common scientific setting; held fixed across the authored candidates.
+  optimization_profile: "baseline"  # Inherited common scientific setting; held fixed across the authored candidates.
+  hidden_dim: 128  # Common atom output/surface width, not a residual-graph width.
+  embedding_dim: 32  # Inherited common scientific setting; held fixed across the authored candidates.
+  residue_embedding_dim: 64  # Inherited common scientific setting; held fixed across the authored candidates.
+  atomic_layers: 2  # Two existing atom interactions unless an explicitly declared topology changes them.
+  projection_depth: 3  # Inherited common scientific setting; held fixed across the authored candidates.
+  surface_layers: 4  # Inherited common scientific setting; held fixed across the authored candidates.
+  atom_spatial_k: 8  # Inherited common scientific setting; held fixed across the authored candidates.
+  surface_atom_k: 16  # Inherited common scientific setting; held fixed across the authored candidates.
+  diffusion_spectral_modes: 32  # Inherited common scientific setting; held fixed across the authored candidates.
+  surface_atom_radius: 4  # Inherited common scientific setting; held fixed across the authored candidates.
+  transfer_options: {"message":"low_rank","rank":16}  # V11b continuation: one mean, one attention distribution, rank-16 receiver-conditioned correction.
+  surface_options: {"use_gradient":true,"readout_mode":"single","readouts":1,"local_mode":"none","spectral_source":"base"}  # Keep the tested DiffusionNet path; no untested combination with gradient removal or local messages.
+  atomic_edge_distance_scale: 6  # Inherited common scientific setting; held fixed across the authored candidates.
+  dropout: 0.2  # Inherited common scientific setting; held fixed across the authored candidates.
+  learning_rate: 0.001  # Inherited common scientific setting; held fixed across the authored candidates.
+  weight_decay: 0.0005  # Inherited common scientific setting; held fixed across the authored candidates.
+  gate_lambda: 0.04  # Inherited common scientific setting; held fixed across the authored candidates.
+  gate_policy: {"lambda_surface":0.04,"lambda_chemical":0.04,"lambda_other":0.04,"initial_active_surface":0.95,"initial_active_chemical":0.95,"initial_active_other":0.95,"warmup_fraction":0,"ramp_fraction":0}  # Freeze validated grouped gate costs, initialization and schedule.
+  atomic_representation: {"sources":["atom_name","residue_atom"],"identity_dim":8,"force_sources":"learned","external_model":"esm2","external_mode":"context","context_dim":16}  # Compact V16a context; keep the full mapping aligned with its scalar override.
+  external_context_dim: 16  # Exact V16a compact external projection width.
+  pooling_type: "max"  # Provisional common MAX reference; local targets never enter epoch selection.
+  pooling_area_mode: "point"  # Inherited common scientific setting; held fixed across the authored candidates.
+  surface_refiner_type: "heat"  # Inherited common scientific setting; held fixed across the authored candidates.
+  surface_refiner_heat_length: 6  # Physical Heat6 refinement length in angstroms.
+  weak_loss_profile: "custom"  # Inherited common scientific setting; held fixed across the authored candidates.
+  negative_surface_lambda: 0  # Inherited common scientific setting; held fixed across the authored candidates.
+  positive_existence_lambda: 0  # Inherited common scientific setting; held fixed across the authored candidates.
+  regional_positive_lambda: 0.3  # Inherited common scientific setting; held fixed across the authored candidates.
+  regional_ranking_lambda: 0  # Inherited common scientific setting; held fixed across the authored candidates.
+  regional_loss_length: 2.5  # Inherited common scientific setting; held fixed across the authored candidates.
+  regional_ranking_margin: 0.5  # Inherited common scientific setting; held fixed across the authored candidates.
+  cardinality_lambda: 0  # Inherited common scientific setting; held fixed across the authored candidates.
+  total_variation_lambda: 0  # Inherited common scientific setting; held fixed across the authored candidates.
+  dirichlet_lambda: 0  # Inherited common scientific setting; held fixed across the authored candidates.
+  head_type: "single"  # Inherited common scientific setting; held fixed across the authored candidates.
+  head_implementation: "controlled"  # Inherited common scientific setting; held fixed across the authored candidates.
+  architecture_spike: "baseline"  # Inherited common scientific setting; held fixed across the authored candidates.
+  surface_geometry_transfer: false  # Inherited common scientific setting; held fixed across the authored candidates.
+  interaction_round: "single"  # Inherited common scientific setting; held fixed across the authored candidates.
+  vector_atomic_channels: 0  # Inherited common scientific setting; held fixed across the authored candidates.
+  feedback_propagation: "none"  # Inherited common scientific setting; held fixed across the authored candidates.
+  architecture_implementation: "controlled"  # Inherited common scientific setting; held fixed across the authored candidates.
+  gate_cost_normalization: "baseline_count"  # Inherited common scientific setting; held fixed across the authored candidates.
+  atomic_encoder_type: "schnet"  # Inherited common scientific setting; held fixed across the authored candidates.
+  atomic_radial_encoding: "gaussian"  # Inherited common scientific setting; held fixed across the authored candidates.
+  atomic_radial_count: 16  # Inherited common scientific setting; held fixed across the authored candidates.
+  atomic_hidden_dim: 64  # Exact V16a compact SchNet state; atom output and surface width remain 128.
+  atomic_output_dim: 128  # Unchanged interface to atom-to-surface transfer.
+  atomic_spatial_cutoff: 6  # Inherited common scientific setting; held fixed across the authored candidates.
+  batch_size: 16  # Inherited common scientific setting; held fixed across the authored candidates.
+  epochs: 500  # Maximum optimizer epochs, bounded by G-based patience.
+  patience: 30  # Stop after this many non-improving protein-validation epochs.
+  minimum_delta: 0.001  # Minimum improvement of protein-only checkpoint criterion.
+  precision: "auto"  # Inherited common scientific setting; held fixed across the authored candidates.
+  surface_metrics: true  # Numerical localization metrics only; no local-target gradients.
+  surface_metrics_interval: 1  # Measure localization at each validation epoch; selection remains protein-only.
+  visualization: {"mode":"none"}  # No duplicate per-seed viewer galleries during the training comparison.
+  faithfulness_audit: false  # Inherited common scientific setting; held fixed across the authored candidates.
+  evaluate_test: false  # Keep held-out test sealed.
+  optimization_diagnostics: true  # Inherited common scientific setting; held fixed across the authored candidates.
+  data_workers: 4  # Operational decoding parallelism; no effect on scientific content.
+
+# TransferExperiment defaults: summary=mean, message=atom (atom|pair|point_pair|low_rank),
+# rank=16 (>0), heads=1, shared_head_weights=false, channel_attention=false,
+# normalization=softmax (softmax|entmax15), normalization_radius=null, learned_radius=false,
+# radius_bounds=[1,12] Angstrom, radius_initial=6, radius_temperature=.5 Angstrom,
+# epsilon=1e-8 (>0), summary_repeats=2, support=effective (effective|count),
+# active_radius=null, active_k=null. candidates=base is consumed by Training, not the module.
+# Selected message=low_rank changes values only; no new summary, heads, cutoff or radius gate.
+# DiffusionSurfaceEncoder.configure defaults: readout_mode=single (single|concat|mixture|duplicate),
+# readouts=1 (1..3), scale_multipliers=[.5,2] in TIME units, use_gradient=true,
+# local_mode=none (none|distance|attention), local_sigma=2 Angstrom, local_area=false,
+# local_initial_scale=0, local_chunk_size=65536, spectral_source=base (base|extension).
+# Optional environment/residue branches are deliberately inactive until independently justified.
+
+# Constructor truth: Training dataset required; model_version=1, subset=full, hidden_dim=128,
+# element width=32, residue width=null, atomic_layers=2, projection_depth=1, surface_layers=2,
+# batch_size=2, epochs=100, patience=30, minimum_delta=.001, precision=auto, data_workers=4.
+# atomic_representation=null by default; sources=(), identity_dim=8, external_model=null,
+# external_mode=none|static|context|both|replace; context_dim=32; standard_deviation_floor=1e-6;
+# context_control=aligned|mean|permuted (default aligned), context_seed=2026, drop_sources=().
+# residue_graph=null by default; mode=hybrid (pointwise|null|sequence|contact|hybrid), hidden_dim=64,
+# layers=2, radius=10 Angstrom, k=16, radial_count=16; output=context_dim; zero_initialize=true,
+# initial_scale=1 (must not also be zero), topology=descending|roundtrip|parallel, atomic_dim=128,
+# null_atomic_message=false, surface_radius=12 Angstrom, surface_k=32. CA support must be stored.
+# surface_options=null; environment=null by default. Environment features=[travel_depth],
+# mode=real|mask_only|curvature_control (default real), standard_deviation_floor=1e-6.
+# All new normalization uses valid selected TRAIN only; checkpoint buffers preserve it exactly.
+# New environment branch output initializes to zero, with nonzero multiplier, for exact molecular-baseline recovery.
+# Added or ablated source widths are nominal unless explicitly removed; no hidden compaction.
+# Remaining selected baseline choices below are deliberate inherited experiment overrides,
+# not constructor defaults. Full public argument documentation is Training.run and lf explain.
+
+# external_context_dim=null; optional positive scalar override of the enabled context projection.
+# negative_mining=null and negative_calibration=null preserve the historical Training path.
+
+seeds: [1031, 1033, 1039, 1049]  # Reserved confirmation seeds, disjoint from V16a/b.
+sweep:  # One compact reference row; update only numerical choices after V16b review.
+  space:  # Keep these domains synchronized with the explicitly reviewed candidate rows.
+    external_context_dim: {values: [16]}  # V16a-selected context projection width.
+    atomic_hidden_dim: {values: [64]}  # V16a-selected SchNet hidden width.
+    learning_rate: {values: [0.001]}  # Reference value until a finalist is prospectively recorded.
+    surface_layers: {values: [4]}  # Reference depth until a finalist is prospectively recorded.
+  candidates:  # Edit these explicit scalar rows prospectively after screening, not after confirmation.
+    - external_context_dim: 16  # V16a-selected compact context projection.
+      atomic_hidden_dim: 64  # V16a-selected compact SchNet state.
+      learning_rate: 0.001  # Reference optimizer until V16b is reviewed.
+      surface_layers: 4  # Reference depth until V16b is reviewed.
+# Finite sweep rows and all four seeds are mandatory; no pruning or hidden best-seed selection.
+objective:  # Development ranking only; checkpoint epochs are always selected by G.
+  metric: val_wisdom_hpo_score  # W is secondary; inspect S, G, negatives and cost separately.
+  mode: max  # Higher development utility is better, not a scientific equivalence test.
+  range: [0.0, 1.0]  # Mathematical composite-utility bounds.
+  practical_margin: 0.015  # Historical W margin, not a newly invented S threshold.
+# Objective defaults: mode=max; range/practical_margin optional. Training selects epochs by G.
+resources:  # LF owns grant-aware admission and native checkpoint recovery.
+  gpu: 2  # Use only logical GPUs granted by the execution provider.
+  cpu: 36  # Shared study CPU budget, not per-Run capacity.
+  memory: 96GiB  # Shared host memory; frozen extractors are accounted separately.
+  time: 168h  # Seven-day per-Attempt safety envelope, not an epoch/ranking fidelity shortcut.
+# Resource defaults: cpu=1, gpu=0, processes=1; memory/storage/gpu_memory=0, time=null.

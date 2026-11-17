@@ -1,0 +1,647 @@
+{
+  "scientific_identifier": "wisdom-v10f",
+  "status": "prepared_not_executed",
+  "source_execution": "execution-fb5d3b83bc625f62",
+  "source_run": "run-090bcc547bb8878e6bbb",
+  "source_submitted_configuration_sha256": "a35abe1b2d4e40003a9994e38b3004b10d6924506b06d1727d46ed9ef1b72b93",
+  "source_checkpoint_contract": {
+    "historical_gates": 41,
+    "full_gates": 48,
+    "all_fixed_with_parameters_match": true
+  },
+  "dataset": {
+    "selector": "wisdom-dna-reduced@8",
+    "content_id": "sha256:0e09a1148d09f7912fdf249343db1e3348cf39dc9e493797db1f179df0469af0"
+  },
+  "seeds": [
+    269,
+    271,
+    277,
+    281
+  ],
+  "seed_conflicts_in_local_campaigns_or_exported_submissions": [],
+  "source_git_head": "9d88ef5b1cc1ad8a01d231526b8feb513a72b86b",
+  "working_tree": "dirty; native LF code/bundle identity and per-Run code digests bind the actual submitted implementation, not HEAD alone",
+  "frozen_yaml_sha256": {
+    "wisdom_v10a.yaml": "4d199a76d6e759d3246215c83877e83825adf9117494d66a98a68665531d85b5",
+    "wisdom_v10b.yaml": "5e8b9ac8daec730e0dc4fef962f5c64b2be031c2fb4640a314ed11c5548d8542",
+    "wisdom_v10c.yaml": "539ceb5df364f8a408cfa93a12177a2a03b8fa738efbec3cbfad2d21f8b345a4",
+    "wisdom_v10d.yaml": "37fef3a11da24109af0a34d5af29e37cb92ba5f8739b6000361a2dca06414502",
+    "wisdom_v10e.yaml": "8e959f0b3165ea6464b8c1025f6a844468dd7f2d2f53941cd35628c20bb73c18"
+  },
+  "renamed_future_campaigns": {
+    "former_planned_V10f": "V10g",
+    "former_planned_V10g": "V10h",
+    "former_planned_V10h_template": "V10i_template"
+  },
+  "required_run_count": 80,
+  "optional_run_count": 0,
+  "gate_audit": {
+    "probability": "sigmoid(log_alpha - beta*log(-gamma/zeta))",
+    "sample": "clamp(sigmoid((log(u)-log(1-u)+log_alpha)/beta)*(zeta-gamma)+gamma,0,1)",
+    "deterministic": "clamp(sigmoid(log_alpha)*(zeta-gamma)+gamma,0,1)",
+    "constants": {
+      "beta": 0.6666666666666666,
+      "gamma": -0.1,
+      "zeta": 1.1
+    },
+    "initial_050_deterministic": 0.1018133834,
+    "optimizer": "AdamW: all log_alpha parameters have weight_decay=0",
+    "denominator": 41,
+    "ancestor_rule": "product of own and all ancestor activity probabilities; each direct gate cost counted once",
+    "fixed_chemical_cost": "zero, including no direct penalty gradient; historical parent costs retained",
+    "schedule": "S/C only: t=(epoch-1)/nominal_epochs; O always learned and regularized",
+    "checkpoint": "strict tensors and saved per-gate runtime overrides; G alone selects the epoch",
+    "historical_behavior": "gate_policy defaults to None; no state_dict keys added"
+  },
+  "reference_candidate": 1,
+  "candidates": [
+    {
+      "candidate": 1,
+      "profile": {
+        "gate_lambda_surface": 0.04,
+        "gate_lambda_chemical": 0.04,
+        "gate_lambda_other": 0.04,
+        "gate_initial_active_surface": 0.95,
+        "gate_initial_active_chemical": 0.95,
+        "gate_group_warmup_fraction": 0.0,
+        "gate_group_ramp_fraction": 0.0,
+        "atomic_sources": "atom_name,residue_atom,backbone_torsions,sidechain_torsions,covalent_statistics,functional_groups,atomic_sasa",
+        "atomic_force_sources": "learned"
+      },
+      "available_counts": {
+        "surface": 20,
+        "chemical": 7,
+        "other": 21
+      },
+      "nominal_initial_expected_penalty": {
+        "surface": 0.018536585365853658,
+        "chemical": 0.006163414634146341,
+        "other": 0.01822841463414634
+      },
+      "first_epoch_expected_penalty": {
+        "surface": 0.018536585365853658,
+        "chemical": 0.006163414634146341,
+        "other": 0.01822841463414634
+      }
+    },
+    {
+      "candidate": 2,
+      "profile": {
+        "gate_lambda_surface": 0.04,
+        "gate_lambda_chemical": 0.16,
+        "gate_lambda_other": 0.04,
+        "gate_initial_active_surface": 0.95,
+        "gate_initial_active_chemical": 0.95,
+        "gate_group_warmup_fraction": 0.0,
+        "gate_group_ramp_fraction": 0.0,
+        "atomic_sources": "atom_name,residue_atom,backbone_torsions,sidechain_torsions,covalent_statistics,functional_groups,atomic_sasa",
+        "atomic_force_sources": "learned"
+      },
+      "available_counts": {
+        "surface": 20,
+        "chemical": 7,
+        "other": 21
+      },
+      "nominal_initial_expected_penalty": {
+        "surface": 0.018536585365853658,
+        "chemical": 0.024653658536585365,
+        "other": 0.01822841463414634
+      },
+      "first_epoch_expected_penalty": {
+        "surface": 0.018536585365853658,
+        "chemical": 0.024653658536585365,
+        "other": 0.01822841463414634
+      }
+    },
+    {
+      "candidate": 3,
+      "profile": {
+        "gate_lambda_surface": 0.04,
+        "gate_lambda_chemical": 0.64,
+        "gate_lambda_other": 0.04,
+        "gate_initial_active_surface": 0.95,
+        "gate_initial_active_chemical": 0.95,
+        "gate_group_warmup_fraction": 0.0,
+        "gate_group_ramp_fraction": 0.0,
+        "atomic_sources": "atom_name,residue_atom,backbone_torsions,sidechain_torsions,covalent_statistics,functional_groups,atomic_sasa",
+        "atomic_force_sources": "learned"
+      },
+      "available_counts": {
+        "surface": 20,
+        "chemical": 7,
+        "other": 21
+      },
+      "nominal_initial_expected_penalty": {
+        "surface": 0.018536585365853658,
+        "chemical": 0.09861463414634146,
+        "other": 0.01822841463414634
+      },
+      "first_epoch_expected_penalty": {
+        "surface": 0.018536585365853658,
+        "chemical": 0.09861463414634146,
+        "other": 0.01822841463414634
+      }
+    },
+    {
+      "candidate": 4,
+      "profile": {
+        "gate_lambda_surface": 0.16,
+        "gate_lambda_chemical": 0.04,
+        "gate_lambda_other": 0.04,
+        "gate_initial_active_surface": 0.95,
+        "gate_initial_active_chemical": 0.95,
+        "gate_group_warmup_fraction": 0.0,
+        "gate_group_ramp_fraction": 0.0,
+        "atomic_sources": "atom_name,residue_atom,backbone_torsions,sidechain_torsions,covalent_statistics,functional_groups,atomic_sasa",
+        "atomic_force_sources": "learned"
+      },
+      "available_counts": {
+        "surface": 20,
+        "chemical": 7,
+        "other": 21
+      },
+      "nominal_initial_expected_penalty": {
+        "surface": 0.07414634146341463,
+        "chemical": 0.006163414634146341,
+        "other": 0.01822841463414634
+      },
+      "first_epoch_expected_penalty": {
+        "surface": 0.07414634146341463,
+        "chemical": 0.006163414634146341,
+        "other": 0.01822841463414634
+      }
+    },
+    {
+      "candidate": 5,
+      "profile": {
+        "gate_lambda_surface": 0.16,
+        "gate_lambda_chemical": 0.16,
+        "gate_lambda_other": 0.04,
+        "gate_initial_active_surface": 0.95,
+        "gate_initial_active_chemical": 0.95,
+        "gate_group_warmup_fraction": 0.0,
+        "gate_group_ramp_fraction": 0.0,
+        "atomic_sources": "atom_name,residue_atom,backbone_torsions,sidechain_torsions,covalent_statistics,functional_groups,atomic_sasa",
+        "atomic_force_sources": "learned"
+      },
+      "available_counts": {
+        "surface": 20,
+        "chemical": 7,
+        "other": 21
+      },
+      "nominal_initial_expected_penalty": {
+        "surface": 0.07414634146341463,
+        "chemical": 0.024653658536585365,
+        "other": 0.01822841463414634
+      },
+      "first_epoch_expected_penalty": {
+        "surface": 0.07414634146341463,
+        "chemical": 0.024653658536585365,
+        "other": 0.01822841463414634
+      }
+    },
+    {
+      "candidate": 6,
+      "profile": {
+        "gate_lambda_surface": 0.16,
+        "gate_lambda_chemical": 0.64,
+        "gate_lambda_other": 0.04,
+        "gate_initial_active_surface": 0.95,
+        "gate_initial_active_chemical": 0.95,
+        "gate_group_warmup_fraction": 0.0,
+        "gate_group_ramp_fraction": 0.0,
+        "atomic_sources": "atom_name,residue_atom,backbone_torsions,sidechain_torsions,covalent_statistics,functional_groups,atomic_sasa",
+        "atomic_force_sources": "learned"
+      },
+      "available_counts": {
+        "surface": 20,
+        "chemical": 7,
+        "other": 21
+      },
+      "nominal_initial_expected_penalty": {
+        "surface": 0.07414634146341463,
+        "chemical": 0.09861463414634146,
+        "other": 0.01822841463414634
+      },
+      "first_epoch_expected_penalty": {
+        "surface": 0.07414634146341463,
+        "chemical": 0.09861463414634146,
+        "other": 0.01822841463414634
+      }
+    },
+    {
+      "candidate": 7,
+      "profile": {
+        "gate_lambda_surface": 0.64,
+        "gate_lambda_chemical": 0.04,
+        "gate_lambda_other": 0.04,
+        "gate_initial_active_surface": 0.95,
+        "gate_initial_active_chemical": 0.95,
+        "gate_group_warmup_fraction": 0.0,
+        "gate_group_ramp_fraction": 0.0,
+        "atomic_sources": "atom_name,residue_atom,backbone_torsions,sidechain_torsions,covalent_statistics,functional_groups,atomic_sasa",
+        "atomic_force_sources": "learned"
+      },
+      "available_counts": {
+        "surface": 20,
+        "chemical": 7,
+        "other": 21
+      },
+      "nominal_initial_expected_penalty": {
+        "surface": 0.2965853658536585,
+        "chemical": 0.006163414634146341,
+        "other": 0.01822841463414634
+      },
+      "first_epoch_expected_penalty": {
+        "surface": 0.2965853658536585,
+        "chemical": 0.006163414634146341,
+        "other": 0.01822841463414634
+      }
+    },
+    {
+      "candidate": 8,
+      "profile": {
+        "gate_lambda_surface": 0.64,
+        "gate_lambda_chemical": 0.16,
+        "gate_lambda_other": 0.04,
+        "gate_initial_active_surface": 0.95,
+        "gate_initial_active_chemical": 0.95,
+        "gate_group_warmup_fraction": 0.0,
+        "gate_group_ramp_fraction": 0.0,
+        "atomic_sources": "atom_name,residue_atom,backbone_torsions,sidechain_torsions,covalent_statistics,functional_groups,atomic_sasa",
+        "atomic_force_sources": "learned"
+      },
+      "available_counts": {
+        "surface": 20,
+        "chemical": 7,
+        "other": 21
+      },
+      "nominal_initial_expected_penalty": {
+        "surface": 0.2965853658536585,
+        "chemical": 0.024653658536585365,
+        "other": 0.01822841463414634
+      },
+      "first_epoch_expected_penalty": {
+        "surface": 0.2965853658536585,
+        "chemical": 0.024653658536585365,
+        "other": 0.01822841463414634
+      }
+    },
+    {
+      "candidate": 9,
+      "profile": {
+        "gate_lambda_surface": 0.64,
+        "gate_lambda_chemical": 0.64,
+        "gate_lambda_other": 0.04,
+        "gate_initial_active_surface": 0.95,
+        "gate_initial_active_chemical": 0.95,
+        "gate_group_warmup_fraction": 0.0,
+        "gate_group_ramp_fraction": 0.0,
+        "atomic_sources": "atom_name,residue_atom,backbone_torsions,sidechain_torsions,covalent_statistics,functional_groups,atomic_sasa",
+        "atomic_force_sources": "learned"
+      },
+      "available_counts": {
+        "surface": 20,
+        "chemical": 7,
+        "other": 21
+      },
+      "nominal_initial_expected_penalty": {
+        "surface": 0.2965853658536585,
+        "chemical": 0.09861463414634146,
+        "other": 0.01822841463414634
+      },
+      "first_epoch_expected_penalty": {
+        "surface": 0.2965853658536585,
+        "chemical": 0.09861463414634146,
+        "other": 0.01822841463414634
+      }
+    },
+    {
+      "candidate": 10,
+      "profile": {
+        "gate_lambda_surface": 0.16,
+        "gate_lambda_chemical": 0.16,
+        "gate_lambda_other": 0.04,
+        "gate_initial_active_surface": 0.5,
+        "gate_initial_active_chemical": 0.95,
+        "gate_group_warmup_fraction": 0.0,
+        "gate_group_ramp_fraction": 0.0,
+        "atomic_sources": "atom_name,residue_atom,backbone_torsions,sidechain_torsions,covalent_statistics,functional_groups,atomic_sasa",
+        "atomic_force_sources": "learned"
+      },
+      "available_counts": {
+        "surface": 20,
+        "chemical": 7,
+        "other": 21
+      },
+      "nominal_initial_expected_penalty": {
+        "surface": 0.03902439024390244,
+        "chemical": 0.024653658536585365,
+        "other": 0.01822841463414634
+      },
+      "first_epoch_expected_penalty": {
+        "surface": 0.03902439024390244,
+        "chemical": 0.024653658536585365,
+        "other": 0.01822841463414634
+      }
+    },
+    {
+      "candidate": 11,
+      "profile": {
+        "gate_lambda_surface": 0.16,
+        "gate_lambda_chemical": 0.16,
+        "gate_lambda_other": 0.04,
+        "gate_initial_active_surface": 0.95,
+        "gate_initial_active_chemical": 0.5,
+        "gate_group_warmup_fraction": 0.0,
+        "gate_group_ramp_fraction": 0.0,
+        "atomic_sources": "atom_name,residue_atom,backbone_torsions,sidechain_torsions,covalent_statistics,functional_groups,atomic_sasa",
+        "atomic_force_sources": "learned"
+      },
+      "available_counts": {
+        "surface": 20,
+        "chemical": 7,
+        "other": 21
+      },
+      "nominal_initial_expected_penalty": {
+        "surface": 0.07414634146341463,
+        "chemical": 0.012975609756097559,
+        "other": 0.01822841463414634
+      },
+      "first_epoch_expected_penalty": {
+        "surface": 0.07414634146341463,
+        "chemical": 0.012975609756097559,
+        "other": 0.01822841463414634
+      }
+    },
+    {
+      "candidate": 12,
+      "profile": {
+        "gate_lambda_surface": 0.16,
+        "gate_lambda_chemical": 0.16,
+        "gate_lambda_other": 0.04,
+        "gate_initial_active_surface": 0.5,
+        "gate_initial_active_chemical": 0.5,
+        "gate_group_warmup_fraction": 0.0,
+        "gate_group_ramp_fraction": 0.0,
+        "atomic_sources": "atom_name,residue_atom,backbone_torsions,sidechain_torsions,covalent_statistics,functional_groups,atomic_sasa",
+        "atomic_force_sources": "learned"
+      },
+      "available_counts": {
+        "surface": 20,
+        "chemical": 7,
+        "other": 21
+      },
+      "nominal_initial_expected_penalty": {
+        "surface": 0.03902439024390244,
+        "chemical": 0.012975609756097559,
+        "other": 0.01822841463414634
+      },
+      "first_epoch_expected_penalty": {
+        "surface": 0.03902439024390244,
+        "chemical": 0.012975609756097559,
+        "other": 0.01822841463414634
+      }
+    },
+    {
+      "candidate": 13,
+      "profile": {
+        "gate_lambda_surface": 0.16,
+        "gate_lambda_chemical": 0.16,
+        "gate_lambda_other": 0.04,
+        "gate_initial_active_surface": 0.95,
+        "gate_initial_active_chemical": 0.95,
+        "gate_group_warmup_fraction": 0.0,
+        "gate_group_ramp_fraction": 0.02,
+        "atomic_sources": "atom_name,residue_atom,backbone_torsions,sidechain_torsions,covalent_statistics,functional_groups,atomic_sasa",
+        "atomic_force_sources": "learned"
+      },
+      "available_counts": {
+        "surface": 20,
+        "chemical": 7,
+        "other": 21
+      },
+      "nominal_initial_expected_penalty": {
+        "surface": 0.07414634146341463,
+        "chemical": 0.024653658536585365,
+        "other": 0.01822841463414634
+      },
+      "first_epoch_expected_penalty": {
+        "surface": 0.0,
+        "chemical": 0.0,
+        "other": 0.01822841463414634
+      }
+    },
+    {
+      "candidate": 14,
+      "profile": {
+        "gate_lambda_surface": 0.16,
+        "gate_lambda_chemical": 0.16,
+        "gate_lambda_other": 0.04,
+        "gate_initial_active_surface": 0.95,
+        "gate_initial_active_chemical": 0.95,
+        "gate_group_warmup_fraction": 0.0,
+        "gate_group_ramp_fraction": 0.04,
+        "atomic_sources": "atom_name,residue_atom,backbone_torsions,sidechain_torsions,covalent_statistics,functional_groups,atomic_sasa",
+        "atomic_force_sources": "learned"
+      },
+      "available_counts": {
+        "surface": 20,
+        "chemical": 7,
+        "other": 21
+      },
+      "nominal_initial_expected_penalty": {
+        "surface": 0.07414634146341463,
+        "chemical": 0.024653658536585365,
+        "other": 0.01822841463414634
+      },
+      "first_epoch_expected_penalty": {
+        "surface": 0.0,
+        "chemical": 0.0,
+        "other": 0.01822841463414634
+      }
+    },
+    {
+      "candidate": 15,
+      "profile": {
+        "gate_lambda_surface": 0.16,
+        "gate_lambda_chemical": 0.16,
+        "gate_lambda_other": 0.04,
+        "gate_initial_active_surface": 0.95,
+        "gate_initial_active_chemical": 0.95,
+        "gate_group_warmup_fraction": 0.01,
+        "gate_group_ramp_fraction": 0.02,
+        "atomic_sources": "atom_name,residue_atom,backbone_torsions,sidechain_torsions,covalent_statistics,functional_groups,atomic_sasa",
+        "atomic_force_sources": "learned"
+      },
+      "available_counts": {
+        "surface": 20,
+        "chemical": 7,
+        "other": 21
+      },
+      "nominal_initial_expected_penalty": {
+        "surface": 0.07414634146341463,
+        "chemical": 0.024653658536585365,
+        "other": 0.01822841463414634
+      },
+      "first_epoch_expected_penalty": {
+        "surface": 0.0,
+        "chemical": 0.0,
+        "other": 0.01822841463414634
+      }
+    },
+    {
+      "candidate": 16,
+      "profile": {
+        "gate_lambda_surface": 0.16,
+        "gate_lambda_chemical": 0.16,
+        "gate_lambda_other": 0.16,
+        "gate_initial_active_surface": 0.95,
+        "gate_initial_active_chemical": 0.95,
+        "gate_group_warmup_fraction": 0.0,
+        "gate_group_ramp_fraction": 0.0,
+        "atomic_sources": "atom_name,residue_atom,backbone_torsions,sidechain_torsions,covalent_statistics,functional_groups,atomic_sasa",
+        "atomic_force_sources": "learned"
+      },
+      "available_counts": {
+        "surface": 20,
+        "chemical": 7,
+        "other": 21
+      },
+      "nominal_initial_expected_penalty": {
+        "surface": 0.07414634146341463,
+        "chemical": 0.024653658536585365,
+        "other": 0.07291365853658537
+      },
+      "first_epoch_expected_penalty": {
+        "surface": 0.07414634146341463,
+        "chemical": 0.024653658536585365,
+        "other": 0.07291365853658537
+      }
+    },
+    {
+      "candidate": 17,
+      "profile": {
+        "gate_lambda_surface": 0.64,
+        "gate_lambda_chemical": 0.64,
+        "gate_lambda_other": 0.64,
+        "gate_initial_active_surface": 0.95,
+        "gate_initial_active_chemical": 0.95,
+        "gate_group_warmup_fraction": 0.0,
+        "gate_group_ramp_fraction": 0.0,
+        "atomic_sources": "atom_name,residue_atom,backbone_torsions,sidechain_torsions,covalent_statistics,functional_groups,atomic_sasa",
+        "atomic_force_sources": "learned"
+      },
+      "available_counts": {
+        "surface": 20,
+        "chemical": 7,
+        "other": 21
+      },
+      "nominal_initial_expected_penalty": {
+        "surface": 0.2965853658536585,
+        "chemical": 0.09861463414634146,
+        "other": 0.29165463414634146
+      },
+      "first_epoch_expected_penalty": {
+        "surface": 0.2965853658536585,
+        "chemical": 0.09861463414634146,
+        "other": 0.29165463414634146
+      }
+    },
+    {
+      "candidate": 18,
+      "profile": {
+        "gate_lambda_surface": 0.04,
+        "gate_lambda_chemical": 0.04,
+        "gate_lambda_other": 0.04,
+        "gate_initial_active_surface": 0.95,
+        "gate_initial_active_chemical": 0.95,
+        "gate_group_warmup_fraction": 0.0,
+        "gate_group_ramp_fraction": 0.0,
+        "atomic_sources": "atom_name,residue_atom,backbone_torsions,sidechain_torsions,covalent_statistics,functional_groups,atomic_sasa",
+        "atomic_force_sources": "open"
+      },
+      "available_counts": {
+        "surface": 20,
+        "chemical": 7,
+        "other": 21
+      },
+      "nominal_initial_expected_penalty": {
+        "surface": 0.018536585365853658,
+        "chemical": 0.0,
+        "other": 0.01822841463414634
+      },
+      "first_epoch_expected_penalty": {
+        "surface": 0.018536585365853658,
+        "chemical": 0.0,
+        "other": 0.01822841463414634
+      }
+    },
+    {
+      "candidate": 19,
+      "profile": {
+        "gate_lambda_surface": 0.04,
+        "gate_lambda_chemical": 0.04,
+        "gate_lambda_other": 0.04,
+        "gate_initial_active_surface": 0.95,
+        "gate_initial_active_chemical": 0.95,
+        "gate_group_warmup_fraction": 0.0,
+        "gate_group_ramp_fraction": 0.0,
+        "atomic_sources": "atom_name,residue_atom,backbone_torsions,sidechain_torsions,covalent_statistics,functional_groups,atomic_sasa",
+        "atomic_force_sources": "closed"
+      },
+      "available_counts": {
+        "surface": 20,
+        "chemical": 7,
+        "other": 21
+      },
+      "nominal_initial_expected_penalty": {
+        "surface": 0.018536585365853658,
+        "chemical": 0.0,
+        "other": 0.01822841463414634
+      },
+      "first_epoch_expected_penalty": {
+        "surface": 0.018536585365853658,
+        "chemical": 0.0,
+        "other": 0.01822841463414634
+      }
+    },
+    {
+      "candidate": 20,
+      "profile": {
+        "gate_lambda_surface": 0.04,
+        "gate_lambda_chemical": 0.04,
+        "gate_lambda_other": 0.04,
+        "gate_initial_active_surface": 0.95,
+        "gate_initial_active_chemical": 0.95,
+        "gate_group_warmup_fraction": 0.0,
+        "gate_group_ramp_fraction": 0.0,
+        "atomic_sources": "atom_name,residue_atom",
+        "atomic_force_sources": "learned"
+      },
+      "available_counts": {
+        "surface": 20,
+        "chemical": 2,
+        "other": 21
+      },
+      "nominal_initial_expected_penalty": {
+        "surface": 0.018536585365853658,
+        "chemical": 0.0017609756097560975,
+        "other": 0.01822841463414634
+      },
+      "first_epoch_expected_penalty": {
+        "surface": 0.018536585365853658,
+        "chemical": 0.0017609756097560975,
+        "other": 0.01822841463414634
+      }
+    }
+  ],
+  "interpretation_limits": [
+    "Synthetic closure is technical evidence, not a prediction of actual feature selection.",
+    "All-off preserves physical capacity and may not reduce runtime.",
+    "Global coefficients are not budget-matched to grouped coefficients.",
+    "Local GT remains evaluation-only; test remains sealed.",
+    "DNA results do not establish universal source utility."
+  ]
+}

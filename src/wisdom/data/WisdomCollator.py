@@ -7,6 +7,11 @@ import torch
 from typing import Any
 from torch import Tensor
 from collections.abc import Mapping, Sequence
+from wisdom.data.StructuralInputs import StructuralInputs
+from wisdom.data.AtomicStructuralInputs import AtomicStructuralInputs
+from wisdom.preprocessing.common.structure.assets.graphs.ExtendedSurfaceAtom import (
+    ExtendedSurfaceAtom,
+)
 
 
 class WisdomCollator:
@@ -14,9 +19,12 @@ class WisdomCollator:
 
     def __init__(
         self,
-        atom_spatial_k          : int = 16,
-        surface_atom_k          : int = 16,
+        atom_spatial_k: int = 16,
+        surface_atom_k: int = 16,
         diffusion_spectral_modes: int = 128,
+        transfer_source: str = "base",
+        spectral_source: str = "base",
+        surface_graph_source: str = "base",
     ) -> None:
         """Set runtime topology budgets without changing persisted scientific geometry.
 
@@ -24,14 +32,45 @@ class WisdomCollator:
             atom_spatial_k: Active per-atom spatial rank ``K``; covalent edges always remain.
             surface_atom_k: Prefix width ``J`` selected from every compact atom-neighbor row.
             diffusion_spectral_modes: Maximum low-frequency modes selected per protein.
+            transfer_source: base or explicitly required extended_surface_atom CSR candidates.
+            spectral_source: base or explicitly required spectral_extension operators.
+            surface_graph_source: base or filtered, attaching validated surface-local edges.
         Raises:
             ValueError: If any runtime budget is not positive.
         """
         if atom_spatial_k < 1 or surface_atom_k < 1 or diffusion_spectral_modes < 1:
             raise ValueError("collator K, J, and spectral-mode budgets must be positive")
-        self.atom_spatial_k           = atom_spatial_k
-        self.surface_atom_k           = surface_atom_k
+        self.atom_spatial_k = atom_spatial_k
+        self.surface_atom_k = surface_atom_k
         self.diffusion_spectral_modes = diffusion_spectral_modes
+        if (
+            transfer_source not in {"base", "extended"}
+            or spectral_source not in {"base", "extension"}
+            or surface_graph_source not in {"base", "filtered"}
+        ):
+            raise ValueError("unsupported explicit transfer/spectrum/surface-graph source")
+        self.transfer_source, self.spectral_source = transfer_source, spectral_source
+        self.surface_graph_source = surface_graph_source
+
+    @staticmethod
+    def initialize_worker(worker_id: int) -> None:
+        """Use named shared memory when a DataLoader sends tensor-rich protein batches.
+
+        Args:
+            worker_id: DataLoader worker index, required by its initialization callback API.
+                Transport is identical for every worker; this does not alter its native RNG seed.
+
+        Returns:
+            None. Changes only this worker's CPU-tensor sharing strategy to ``file_system``.
+            PyTorch owns shared-memory allocation and cleanup through ``torch_shm_manager``.
+
+        Per-protein operators and optional sidecars retain many independent tensor storages.
+        The default ``file_descriptor`` strategy caches a descriptor per storage and can exhaust
+        a 1024-descriptor limit while valid batches are prefetched. Named shared memory avoids
+        those cached descriptors without changing tensor values, batching, or operating-system
+        limits. Set it inside each worker so both forked and freshly spawned workers receive it.
+        """
+        torch.multiprocessing.set_sharing_strategy("file_system")  # type: ignore[no-untyped-call]
 
     def __call__(
         self,
@@ -53,7 +92,8 @@ class WisdomCollator:
         Returns:
             Concatenated atom/surface tensors, runtime relations, compact transfer tables,
             ``surface_ptr[B+1]``, per-protein operator dictionaries, optional geometry/targets, and
-            one target per protein.
+            one target per protein. Prepared global atomic packs remain protein-local under
+            ``atomic_operators`` and are never padded into a dense batch matrix.
 
         Raises:
             ValueError: If a budget exceeds persisted maxima or a required tensor is unavailable.
@@ -111,16 +151,15 @@ class WisdomCollator:
         )
         annotations: dict[str, list[Tensor]] = {name: [] for name in annotation_names}
         operators: list[dict[str, Tensor]] = []
-        identifiers         : list[str] = []
-        tiers               : list[str] = []
-        leakage_groups      : list[str] = []
-        global_phenotypes   : list[str] = []
+        identifiers: list[str] = []
+        tiers: list[str] = []
+        leakage_groups: list[str] = []
+        global_phenotypes: list[str] = []
         local_phenotypes: list[str] = []
-        surface_ptr                     = [0]
+        surface_ptr = [0]
 
         has_surface_targets = all(
-            "surface_target_hard" in sample and "surface_valid_mask" in sample
-            for sample in samples
+            "surface_target_hard" in sample and "surface_valid_mask" in sample for sample in samples
         )
         has_full_annotations = has_surface_targets and all(
             all(name in sample for name in annotation_names[2:]) for sample in samples
@@ -129,18 +168,36 @@ class WisdomCollator:
         has_atom_geometry = all("atom_positions" in sample for sample in samples)
         has_identity = all("identifier" in sample for sample in samples)
 
-        atom_offset    = 0
+        atom_offset = 0
         surface_offset = 0
         for batch_index, sample in enumerate(samples):
+            if self.transfer_source == "extended":
+                # Registration checks limits; short dense rows retain -1/false padding.
+
+                extended = {
+                    key.split("__", 1)[1]: value.numpy()
+                    for key, value in sample.items()
+                    if key.startswith("extended_surface_atom__") and isinstance(value, Tensor)
+                }
+                dense = ExtendedSurfaceAtom.dense(extended, self.surface_atom_k)
+                sample = {
+                    **sample,
+                    **{
+                        key: torch.from_numpy(value).long()
+                        if key == "surface_atom_neighbors"
+                        else torch.from_numpy(value)
+                        for key, value in dense.items()
+                    },
+                }
             atomic_numbers = self._tensor(sample, "atomic_numbers")
             surface_weights = self._tensor(sample, "surface_area_weights")
-            atom_count      = len(atomic_numbers)
-            surface_count   = len(surface_weights)
+            atom_count = len(atomic_numbers)
+            surface_count = len(surface_weights)
 
             values["atomic_numbers"].append(atomic_numbers)
             values["residue_type_ids"].append(self._tensor(sample, "residue_type_ids"))
             integer_features = ("atom_role_ids", "atom_hybridization_ids")
-            scalar_features  = (
+            scalar_features = (
                 "formal_charges",
                 "atom_aromaticity",
                 "atom_hbond_donor",
@@ -156,9 +213,7 @@ class WisdomCollator:
                 values[name].append(
                     self._optional_atom_tensor(sample, name, atomic_numbers, torch.float32)
                 )
-            values["atom_batch"].append(
-                torch.full((atom_count,), batch_index, dtype=torch.long)
-            )
+            values["atom_batch"].append(torch.full((atom_count,), batch_index, dtype=torch.long))
             if has_atom_geometry:
                 values["atom_positions"].append(self._tensor(sample, "atom_positions"))
 
@@ -166,11 +221,11 @@ class WisdomCollator:
             # membership masks remain separate so one physical pair may feed both model branches.
 
             stored_edges = self._tensor(sample, "atom_edge_index")
-            distances    = self._tensor(sample, "atom_edge_distance")
-            covalent     = self._tensor(sample, "atom_edge_is_covalent").bool()
-            ranks        = self._tensor(sample, "atom_edge_spatial_rank")
-            spatial     = (ranks > 0) & (ranks <= self.atom_spatial_k)
-            active      = covalent | spatial
+            distances = self._tensor(sample, "atom_edge_distance")
+            covalent = self._tensor(sample, "atom_edge_is_covalent").bool()
+            ranks = self._tensor(sample, "atom_edge_spatial_rank")
+            spatial = (ranks > 0) & (ranks <= self.atom_spatial_k)
+            active = covalent | spatial
 
             active_edges = stored_edges[:, active] + atom_offset
             values["atom_edge_index"].append(active_edges)
@@ -211,9 +266,7 @@ class WisdomCollator:
                 self._tensor(sample, "surface_atom_normal_offsets")[:, : self.surface_atom_k]
             )
             values["surface_atom_tangential_distances"].append(
-                self._tensor(sample, "surface_atom_tangential_distances")[
-                    :, : self.surface_atom_k
-                ]
+                self._tensor(sample, "surface_atom_tangential_distances")[:, : self.surface_atom_k]
             )
             values["surface_atom_mask"].append(atom_mask)
             values["surface_area_weights"].append(surface_weights)
@@ -223,27 +276,46 @@ class WisdomCollator:
 
             # Operators keep local surface indices and are moved recursively by Training.
 
-            eigenvalues = self._tensor(sample, "diffusion_eigenvalues")
-            mode_count  = min(self.diffusion_spectral_modes, len(eigenvalues))
+            eigenvalues = self._tensor(
+                sample,
+                "spectral_extension__eigenvalues"
+                if self.spectral_source == "extension"
+                else "diffusion_eigenvalues",
+            )
+            mode_count = min(self.diffusion_spectral_modes, len(eigenvalues))
             operators.append(
                 {
                     "mass": self._tensor(sample, "diffusion_mass"),
                     "eigenvalues": eigenvalues[:mode_count],
-                    "eigenvectors": self._tensor(sample, "diffusion_eigenvectors")[
-                        :, :mode_count
-                    ],
+                    "eigenvectors": self._tensor(
+                        sample,
+                        "spectral_extension__eigenvectors"
+                        if self.spectral_source == "extension"
+                        else "diffusion_eigenvectors",
+                    )[:, :mode_count],
                     "gradient_index": self._tensor(sample, "diffusion_gradient_index"),
                     "gradient_x": self._tensor(sample, "diffusion_gradient_x"),
                     "gradient_y": self._tensor(sample, "diffusion_gradient_y"),
                 }
             )
+            if self.surface_graph_source == "filtered":
+                operators[-1].update(
+                    {
+                        "local_edge_index": self._tensor(
+                            sample, "surface_local_graph__surface_edge_index"
+                        ),
+                        "positions": self._tensor(sample, "surface_positions"),
+                        "normals": self._tensor(sample, "surface_normals"),
+                        "area": surface_weights,
+                    }
+                )
             surface_ptr.append(surface_offset + surface_count)
 
             if has_geometry:
                 values["surface_positions"].append(self._tensor(sample, "surface_positions"))
                 values["surface_normals"].append(self._tensor(sample, "surface_normals"))
                 local_neighbors = self._tensor(sample, "surface_neighbors").clone()
-                local_mask      = self._tensor(sample, "surface_neighbor_mask").bool()
+                local_mask = self._tensor(sample, "surface_neighbor_mask").bool()
                 local_neighbors[local_mask] += surface_offset
                 values["surface_neighbors"].append(local_neighbors)
                 values["surface_neighbor_distances"].append(
@@ -265,7 +337,7 @@ class WisdomCollator:
                 for name in annotation_names[2:]:
                     annotations[name].append(self._tensor(sample, name))
 
-            atom_offset    += atom_count
+            atom_offset += atom_count
             surface_offset += surface_count
 
         tensor_names = (
@@ -320,18 +392,24 @@ class WisdomCollator:
                 batch[name] = torch.cat(values[name])
         if has_atom_geometry:
             batch["atom_positions"] = torch.cat(values["atom_positions"])
+        if "atom_residue_indices" in samples[0]:
+            # Residue addresses stay protein-local, paired with explicit atom_batch ownership.
+
+            batch["atom_residue_indices"] = torch.cat(
+                [self._tensor(sample, "atom_residue_indices") for sample in samples]
+            )
         if any("surface_explicit_features" in sample for sample in samples):
             # All members must expose exactly the requested channel order; a missing member
             # cannot silently become an all-zero explicit representation.
 
-            batch["surface_explicit_features"] = torch.cat([
-                self._tensor(sample, "surface_explicit_features") for sample in samples
-            ])
+            batch["surface_explicit_features"] = torch.cat(
+                [self._tensor(sample, "surface_explicit_features") for sample in samples]
+            )
         if has_identity:
-            batch["identifier"]          = identifiers
-            batch["tier"]                = tiers
-            batch["leakage_group"]       = leakage_groups
-            batch["global_phenotype"]    = global_phenotypes
+            batch["identifier"] = identifiers
+            batch["tier"] = tiers
+            batch["leakage_group"] = leakage_groups
+            batch["global_phenotype"] = global_phenotypes
             batch["local_phenotype"] = local_phenotypes
         if has_surface_targets:
             for name in annotation_names[:2]:
@@ -347,14 +425,19 @@ class WisdomCollator:
                 raise ValueError("all DNA sidecars in a batch must use the same sensitivity gaps")
             batch["sensitivity_gaps"] = sensitivity_gaps
 
+        batch.update(StructuralInputs.collate(samples))
+        if any("atomic_structure__spatial_k" in sample for sample in samples):
+            batch["atomic_operators"] = [
+                AtomicStructuralInputs.pack(sample, self.atom_spatial_k) for sample in samples
+            ]
         return batch
 
     @staticmethod
     def _optional_atom_tensor(
-        sample   : Mapping[str, Tensor | str],
-        name     : str,
+        sample: Mapping[str, Tensor | str],
+        name: str,
         reference: Tensor,
-        dtype    : torch.dtype,
+        dtype: torch.dtype,
     ) -> Tensor:
         """Read one generic atom descriptor with a legacy zero fallback.
 

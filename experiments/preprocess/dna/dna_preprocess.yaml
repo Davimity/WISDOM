@@ -120,7 +120,7 @@ steps:                                                          # LambdaForge ru
       structures: {from: select.structures}                     # Exact audited mmCIF snapshot.
 
       dataset_name: wisdom-dna-reduced                          # Stable LambdaForge Registry family.
-      dataset_version: "8"                                     # Optional structural context/extended candidates; never overwrite @7.
+      dataset_version: "9"                                     # New residue-CA and masked free-space assets; immutable @8 remains unchanged.
 
       # include_full_train: true                                # Build the complete canonical training split.
       # train_dilutions: []                                     # Extra nested train views; no duplicate NPZs.
@@ -148,6 +148,42 @@ steps:                                                          # LambdaForge ru
       extended_surface_atom: true                              # Separate sparse candidates; historic 6 Å/32 table unchanged.
       extended_radius: 12.0                                    # Expanded protein-only atom-center cutoff in Å.
       extended_k_max: 96                                       # Up to 96 candidates; shorter rows valid, truncation audited.
+      sequence_context: true                                  # Physical residues, author addresses, observed/full sequence mapping.
+      covalent_environment: true                              # Neighbour element composition and bond-order counts.
+      atomic_sasa: true                                       # Absolute per-atom solvent-accessible area; not normalized weights.
+      sasa_probe: 1.4                                         # Independent solvent-probe radius in Å.
+      sasa_samples: 960                                       # Deterministic quadrature directions per atom.
+      residue_graph: true                                     # Exact heavy-atom residue contacts and residue-surface CSR.
+      residue_contact_radius: 8.0                             # Minimum heavy-atom contact threshold in Å.
+      residue_surface_radius: 12.0                            # Direct residue-surface candidates, without atom-list truncation.
+      residue_ca_radius: 12.0                                 # Independent CA spatial support; includes V14 8/10/12-Angstrom controls.
+      residue_ca_k_max: 32                                    # Store 32 directed neighbors before union; runtime may use 8/16/32.
+      surface_environment: true                              # Protein-only masked depth, ray occlusion and associated empty-space radius.
+      environment_options:                                   # Explicit scientific geometry; no local target or ligand is consumed.
+        spacing: 1.0                                         # Voxel side length in Angstrom; 0.5 is a separate cost/accuracy pilot.
+        probe: 1.4                                           # Same physical solvent radius as the base SAS, in Angstrom.
+        rays: 64                                             # Finite deterministic hemisphere quadrature, not exact angular invariance.
+        horizons: [4.0, 15.0]                                # Near/far occlusion horizons in Angstrom; opening is not duplicated.
+        offset: 0.2                                          # Initial outward query offset in Angstrom; invalid starts remain masked.
+        association_radius: 8.0                              # Bound center-to-wall association; exclude unbounded bulk solvent.
+        maximum_voxels: 18000000                             # Hard per-protein allocation guard; never silently coarsen geometry.
+        hull_directions: 96                                  # Supporting-plane approximation of expanded-sphere convex envelope.
+      # True Work defaults: residue_ca_radius=null, residue_ca_k_max=32, surface_environment=false,
+      # environment_options=null. SurfaceEnvironment defaults are the eight values selected above.
+      # CA and heavy-contact edge meanings remain separate. Invalid/closed-cavity descriptors keep
+      # explicit masks; finite-stencil/angular errors must be audited before V15 scientific claims.
+      surface_local_graph: true                               # Normal/chord-filtered surface edges, degrees and components.
+      surface_graph_resolution: 1.0                           # Surface coherence-rule length scale in Å.
+      spectral_modes: 256                                     # Independent fixed-mode extension; base schema remains unchanged.
+      surface_view: true                                      # One deterministic alternate surface with all its own operators.
+      view_id: 1                                              # Fixed alternative Fibonacci phase and voxel-grid offset.
+      view_resolution: 1.0                                    # Alternative surface spacing in Å; same physical probe/radii.
+      structure_tokens: false                                 # Selected ESM-2 needs no 3Di; SaProt enables it automatically when requested.
+      protein_models: {file: ../../../data/models}             # Verified pinned manifest; generate only the selected residue model.
+      protein_model_kinds: [esm2]                              # Current V14/V15 context source; esmc/saprot remain available.
+      protein_static_tables: false                            # Context-only training does not use static initialization prototypes.
+      # protein_model_kinds: [esm2, esmc, saprot]               # Explicitly restore the all-model comparison.
+      # protein_static_tables: true                            # Export selected input tables for initialization experiments.
       diffusion_spectral_modes_max: 128                         # Persist at most 128 lowest intrinsic modes.
       surface_neighbor_k_max: 24                                # Bounded local surface table for operators/V3.
       curvature_scales: [1.5, 2.5, 5.0, 7.5, 10.0]              # Superset of curvature radii in resolution units.
@@ -155,11 +191,27 @@ steps:                                                          # LambdaForge ru
       positive_gap: 1.4                                         # Largest confidently contacting gap in Å.
       negative_gap: 3.0                                         # Smallest confidently non-contacting gap in Å.
       sensitivity_gaps: [1.0, 1.4, 2.0]                         # Evaluation-only positive cutoffs in Å.
+
+      # This recipe requests ESM-2 context only, sequentially on CPU; it skips other models,
+      # their static tables and unused 3Di. Install/bootstrap the current project first;
+      # native Transformers support is a project dependency, not installed from inside a Work.
+      # LF transfers only small inputs automatically: this 1.5 GiB directory must already exist
+      # at data/models in the cluster project mirror, with identical bytes, before submission.
+      # The alternative single-model recipe below requires commenting protein_models first.
+      # external_model: esm2                                  # esm2 (35M), esmc (300M), or saprot (35M).
+      # external_checkpoint: {file: ../../../data/models/esm2-35m}  # Complete local model/tokenizer directory.
+      # external_identifier: facebook/esm2_t12_35M_UR50D         # Exact staged ESM-2 repository identity.
+      # external_revision: 6fbf070e65b0b7291e7bbcd451118c216cff79d8  # Immutable staged upstream revision.
+      # static_embedding_table: true                           # Include actual input weights for the requested model.
+      # external_layer: -1                                     # Final hidden state; other layers are explicit alternatives.
+      # external_maximum_length: 1022                          # Disjoint residue chunks, excluding CLS/EOS.
+      # external_device: cpu                                  # cuda needs GPU resources and workers=1.
+      # external_sequence_policy: fragments                    # Observed peptide-connected runs; complete needs label_seq.
     resources:                                                   # Active geometry and annotation reservation.
-      cpu: 12                                                    # Matches the configured spawned-process workers.
-      memory: 12GiB                                             # Concurrent surfaces, operators, and validation.
-      storage: 100GiB                                            # Structures, archives, sidecars, and checkpoints.
-      time: 24h                                                  # Complete preprocessing wall-time ceiling.
+      cpu: 48                                                    # Shared CPU budget for 12 protein workers and native numerical kernels.
+      memory: 200GiB                                             # Concurrent base/view operators, SASA, and complete asset validation.
+      storage: 200GiB                                            # Base/annotation data plus independent views and structural assets.
+      time: 72h                                                  # Complete structural bundle; no measured production runtime guarantee.
 
     # Full Preprocessing resource recipe; use it together with skip=false and the inputs above:
     # resources:
@@ -189,22 +241,44 @@ steps:                                                          # LambdaForge ru
     # Enable families independently; source quality is metadata, not an automatically active
     # feature. CSR rows have no padding; discarded_count records every storage-cap truncation.
     # These settings do not change the base geometry hash or the atomic graph (6 Å/K32).
+    # Additional run defaults: sequence_context=false, covalent_environment=false, atomic_sasa=false,
+    # sasa_probe=1.4 Å (>0), sasa_samples=960 (integer>=24), residue_graph=false,
+    # residue_contact_radius=8 Å (>0), residue_surface_radius=12 Å (>0), surface_local_graph=false,
+    # surface_graph_resolution=1 Å (>0), spectral_modes=null (or positive integer), surface_view=false,
+    # view_id=1 (integer>=0), view_resolution=null (or positive Å), and structure_tokens=false.
+    # This recipe deliberately enables every structural family, adds 256 fixed modes, and builds
+    # view 1 at 1 Å. No task labels are copied by index to the alternative cloud. Foldseek is needed
+    # only if 3Di/SaProt is requested; missing observations remain explicitly masked, never invented.
+    # External run defaults: external_model=null (or esm2/esmc/saprot), external_checkpoint=null,
+    # external_identifier="", external_revision="", external_layer=-1, external_maximum_length=1022
+    # (>0 residues), external_device=cpu, external_sequence_policy=fragments (or complete), and
+    # static_embedding_table=false. An enabled single model requires its local checkpoint/ID/revision;
+    # a requested static table without a model fails at Work start. protein_models=null is the true
+    # default. protein_model_kinds=null preserves all three historical models; a nonempty unique
+    # esm2/esmc/saprot list selects a subset. protein_static_tables=true preserves historical static
+    # tables; false generates only contextual vectors. A bundle excludes external_model, uses
+    # last-layer FP32/1022-residue chunks on CPU and serializes inference independently of workers.
+    # Only selected weights are preflighted; selected SaProt automatically enables official 3Di.
+    # Weights are frozen; they never enter the universal structural NPZ or any task annotation.
+    # atomic_checkpoint=null and atomic_device=cpu are optional SLAE defaults. Explicit atomic
+    # extraction needs the reviewed runtime and workers=1; enrich_atomic.yaml adds it separately
+    # after feasibility review, without rebuilding this geometry or forcing it onto every study.
 
   - name: visualize                                             # Inspect immutable members without changing data.
     run: wisdom.visualization.Visualization.Visualization        # Dataset-to-HTML/PLY inspection Work.
     with:                                                        # Arguments passed to Visualization.run(...).
-      skip: true                                                 # Do not render during this reduced dataset build.
+      skip: false                                                # Render the new dataset after all required assets are published.
       dataset: {from: preprocess.dataset}                        # DatasetVersion published by the preceding step.
 
       # Visualization-only recipe; use it together with preprocess.skip=true:
-      # dataset: {dataset: wisdom-dna-reduced@6}                 # Resolve this published screening release.
+      # dataset: {dataset: wisdom-dna-reduced@9}                 # Resolve this release after publication.
       output_directory: ../../../data/dna/visualizations               # Atomically publish the browsable gallery here.
       overwrite_output: true                                     # Replace a different prior gallery after success.
 
       identifiers: []                                            # Empty selects a balanced deterministic sample.
       splits: [train, validation]                                # Eligible split strata for automatic sampling.
       labels: [0, 1]                                             # Include curated negatives and verified positives.
-      maximum_proteins: 12                                       # Automatic cap; zero renders every eligible member.
+      maximum_proteins: 32                                       # Automatic cap; zero renders every eligible member.
 
       maximum_surface_points: 6000                               # WebGL point-cloud payload cap per protein.
       maximum_mesh_points: 2500                                  # Alpha-shape input cap per diagnostic mesh.

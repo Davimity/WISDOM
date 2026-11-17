@@ -3,19 +3,151 @@
 # ruff: noqa: I001
 
 import io
+import types
 import torch
 import pytest
 
 from pathlib import Path
 from test_wisdom_v2 import _v2
-from test_v8_architectures import batch
+from test_v8_architectures import batch as base_batch
+from lambdaforge.nn import GraphTriplets
+from lambdaforge.nn import GraphStructuralEncoding
 from lambdaforge.work import WorkConfig, WorkRunner
-from wisdom.Training import _model_inputs, _create_model
-from wisdom.models.AtomicEncoderType import AtomicEncoderType
-from wisdom.models.AtomicGraphEncoder import AtomicGraphEncoder
+from wisdom.models.atomic.AtomicEncoderType import AtomicEncoderType
+from wisdom.models.atomic.AtomicGraphEncoder import AtomicGraphEncoder
+from wisdom.Training import _model_inputs, _create_model, _device_batch
 
 
 KINDS = [kind.value for kind in AtomicEncoderType]
+
+
+def batch():
+    """Prepare exact tiny per-protein structural packs outside every synthetic neural forward."""
+    data = base_batch()
+    packs = []
+    for owner in torch.unique(data["atom_batch"], sorted=True):
+        ids = torch.where(data["atom_batch"] == owner)[0]
+        inverse = torch.full((len(data["atom_batch"]),), -1, dtype=torch.long)
+        inverse[ids] = torch.arange(len(ids))
+        pack = {}
+        for relation in ("covalent", "spatial"):
+            edges = data["atom_edge_index"][:, data[f"atom_edge_is_{relation}"]]
+            edges = edges[:, data["atom_batch"][edges[0]] == owner]
+            edges = inverse[torch.cat((edges, edges.flip(0)), dim=1)]
+            encoding = GraphStructuralEncoding.from_edges(edges, len(ids))
+            pack[f"{relation}_codes"] = encoding.spatial_indices
+            pack[f"{relation}_in_degree"] = encoding.in_degree
+            pack[f"{relation}_out_degree"] = encoding.out_degree
+        packs.append(pack)
+    data["atomic_operators"] = packs
+    return data
+
+
+@pytest.mark.parametrize("kind", ["dimenet", "dimenet_plus_plus"])
+def test_training_device_path_preserves_directional_member_guards(kind, monkeypatch):
+    """Preserve per-protein triplet guards through the actual training input boundary.
+
+    Args:
+        kind: Public DimeNet or DimeNet++ encoder selector.
+        monkeypatch: Pytest fixture recording triplet construction without replacing its logic.
+    """
+    predictor = model(kind).eval()
+    data = batch()
+    data["atom_batch"] = torch.tensor([41, 41, 41, 77, 77, 77, 77])
+    native = GraphTriplets.from_edges
+    counts = []
+
+    def record(*args, **kwargs):
+        """Record member triplet counts while retaining the real public graph construction.
+
+        Args:
+            args: Positional arguments forwarded unchanged to ``GraphTriplets.from_edges``.
+            kwargs: Keyword arguments forwarded unchanged to the same constructor.
+
+        Returns:
+            Unmodified public LF triplet object; appends its path count to ``counts``.
+        """
+        result = native(*args, **kwargs)
+        counts.append(len(result.incoming))
+        return result
+
+    monkeypatch.setattr(GraphTriplets, "from_edges", record)
+    reference = predictor(**_model_inputs(data))
+    assert len(counts) == 2 and sum(counts) > max(counts)
+    predictor.atomic_encoder.maximum_triplets = max(counts)
+    counts.clear()
+
+    moved = _device_batch(data, torch.device("cpu"))
+    assert torch.equal(moved["atom_batch"], data["atom_batch"])
+    actual = predictor(**_model_inputs(moved))
+    assert len(counts) == 2
+    torch.testing.assert_close(actual["logits"], reference["logits"], rtol=0, atol=0)
+    actual["logits"].sum().backward()
+    assert all(torch.isfinite(p.grad).all() for p in predictor.parameters() if p.grad is not None)
+
+
+@pytest.mark.parametrize("kind", ["structural_global", "global_no_structure"])
+def test_training_device_path_preserves_global_protein_isolation(kind):
+    """Keep the bounded global-attention exception scoped to individual proteins.
+
+    Args:
+        kind: Public V9g global encoder selector, explicitly enabled only in this tiny fixture.
+    """
+    predictor = model(kind).eval()
+    data = batch()
+    reference = predictor(**_model_inputs(data))["logits"]
+    moved = _device_batch(data, torch.device("cpu"))
+    actual = predictor(**_model_inputs(moved))["logits"]
+    torch.testing.assert_close(actual, reference, rtol=0, atol=0)
+
+    # Preparing another device batch must not allow the second molecule to influence the first.
+
+    data["atomic_numbers"] = data["atomic_numbers"].clone()
+    data["atomic_numbers"][3:] = 8
+    changed = predictor(**_model_inputs(_device_batch(data, torch.device("cpu"))))["logits"]
+    torch.testing.assert_close(changed[0], reference[0], rtol=0, atol=0)
+
+
+def test_training_batch_without_atom_ownership_fails_before_graph_execution():
+    """A malformed training batch cannot silently become one oversized directional molecule."""
+    data = batch()
+    del data["atom_batch"]
+    with pytest.raises(KeyError, match="atom_batch"):
+        _device_batch(data, torch.device("cpu"))
+
+
+@pytest.mark.parametrize("kind", ["dimenet", "dimenet_plus_plus"])
+def test_directional_member_execution_matches_disjoint_forward_and_gradients(kind, monkeypatch):
+    """Per-protein resource guards must preserve all messages and the original optimizer batch."""
+    predictor = model(kind).eval()
+    data = batch()
+    inputs = _model_inputs(data)
+    reference = predictor(**dict(inputs, atom_batch=None))
+    reference["logits"].sum().backward()
+    gradients = {
+        name: p.grad.clone() for name, p in predictor.named_parameters() if p.grad is not None
+    }
+    predictor.zero_grad(set_to_none=True)
+    native = GraphTriplets.from_edges
+    sizes = []
+
+    def count(*args, **kwargs):
+        result = native(*args, **kwargs)
+        sizes.append(len(result.incoming))
+        return result
+
+    monkeypatch.setattr(GraphTriplets, "from_edges", count)
+    actual = predictor(**inputs)
+    torch.testing.assert_close(actual["logits"], reference["logits"], atol=2e-6, rtol=2e-5)
+    actual["logits"].sum().backward()
+    for name, p in predictor.named_parameters():
+        if name in gradients:
+            torch.testing.assert_close(p.grad, gradients[name], atol=2e-6, rtol=2e-4)
+    assert len(sizes) == 2 and sum(sizes) > max(sizes)
+    predictor.atomic_encoder.maximum_triplets = max(sizes)
+    predictor(**inputs)  # The disjoint batch fits member guards without changing batch_size.
+    with pytest.raises(MemoryError, match="typed triplets"):
+        predictor(**dict(inputs, atom_batch=None))
 
 
 def model(kind):
@@ -103,6 +235,16 @@ def test_atom_permutation_and_rigid_motion(kind):
     )
     for name in atom_fields:
         inputs[name] = inputs[name][permutation]
+    inputs["atomic_operators"] = [
+        {
+            key: value[local][:, local] if key.endswith("_codes") else value[local]
+            for key, value in pack.items()
+        }
+        for pack, local in zip(
+            inputs["atomic_operators"],
+            (permutation[:3], permutation[3:] - 3), strict=True,
+        )
+    ]
     inputs["atom_edge_index"] = inverse[inputs["atom_edge_index"]].sort(dim=0).values
     neighbors = inputs["surface_atom_neighbors"]
     inputs["surface_atom_neighbors"] = torch.where(
@@ -206,11 +348,120 @@ def test_global_requires_explicit_permission_and_does_not_silently_shrink():
         predictor(**_model_inputs(batch()))
 
 
+def test_global_no_structure_skips_unused_shortest_paths(monkeypatch):
+    """The no-structure control must not solve BFS paths that it replaces with zero codes.
+
+    Args:
+        monkeypatch: Pytest fixture forbidding public path construction after the reference pass.
+    """
+    predictor = model("global_no_structure").eval()
+    inputs = _model_inputs(_device_batch(batch(), torch.device("cpu")))
+
+    def erased_paths(self, operator, hidden, edges, atom_batch, atomic_operators, relation):
+        """Reproduce the former public path calculation followed by erasing every code.
+
+        Args:
+            self: Encoder whose unchanged per-protein bound belongs to the reference route.
+            operator: Public LF global attention layer with the original weights.
+            hidden: Scalar atomic states [N,D].
+            edges: One complete directed atomic relation [2,E].
+            atom_batch: Explicit molecule ownership [N].
+            atomic_operators: Ignored precomputed packs, absent from the original implementation.
+            relation: Ignored selected relation name; the reference deliberately recomputes it.
+
+        Returns:
+            Original-order [N,D] states from the pre-optimization equations.
+        """
+        output = torch.zeros_like(hidden)
+        for owner in torch.unique(atom_batch, sorted=True):
+            ids = torch.where(atom_batch == owner)[0]
+            inverse = torch.full((len(hidden),), -1, dtype=torch.long)
+            inverse[ids] = torch.arange(len(ids))
+            local = inverse[edges[:, atom_batch[edges[0]] == owner]]
+            encoding = GraphStructuralEncoding.from_edges(
+                local, len(ids), max_pairwise_bytes=self.maximum_pairwise_bytes,
+            )
+            codes = torch.zeros_like(encoding.spatial_indices)
+            indegree = torch.zeros_like(encoding.in_degree)
+            outdegree = torch.zeros_like(encoding.out_degree)
+            output[ids] = operator(
+                hidden[ids][None], codes[None], indegree[None], outdegree[None],
+            )[0]
+        return output
+
+    encoder = predictor.atomic_encoder
+    with monkeypatch.context() as reference_patch:
+        reference_patch.setattr(encoder, "_global", types.MethodType(erased_paths, encoder))
+        expected = predictor(**inputs)["logits"]
+    expected.sum().backward()
+    gradients = {
+        name: parameter.grad.clone()
+        for name, parameter in predictor.named_parameters() if parameter.grad is not None
+    }
+    predictor.zero_grad(set_to_none=True)
+
+    def forbidden(*args, **kwargs):
+        """Reject unused shortest-path work, regardless of supplied constructor arguments.
+
+        Args:
+            args: Unused public constructor positional arguments.
+            kwargs: Unused public constructor keyword arguments.
+
+        Raises:
+            AssertionError: Always; this ablation consumes zero structural codes directly.
+        """
+        raise AssertionError("no-structure attention must not compute shortest paths")
+
+    monkeypatch.setattr(GraphStructuralEncoding, "from_edges", forbidden)
+    actual = predictor(**inputs)["logits"]
+    torch.testing.assert_close(actual, expected, rtol=0, atol=0)
+    actual.sum().backward()
+    for name, parameter in predictor.named_parameters():
+        if name in gradients:
+            torch.testing.assert_close(parameter.grad, gradients[name], rtol=0, atol=0)
+
+
+@pytest.mark.parametrize("kind", ["structural_global", "global_no_structure"])
+def test_global_guard_explains_actual_member_and_promoted_score_storage(kind, monkeypatch):
+    """Reject an unsafe global request before paths/attention with counts and a usable diagnosis.
+
+    Args:
+        kind: Explicitly approved global attention profile.
+        monkeypatch: Pytest fixture proving the guard executes before the path constructor.
+    """
+    encoder = model(kind).atomic_encoder
+    operator = encoder.covalent[0]
+    # Four nodes need 128 bytes of int64 codes and 128 bytes of two-head FP32 scores.
+
+    encoder.maximum_pairwise_bytes = 127
+    owners = torch.full((4,), 41, dtype=torch.long)
+    hidden = torch.zeros((4, encoder.hidden_dim), dtype=torch.bfloat16)
+    edges = torch.tensor([[0, 1, 2], [1, 2, 3]])
+
+    def forbidden(*args, **kwargs):
+        """Forbid path allocation before the resource check.
+
+        Args:
+            args: Unused public constructor positional arguments.
+            kwargs: Unused public constructor keyword arguments.
+
+        Raises:
+            AssertionError: Always; resource rejection must happen before this call.
+        """
+        raise AssertionError("path allocation preceded the resource guard")
+
+    monkeypatch.setattr(GraphStructuralEncoding, "from_edges", forbidden)
+    with pytest.raises(MemoryError, match=r"owner=41 atoms=4.*128.*127.*not a CUDA"):
+        encoder._global(operator, hidden, edges, owners, [{}])
+
+
 def test_native_campaign_counts_and_frozen_context():
-    """Six independent fixed studies enumerate exactly 172 Runs, with no hidden Cartesian axes."""
+    """Seven independent fixed studies enumerate exactly 224 Runs, with no hidden Cartesian axes."""
     root = Path(__file__).parents[1] / "experiments/v9"
     total = 0
-    for suffix, candidates in (("a", 10), ("b", 7), ("c", 9), ("d", 6), ("e", 5), ("f", 6)):
+    for suffix, candidates in (
+        ("a", 10), ("b", 7), ("c", 9), ("d", 6), ("e", 5), ("f", 13), ("g", 6)
+    ):
         authored = WorkConfig.from_yaml(root / f"wisdom_v9{suffix}.yaml")
         fixture = authored.to_dict()
         fixture["with"]["dataset"] = {"file": str(Path(__file__).resolve())}
@@ -231,17 +482,18 @@ def test_native_campaign_counts_and_frozen_context():
         assert common["surface_encoder_type"] == "diffusion"
         assert common["surface_representation_mode"] == "learned"
         assert common["pooling_type"] == "max" and common["pooling_area_mode"] == "point"
-        assert fixture["resources"]["gpu"] == 2 and fixture["resources"]["cpu"] == 36
+        # Researchers may adapt granted GPU counts without changing this scientific sweep.
+        assert fixture["resources"]["gpu"] >= 1 and fixture["resources"]["cpu"] == 36
         assert fixture["resources"]["memory"] == "96GiB"
         assert "execution" not in fixture
         assert work.execution_policy.max_parallel is None
         assert work.execution_policy.runs_per_gpu is None
-        assert common["atomic_allow_dense_global"] is (suffix == "f")
+        assert common["atomic_allow_dense_global"] is (suffix == "g")
         assert not {"steps", "search"} & fixture.keys()
         plan = WorkRunner().run(config, dry_run=True).to_dict()
         assert sum(len(level) for level in plan["levels"]) == candidates * 4
         total += candidates * 4
-    assert total == 172 and not (root / "wisdom_v9.yaml").exists()
+    assert total == 224 and not (root / "wisdom_v9.yaml").exists()
 
 
 def test_v9_keeps_the_reviewed_single_pass_shared_ledger():
@@ -249,24 +501,67 @@ def test_v9_keeps_the_reviewed_single_pass_shared_ledger():
     root = Path(__file__).parents[1] / "experiments"
     previous = WorkConfig.from_yaml(root / "v8/wisdom_v8b.yaml").to_dict()["with"]
     fields = (
-        "dataset", "model_version", "subset", "initialization_profile", "optimization_profile",
-        "hidden_dim", "embedding_dim", "residue_embedding_dim", "atomic_layers", "projection_depth",
-        "surface_layers", "atom_spatial_k", "surface_atom_k", "diffusion_spectral_modes",
-        "surface_atom_radius", "dropout", "learning_rate", "weight_decay", "gate_lambda",
-        "surface_refiner_type", "surface_refiner_heat_length", "weak_loss_profile",
-        "positive_existence_lambda", "cardinality_lambda", "total_variation_lambda",
-        "dirichlet_lambda", "regional_loss_length", "regional_ranking_margin",
-        "head_implementation", "architecture_implementation", "gate_cost_normalization",
-        "batch_size", "epochs", "patience", "minimum_delta", "precision",
-        "surface_metrics", "surface_metrics_interval", "faithfulness_audit", "evaluate_test",
-        "optimization_diagnostics", "data_workers",
+        "dataset",
+        "model_version",
+        "subset",
+        "initialization_profile",
+        "optimization_profile",
+        "hidden_dim",
+        "embedding_dim",
+        "residue_embedding_dim",
+        "atomic_layers",
+        "projection_depth",
+        "surface_layers",
+        "atom_spatial_k",
+        "surface_atom_k",
+        "diffusion_spectral_modes",
+        "surface_atom_radius",
+        "dropout",
+        "learning_rate",
+        "weight_decay",
+        "gate_lambda",
+        "surface_refiner_type",
+        "surface_refiner_heat_length",
+        "weak_loss_profile",
+        "positive_existence_lambda",
+        "cardinality_lambda",
+        "total_variation_lambda",
+        "dirichlet_lambda",
+        "regional_loss_length",
+        "regional_ranking_margin",
+        "head_implementation",
+        "architecture_implementation",
+        "gate_cost_normalization",
+        "batch_size",
+        "epochs",
+        "patience",
+        "minimum_delta",
+        "precision",
+        "surface_metrics",
+        "surface_metrics_interval",
+        "faithfulness_audit",
+        "evaluate_test",
+        "optimization_diagnostics",
+        "data_workers",
     )
     reference = None
-    for suffix in "abcdef":
+    for suffix in "abcdefg":
         values = WorkConfig.from_yaml(root / f"v9/wisdom_v9{suffix}.yaml").to_dict()["with"]
         assert {name: values[name] for name in fields} == {name: previous[name] for name in fields}
-        scientific = {name: value for name, value in values.items()
-                      if name != "atomic_allow_dense_global"}
+        operational_guards = {
+            "atomic_allow_dense_global",
+            "atomic_maximum_triplets",
+            "atomic_maximum_pairwise_bytes",
+            "atomic_radial_encoding", "atomic_hidden_dim", "atomic_output_dim",
+        }
+        scientific = {
+            name: value for name, value in values.items() if name not in operational_guards
+        }
+        assert values["atomic_maximum_triplets"] == (
+            2_000_000 if suffix in {"d", "f"} else 1_000_000)
+        assert values["atomic_maximum_pairwise_bytes"] == (
+            1_073_741_824 if suffix in {"d", "f", "g"} else 134_217_728
+        )
         if reference is None:
             reference = scientific
         assert scientific == reference

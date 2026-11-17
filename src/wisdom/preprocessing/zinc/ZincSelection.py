@@ -8,23 +8,23 @@ import lambdaforge as lf
 from typing import Any
 from pathlib import Path
 from collections.abc import Sequence
-from wisdom.preprocessing.common.audit import audit_dataset
-from wisdom.preprocessing.zinc.evidence import load_evidence
-from wisdom.preprocessing.common.splits import assign_splits
-from wisdom.preprocessing.zinc.evidence import annotate_sites
-from wisdom.preprocessing.common.shortcut import shortcut_baseline
-from wisdom.preprocessing.zinc.audit import write_diversity_report
-from wisdom.preprocessing.zinc.audit import write_benchmark_report
-from wisdom.preprocessing.zinc.phenotypes import assign_phenotypes
-from wisdom.preprocessing.common.dilutions import create_dilutions
-from wisdom.preprocessing.zinc.structures import analyse_structures
-from wisdom.preprocessing.common.population import select_population
-from wisdom.preprocessing.common.leakage import assign_leakage_groups
-from wisdom.preprocessing.common.similarity import compute_similarity
-from wisdom.preprocessing.common.snapshots import snapshot_structures
-from wisdom.preprocessing.common.snapshots import restore_structure_snapshot
-from wisdom.preprocessing.common.snapshots import validate_structure_snapshot
-from wisdom.preprocessing.common.functional_metadata import annotate_functions
+from wisdom.preprocessing.zinc.stages.evidence import load_evidence
+from wisdom.preprocessing.common.auditing.audit import audit_dataset
+from wisdom.preprocessing.zinc.stages.evidence import annotate_sites
+from wisdom.preprocessing.common.sampling.splits import assign_splits
+from wisdom.preprocessing.zinc.stages.audit import write_benchmark_report
+from wisdom.preprocessing.zinc.stages.audit import write_diversity_report
+from wisdom.preprocessing.zinc.stages.phenotypes import assign_phenotypes
+from wisdom.preprocessing.zinc.stages.structures import analyse_structures
+from wisdom.preprocessing.common.auditing.shortcut import shortcut_baseline
+from wisdom.preprocessing.common.sampling.dilutions import create_dilutions
+from wisdom.preprocessing.common.sampling.population import select_population
+from wisdom.preprocessing.common.independence.leakage import assign_leakage_groups
+from wisdom.preprocessing.common.independence.similarity import compute_similarity
+from wisdom.preprocessing.common.independence.snapshots import snapshot_structures
+from wisdom.preprocessing.common.auditing.functional_metadata import annotate_functions
+from wisdom.preprocessing.common.independence.snapshots import restore_structure_snapshot
+from wisdom.preprocessing.common.independence.snapshots import validate_structure_snapshot
 
 
 class ZincSelection(lf.Work):
@@ -148,15 +148,17 @@ class ZincSelection(lf.Work):
         if raw_path is None:
             raise ValueError("Zn Selection requires frozen Discovery raw.jsonl and structures/")
         rows = load_evidence(raw_path)
+        negative_sequences = {row["sequence"].upper() for row in rows if int(row["label"]) == 0}
+        if len(negative_sequences) < 3:
+            raise RuntimeError("Zn train/validation/test need at least three distinct explicit "
+                "negative sequences; repeated chains/structures cannot fill independent splits. "
+                "Acquire more experimental negative evidence before expensive Selection.")
         provenance = json.loads((raw_path.parent / "provenance.json").read_text())
         if hashlib.sha256(raw_path.read_bytes()).hexdigest() != provenance["raw_sha256"]:
             raise ValueError("Frozen Zn raw evidence differs from Discovery provenance")
         snapshot = raw_path.parent / "structures"
         validate_structure_snapshot(self, rows, snapshot, workers, 120, False)
         sources = restore_structure_snapshot(self, snapshot)
-        if not any(int(row["label"]) == 0 for row in rows):
-            raise RuntimeError("no explicit negative Zn evidence; benchmark construction stopped")
-
         # 2. Validate biological assemblies and occupied Zn coordination. Keep rejected but
         # parseable candidates in RAW so homologous bridges cannot disappear before grouping.
 
@@ -189,6 +191,12 @@ class ZincSelection(lf.Work):
                                         sequence_coverage, sequence_evalue, foldseek_probability,
                                         foldseek_tmscore, foldseek_coverage, foldseek_evalue)
         rows, leakage = assign_leakage_groups(rows, similarity, group_same_pdb)
+        negative_groups = {row["leakage_group"] for row in rows
+                           if int(row["label"]) == 0 and row["quality_eligible"]}
+        if len(negative_groups) < 3:
+            raise RuntimeError(f"Zn has only {len(negative_groups)} eligible negative leakage "
+                "groups after full-RAW similarity; three independent split roles are impossible. "
+                "Acquire additional explicit evidence; do not split homologues or invent labels.")
         rows, phenotypes = assign_phenotypes(rows, phenotype_cluster_sizes, phenotype_min_samples,
                                              phenotype_stability, workers)
 
@@ -210,6 +218,9 @@ class ZincSelection(lf.Work):
                        if int(row["label"]) == 1 and not row["local_gt_expected"]]
         selected, split_audit = assign_splits(selected, train_fraction, validation_fraction,
                                               test_fraction, seed, training_only_ids=global_only)
+        if {int(row["label"]) for row in selected if row["split"] == "train"} != {0, 1}:
+            raise RuntimeError("Zn training split lacks one class under indivisible leakage "
+                               "groups; refusing an invalid binary benchmark")
         dilutions = create_dilutions(selected, dilution_fractions, dilution_replicates, seed)
         audit = audit_dataset(rows, selected, dilutions, selection["positive_negative_ratio"])
         audit.update(phenotypes=phenotypes, selection=selection, split_assignment=split_audit,

@@ -1,0 +1,275 @@
+{
+  "decision": "Frozen post-V10f development input and gate policy; not a confirmed universal optimum",
+  "decision_date": "2026-11-01",
+  "source_execution_id": "execution-0c388ab4f20c1f6a",
+  "source_code_identity": {
+    "changes_digest": "sha256:9de16618a47ce1675b5240a7d3fa7601244dc75b705eefbcc71c75f994a427a4",
+    "dirty": true,
+    "provider": "git",
+    "revision": "9d88ef5b1cc1ad8a01d231526b8feb513a72b86b",
+    "source_digest": null
+  },
+  "source_dataset_content_id": "sha256:0e09a1148d09f7912fdf249343db1e3348cf39dc9e493797db1f179df0469af0",
+  "source_seeds": [
+    269,
+    271,
+    277,
+    281
+  ],
+  "atomic_representation": {
+    "sources": [
+      "atom_name",
+      "residue_atom"
+    ],
+    "identity_dim": 8,
+    "force_sources": "learned"
+  },
+  "gate_policy": {
+    "lambda_surface": 0.04,
+    "lambda_chemical": 0.04,
+    "lambda_other": 0.04,
+    "initial_active_surface": 0.95,
+    "initial_active_chemical": 0.95,
+    "initial_active_other": 0.95,
+    "warmup_fraction": 0.0,
+    "ramp_fraction": 0.0
+  },
+  "gate_lambda": 0.04,
+  "gate_initial_active": 0.95,
+  "gate_cost_normalization": "baseline_count",
+  "denominator": 41,
+  "primary_configuration": "name_pair",
+  "primary_statistics": {
+    "S": {
+      "n": 4,
+      "mean": 0.30593103659724447,
+      "sd": 0.016701872710687612,
+      "median": 0.30393077573235666,
+      "minimum": 0.2893614780674825,
+      "maximum": 0.32650111685678196
+    },
+    "G": {
+      "n": 4,
+      "mean": 0.7043577596545219,
+      "sd": 0.011644357275248035,
+      "median": 0.7035311073064804,
+      "minimum": 0.6928477585315704,
+      "maximum": 0.7175210654735564
+    },
+    "raw_S": {
+      "n": 4,
+      "mean": 0.20035223207207095,
+      "sd": 0.008978530326706721,
+      "median": 0.19972157133195328,
+      "minimum": 0.19107023493715508,
+      "maximum": 0.21089555068722213
+    },
+    "global_auprc": {
+      "n": 4,
+      "mean": 0.6870617717504501,
+      "sd": 0.010170482916940867,
+      "median": 0.6861588954925537,
+      "minimum": 0.6769503951072693,
+      "maximum": 0.6989789009094238
+    },
+    "global_auroc": {
+      "n": 4,
+      "mean": 0.7447150647640228,
+      "sd": 0.015154530280417975,
+      "median": 0.7440662682056427,
+      "minimum": 0.7299416065216064,
+      "maximum": 0.7607861161231995
+    },
+    "selected_chemical_mean": {
+      "n": 4,
+      "mean": 0.8880632668733597,
+      "sd": 0.012024142682866074,
+      "median": 0.8843796700239182,
+      "minimum": 0.8788251876831055,
+      "maximum": 0.904668539762497
+    },
+    "selected_surface_mean": {
+      "n": 4,
+      "mean": 0.751141581684351,
+      "sd": 0.041426095168768114,
+      "median": 0.7665048986673355,
+      "minimum": 0.690377601981163,
+      "maximum": 0.7811789274215698
+    }
+  },
+  "paired_vs_all_sources": {
+    "configuration": "name_pair",
+    "reference": "s004_c004",
+    "paired": [
+      {
+        "seed": 269,
+        "differences": {
+          "S": 0.0030854434384416374,
+          "G": -0.008918249607086204,
+          "raw_S": -0.009592649311183338
+        }
+      },
+      {
+        "seed": 271,
+        "differences": {
+          "S": 0.01149741260622461,
+          "G": 0.00028400421142582566,
+          "raw_S": 0.007699235720792785
+        }
+      },
+      {
+        "seed": 277,
+        "differences": {
+          "S": 0.014329984534175721,
+          "G": -0.0059063374996185525,
+          "raw_S": -0.030029498235842972
+        }
+      },
+      {
+        "seed": 281,
+        "differences": {
+          "S": 0.017062636143664878,
+          "G": 0.022505539655685358,
+          "raw_S": -0.0054931053138502495
+        }
+      }
+    ],
+    "differences": {
+      "S": {
+        "n": 4,
+        "mean": 0.011493869180626712,
+        "sd": 0.0060485907946939,
+        "median": 0.012913698570200166,
+        "minimum": 0.0030854434384416374,
+        "maximum": 0.017062636143664878,
+        "increases": 4
+      },
+      "G": {
+        "n": 4,
+        "mean": 0.001991239190101607,
+        "sd": 0.014202580026772616,
+        "median": -0.0028111666440963634,
+        "minimum": -0.008918249607086204,
+        "maximum": 0.022505539655685358,
+        "increases": 2
+      },
+      "raw_S": {
+        "n": 4,
+        "mean": -0.009354004285020943,
+        "sd": 0.01563385788516346,
+        "median": -0.007542877312516794,
+        "minimum": -0.030029498235842972,
+        "maximum": 0.007699235720792785,
+        "increases": 1
+      }
+    }
+  },
+  "paired_vs_forced_closed": {
+    "configuration": "name_pair",
+    "reference": "forced_closed",
+    "paired": [
+      {
+        "seed": 269,
+        "differences": {
+          "S": -0.0017491438826683359,
+          "G": -0.011288535594940141,
+          "raw_S": 0.008803398601765572
+        }
+      },
+      {
+        "seed": 271,
+        "differences": {
+          "S": -0.0072621230347602594,
+          "G": -0.026015049219131448,
+          "raw_S": 0.008814050925566863
+        }
+      },
+      {
+        "seed": 277,
+        "differences": {
+          "S": 0.01993909983395814,
+          "G": -0.0006157934665679266,
+          "raw_S": -0.00452714470927329
+        }
+      },
+      {
+        "seed": 281,
+        "differences": {
+          "S": 0.004790367074105295,
+          "G": 0.022590053081512407,
+          "raw_S": -0.01676827609224027
+        }
+      }
+    ],
+    "differences": {
+      "S": {
+        "n": 4,
+        "mean": 0.00392954999765871,
+        "sd": 0.011755109547924185,
+        "median": 0.0015206115957184796,
+        "minimum": -0.0072621230347602594,
+        "maximum": 0.01993909983395814,
+        "increases": 2
+      },
+      "G": {
+        "n": 4,
+        "mean": -0.003832331299781777,
+        "sd": 0.020462620138567544,
+        "median": -0.005952164530754034,
+        "minimum": -0.026015049219131448,
+        "maximum": 0.022590053081512407,
+        "increases": 1
+      },
+      "raw_S": {
+        "n": 4,
+        "mean": -0.0009194928185452811,
+        "sd": 0.012294654323606479,
+        "median": 0.002138126946246141,
+        "minimum": -0.01676827609224027,
+        "maximum": 0.008814050925566863,
+        "increases": 2
+      }
+    }
+  },
+  "rationale": [
+    "Operative S is the declared scientific priority at G-selected checkpoints.",
+    "Name and residue-atom pair improves operative S over the default full-source configuration in all four V10f seeds.",
+    "Low initial activity produces strong attenuation and surface closures without consistent S/G improvement.",
+    "Higher penalties and progressive schedules do not establish useful chemical source elimination.",
+    "Keep historical curvature channels and learned gates at the reference policy instead of promoting unconfirmed sparsity.",
+    "Retain a contemporary historical-input control for independent confirmation."
+  ],
+  "limitations": [
+    "The four seeds were used to compare 20 policies; this is a development decision.",
+    "Name-pair versus trained forced-closed control has mixed signs and a small uncertain mean S advantage.",
+    "Name-pair does not improve raw S versus the default full-source configuration.",
+    "Low deterministic gates are not biological importance and can be compensated by later weights.",
+    "New chemical sources remain available in the reusable system for other tasks; their global inventories are not deleted."
+  ],
+  "downstream_configuration_files": [
+    "experiments/v10/wisdom_v10g.yaml",
+    "experiments/v10/wisdom_v10h.yaml",
+    "experiments/v10/wisdom_v10i.yaml.example",
+    "experiments/v11/wisdom_v11a.yaml",
+    "experiments/v11/wisdom_v11b.yaml",
+    "experiments/v11/wisdom_v11c.yaml",
+    "experiments/v11/wisdom_v11d.yaml",
+    "experiments/v11/wisdom_v11f.yaml.example",
+    "experiments/v13/wisdom_v13a.yaml",
+    "experiments/v13/wisdom_v13b.yaml",
+    "experiments/v13/wisdom_v13c.yaml",
+    "experiments/v13/wisdom_v13e.yaml.example",
+    "experiments/v13/wisdom_v13f.yaml.example"
+  ],
+  "application_scope": "Input sources and gate policy only. Existing phase-specific architecture factors, seeds, objective, resources and dataset selectors remain unchanged.",
+  "v12": "Inference-only template restores the policy saved in its chosen checkpoints; no training overrides added.",
+  "v10i": "Independent historical-input and name-pair controls use the same frozen gate policy; unresolved external or pretraining winners are not invented.",
+  "weights_transferred": false,
+  "training_or_submission_launched": false,
+  "evidence_sha256": {
+    "data/experimental/v10f-final/runs.json": "fcc3a18bb7b9202119a1af623f195dded0dc6e16dcd2d200da4e83a276795b3e",
+    "data/experimental/v10f-final/gate-aggregates.json": "fce191e056ee3d65a49d87988073e1ed92e36e88f36ffb3977ad4815feff08d1",
+    "data/experimental/v10f-final/gate-contrasts.json": "f4f946d1d981fb63c9aaccbcb76f355482b573e8787e0035b2cfb18cb5db65f0",
+    "data/experimental/v10f-final/audit.json": "0f122e1b58c0298e509882a45c0f1e26913aebaaf5ca3a40a56cb3f8d3aed0a3"
+  }
+}

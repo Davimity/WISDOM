@@ -9,7 +9,7 @@ from scipy.spatial import cKDTree
 from collections import defaultdict
 from lambdaforge.work import RateLimit
 from collections.abc import Mapping, Sequence
-from wisdom.preprocessing.common.descriptors import (
+from wisdom.preprocessing.common.clustering.descriptors import (
     HYDROPHOBIC, POLAR, POSITIVE, NEGATIVE, AROMATIC,
     protein_coordinates, sequence_features, global_features, rigid_transform,
     valid_structure, valid_foldseek_structure,

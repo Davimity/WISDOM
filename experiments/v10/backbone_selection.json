@@ -1,0 +1,535 @@
+{
+  "decision": "Provisional V10 development backbone, not a confirmed universal V9 winner",
+  "decision_date": "2026-10-27",
+  "source_execution_id": "execution-d384d8f6b5064a26",
+  "source_study_name": "wisdom-v9f-schnet",
+  "source_configuration": "full_rbf16_64",
+  "source_cell": 8,
+  "source_dataset_content_id": "sha256:ac1745504422cf60b84e57b90efc99206dea039dc36d0c1359782062cb10e202",
+  "source_seeds": [
+    173,
+    179,
+    181,
+    191
+  ],
+  "parameters": {
+    "atomic_encoder_type": "schnet",
+    "atomic_radial_encoding": "gaussian",
+    "atomic_radial_count": 16,
+    "atomic_hidden_dim": 64,
+    "atomic_output_dim": 128,
+    "atomic_layers": 2,
+    "atomic_spatial_cutoff": 6.0,
+    "hidden_dim": 128
+  },
+  "source_records": [
+    {
+      "seed": 173,
+      "run_id": "run-f9dfa8087cf0f661e46a",
+      "S": 0.2971258519220796,
+      "G": 0.6999796628952026,
+      "raw_S": 0.21416119073161527
+    },
+    {
+      "seed": 179,
+      "run_id": "run-74cb7396008658217bdf",
+      "S": 0.2758348272918203,
+      "G": 0.7067263901233672,
+      "raw_S": 0.1837246047969743
+    },
+    {
+      "seed": 181,
+      "run_id": "run-5be29f54b8df02deb1bb",
+      "S": 0.2907578201694003,
+      "G": 0.6964463889598846,
+      "raw_S": 0.1897624332923442
+    },
+    {
+      "seed": 191,
+      "run_id": "run-c6f6ccf4834362d73ca7",
+      "S": 0.30911104101516473,
+      "G": 0.7089325666427613,
+      "raw_S": 0.1792263712405282
+    }
+  ],
+  "evidence_files": {
+    "Memoria/data/experimental/v9f-final/runs.json": {
+      "sha256": "09b3e07a4db0ad8ff8ed3eacf3c4ba4d4dac0fbf547ca1b7f85520d4dc279a65",
+      "size_bytes": 8651246
+    },
+    "Memoria/data/experimental/v9f-final/encoder-aggregates.json": {
+      "sha256": "7aac1753ad0ab2382750aba8b59ba048460a75af59289714087407a45ba274e4",
+      "size_bytes": 113702
+    },
+    "Experimentos/v9f/manifest.json": {
+      "sha256": "a88064abe3fabf086f4da42a509aecfd14e361ada1e9dc4efeac92ae4d78e6d2",
+      "size_bytes": 258364
+    },
+    "Memoria/docs/v9f_resultados.md": {
+      "sha256": "34522641bef96c9cb0754e99f148c7c69b32edb724d99f20825f732e6c9ec48d",
+      "size_bytes": 4930
+    }
+  },
+  "comparators": {
+    "baseline": {
+      "S": {
+        "n": 4,
+        "mean": 0.27672105349013104,
+        "sd": 0.018308347705055503,
+        "median": 0.28137138108500304,
+        "minimum": 0.25117723446216106,
+        "maximum": 0.2929642173283569
+      },
+      "G": {
+        "n": 4,
+        "mean": 0.7134055122733116,
+        "sd": 0.0045065679466576225,
+        "median": 0.7115546792745591,
+        "minimum": 0.7104188263416289,
+        "maximum": 0.7200938642024993
+      },
+      "raw_S": {
+        "n": 4,
+        "mean": 0.16107015504702063,
+        "sd": 0.02003457483896347,
+        "median": 0.1599954931957387,
+        "minimum": 0.1385670145494206,
+        "maximum": 0.18572261924718453
+      },
+      "surface_negative_positive_mass": {
+        "n": 4,
+        "mean": 0.020236937857744178,
+        "sd": 0.013677165145221753,
+        "median": 0.0187273018951481,
+        "minimum": 0.005965847917469214,
+        "maximum": 0.03752729972321129
+      },
+      "surface_negative_peak": {
+        "n": 4,
+        "mean": 0.41871679739088563,
+        "sd": 0.12590343154427283,
+        "median": 0.43268296128682027,
+        "minimum": 0.26457825652278866,
+        "maximum": 0.5449230104671133
+      },
+      "training_peak_gib": {
+        "n": 4,
+        "mean": 17.183463215827942,
+        "sd": 1.1459177463586776,
+        "median": 17.175045013427734,
+        "minimum": 15.962469577789307,
+        "maximum": 18.421293258666992
+      },
+      "peak_reserved_gib": {
+        "n": 4,
+        "mean": 17.7734375,
+        "sd": 1.177946511263749,
+        "median": 17.74609375,
+        "minimum": 16.544921875,
+        "maximum": 19.056640625
+      },
+      "median_epoch_seconds": {
+        "n": 4,
+        "mean": 99.69994363185833,
+        "sd": 38.4517455822205,
+        "median": 107.2414263979881,
+        "minimum": 48.681016793940216,
+        "maximum": 135.6359049375169
+      },
+      "atomic_encoder_trainable_parameter_count": {
+        "n": 4,
+        "mean": 80944,
+        "sd": 0.0,
+        "median": 80944.0,
+        "minimum": 80944,
+        "maximum": 80944
+      },
+      "trainable_parameter_count": {
+        "n": 4,
+        "mean": 469875,
+        "sd": 0.0,
+        "median": 469875.0,
+        "minimum": 469875,
+        "maximum": 469875
+      }
+    },
+    "full_rbf16_64": {
+      "S": {
+        "n": 4,
+        "mean": 0.29320738509961625,
+        "sd": 0.013857450304817526,
+        "median": 0.29394183604574,
+        "minimum": 0.2758348272918203,
+        "maximum": 0.30911104101516473
+      },
+      "G": {
+        "n": 4,
+        "mean": 0.703021252155304,
+        "sd": 0.0058066564561042085,
+        "median": 0.7033530265092849,
+        "minimum": 0.6964463889598846,
+        "maximum": 0.7089325666427613
+      },
+      "raw_S": {
+        "n": 4,
+        "mean": 0.1917186500153655,
+        "sd": 0.015571942777635791,
+        "median": 0.18674351904465925,
+        "minimum": 0.1792263712405282,
+        "maximum": 0.21416119073161527
+      },
+      "surface_negative_positive_mass": {
+        "n": 4,
+        "mean": 0.01701195553859821,
+        "sd": 0.006627816522673998,
+        "median": 0.014786702578824,
+        "minimum": 0.011924382914484714,
+        "maximum": 0.026550034082260133
+      },
+      "surface_negative_peak": {
+        "n": 4,
+        "mean": 0.3793889883855788,
+        "sd": 0.08805131709102874,
+        "median": 0.34872959907956746,
+        "minimum": 0.31131237542927814,
+        "maximum": 0.508784379953902
+      },
+      "training_peak_gib": {
+        "n": 4,
+        "mean": 16.914633870124817,
+        "sd": 0.8417434332680195,
+        "median": 16.925651788711548,
+        "minimum": 15.963107585906982,
+        "maximum": 17.84412431716919
+      },
+      "peak_reserved_gib": {
+        "n": 4,
+        "mean": 17.55615234375,
+        "sd": 0.8555867245874037,
+        "median": 17.5791015625,
+        "minimum": 16.58203125,
+        "maximum": 18.484375
+      },
+      "median_epoch_seconds": {
+        "n": 4,
+        "mean": 119.4956124353339,
+        "sd": 13.464949820790567,
+        "median": 114.53007943520788,
+        "minimum": 109.61574124195613,
+        "maximum": 139.3065496289637
+      },
+      "atomic_encoder_trainable_parameter_count": {
+        "n": 4,
+        "mean": 87488,
+        "sd": 0.0,
+        "median": 87488.0,
+        "minimum": 87488,
+        "maximum": 87488
+      },
+      "trainable_parameter_count": {
+        "n": 4,
+        "mean": 476419,
+        "sd": 0.0,
+        "median": 476419.0,
+        "minimum": 476419,
+        "maximum": 476419
+      }
+    },
+    "restricted_direct_128": {
+      "S": {
+        "n": 4,
+        "mean": 0.2965525858658914,
+        "sd": 0.0031752615965177067,
+        "median": 0.2966428943122189,
+        "minimum": 0.29264509316999465,
+        "maximum": 0.300279461669133
+      },
+      "G": {
+        "n": 4,
+        "mean": 0.7011145114898681,
+        "sd": 0.01600710514921898,
+        "median": 0.6985083758831023,
+        "minimum": 0.6851331949234009,
+        "maximum": 0.7223080992698669
+      },
+      "raw_S": {
+        "n": 4,
+        "mean": 0.2012713304228622,
+        "sd": 0.02853831513602103,
+        "median": 0.213788988387986,
+        "minimum": 0.15875021428869598,
+        "maximum": 0.21875713062678082
+      },
+      "surface_negative_positive_mass": {
+        "n": 4,
+        "mean": 0.028325091615543255,
+        "sd": 0.025784880719961007,
+        "median": 0.018588959143257585,
+        "minimum": 0.010112951963679628,
+        "maximum": 0.06600949621197823
+      },
+      "surface_negative_peak": {
+        "n": 4,
+        "mean": 0.4425801985823508,
+        "sd": 0.16161516549011348,
+        "median": 0.40266837471983097,
+        "minimum": 0.2933229283234515,
+        "maximum": 0.6716611165662899
+      },
+      "training_peak_gib": {
+        "n": 4,
+        "mean": 17.975808143615723,
+        "sd": 0.8920512374945748,
+        "median": 17.983115673065186,
+        "minimum": 16.965575695037842,
+        "maximum": 18.971425533294678
+      },
+      "peak_reserved_gib": {
+        "n": 4,
+        "mean": 21.1904296875,
+        "sd": 0.40094600709099665,
+        "median": 21.248046875,
+        "minimum": 20.65625,
+        "maximum": 21.609375
+      },
+      "median_epoch_seconds": {
+        "n": 4,
+        "mean": 103.1603648949822,
+        "sd": 2.2130545412991647,
+        "median": 103.26475007802946,
+        "minimum": 100.34973071003333,
+        "maximum": 105.76222871383652
+      },
+      "atomic_encoder_trainable_parameter_count": {
+        "n": 4,
+        "mean": 281728,
+        "sd": 0.0,
+        "median": 281728.0,
+        "minimum": 281728,
+        "maximum": 281728
+      },
+      "trainable_parameter_count": {
+        "n": 4,
+        "mean": 670654,
+        "sd": 0.0,
+        "median": 670654.0,
+        "minimum": 670654,
+        "maximum": 670654
+      }
+    },
+    "restricted_rbf16_64": {
+      "S": {
+        "n": 4,
+        "mean": 0.28835980247993787,
+        "sd": 0.010460871618899737,
+        "median": 0.2893509481150164,
+        "minimum": 0.2753475445548675,
+        "maximum": 0.29938976913485127
+      },
+      "G": {
+        "n": 4,
+        "mean": 0.7080544352531433,
+        "sd": 0.010131841970368094,
+        "median": 0.7112599521875381,
+        "minimum": 0.6933562159538269,
+        "maximum": 0.71634162068367
+      },
+      "raw_S": {
+        "n": 4,
+        "mean": 0.18669994018145028,
+        "sd": 0.02926740818708339,
+        "median": 0.19667807676887605,
+        "minimum": 0.14402068941511542,
+        "maximum": 0.20942291777293362
+      },
+      "surface_negative_positive_mass": {
+        "n": 4,
+        "mean": 0.029153479538871183,
+        "sd": 0.015832173819401347,
+        "median": 0.027533534135727677,
+        "minimum": 0.011612174638100093,
+        "maximum": 0.04993467524592929
+      },
+      "surface_negative_peak": {
+        "n": 4,
+        "mean": 0.42720626543081486,
+        "sd": 0.041869307076333066,
+        "median": 0.44263929405989233,
+        "minimum": 0.366323539886841,
+        "maximum": 0.45722293371663375
+      },
+      "training_peak_gib": {
+        "n": 4,
+        "mean": 16.904669642448425,
+        "sd": 0.8430050565234635,
+        "median": 16.91684579849243,
+        "minimum": 15.951880931854248,
+        "maximum": 17.83310604095459
+      },
+      "peak_reserved_gib": {
+        "n": 4,
+        "mean": 17.67333984375,
+        "sd": 0.8125084118529903,
+        "median": 17.7861328125,
+        "minimum": 16.609375,
+        "maximum": 18.51171875
+      },
+      "median_epoch_seconds": {
+        "n": 4,
+        "mean": 101.14568515025894,
+        "sd": 24.908870945753076,
+        "median": 112.85592099122005,
+        "minimum": 63.86643766448833,
+        "maximum": 115.00446095410734
+      },
+      "atomic_encoder_trainable_parameter_count": {
+        "n": 4,
+        "mean": 87488,
+        "sd": 0.0,
+        "median": 87488.0,
+        "minimum": 87488,
+        "maximum": 87488
+      },
+      "trainable_parameter_count": {
+        "n": 4,
+        "mean": 476414,
+        "sd": 0.0,
+        "median": 476414.0,
+        "minimum": 476414,
+        "maximum": 476414
+      }
+    }
+  },
+  "paired_selected_minus_reference": {
+    "baseline": {
+      "S": {
+        "by_seed": {
+          "173": 0.004161634593722652,
+          "179": -0.010332835247562122,
+          "181": 0.03958058570723927,
+          "191": 0.03253594138454102
+        },
+        "mean": 0.016486331609485205,
+        "sample_sd": 0.023537915609357384,
+        "positive_count": 3,
+        "n": 4
+      },
+      "G": {
+        "by_seed": {
+          "173": -0.01111569404602053,
+          "179": -0.00528761148452761,
+          "181": -0.013972437381744252,
+          "191": -0.011161297559738048
+        },
+        "mean": -0.01038426011800761,
+        "sample_sd": 0.0036510101865122897,
+        "positive_count": 0,
+        "n": 4
+      },
+      "raw_S": {
+        "by_seed": {
+          "173": 0.06078791194458438,
+          "179": -0.0019980144502102226,
+          "181": 0.023144725687897716,
+          "191": 0.040659356691107595
+        },
+        "mean": 0.030648494968344868,
+        "sample_sd": 0.026650221629659413,
+        "positive_count": 3,
+        "n": 4
+      }
+    },
+    "restricted_direct_128": {
+      "S": {
+        "by_seed": {
+          "173": 0.001215229747364932,
+          "179": -0.016810265878174357,
+          "181": -0.00952164149973267,
+          "191": 0.011735874565441506
+        },
+        "mean": -0.003345200766275147,
+        "sample_sd": 0.012485895485603622,
+        "positive_count": 2,
+        "n": 4
+      },
+      "G": {
+        "by_seed": {
+          "173": -0.0035550296306610107,
+          "179": 0.013244330883026123,
+          "181": 0.011313194036483787,
+          "191": -0.013375532627105668
+        },
+        "mean": 0.0019067406654358077,
+        "sample_sd": 0.012654394871861074,
+        "positive_count": 2,
+        "n": 4
+      },
+      "raw_S": {
+        "by_seed": {
+          "173": -0.004595939895165546,
+          "179": -0.03290377124315402,
+          "181": 0.031012219003648228,
+          "191": -0.03172322949531542
+        },
+        "mean": -0.00955268040749669,
+        "sample_sd": 0.03003823691460264,
+        "positive_count": 1,
+        "n": 4
+      }
+    },
+    "restricted_rbf16_64": {
+      "S": {
+        "by_seed": {
+          "173": 0.011978815379894925,
+          "179": -0.023554941843030974,
+          "181": 0.015410275614532842,
+          "191": 0.01555618132731662
+        },
+        "mean": 0.004847582619678353,
+        "sample_sd": 0.01900703769765266,
+        "positive_count": 3,
+        "n": 4
+      },
+      "G": {
+        "by_seed": {
+          "173": -0.012441515922546387,
+          "179": -0.003372335433959983,
+          "181": -0.019895231723785378,
+          "191": 0.01557635068893437
+        },
+        "mean": -0.005033183097839344,
+        "sample_sd": 0.015310945784768893,
+        "positive_count": 1,
+        "n": 4
+      },
+      "raw_S": {
+        "by_seed": {
+          "173": 0.07014050131649985,
+          "179": -0.008905943722792853,
+          "181": -0.010963171725640736,
+          "191": -0.030196546532405416
+        },
+        "mean": 0.005018709833915211,
+        "sample_sd": 0.044460763682543494,
+        "positive_count": 1,
+        "n": 4
+      }
+    }
+  },
+  "rationale": [
+    "Near-highest operational surface S, 0.003346 below restricted direct 128; four seeds do not separate a universal winner.",
+    "Fewer atomic parameters (87488 versus 281728) and lower observed allocated/reserved peaks than restricted direct 128.",
+    "Lower negative-protein probability mass/peak and slightly higher mean G than restricted direct 128.",
+    "Retain full original edge metadata so the V10 input-source study does not also impose a new edge-source mask."
+  ],
+  "limitations": [
+    "Mean G is lower than the contemporary original baseline, in all four paired seeds; non-inferiority is NOT established.",
+    "Observed H200 NVL epoch times are shared-hardware measurements; selected candidate did NOT demonstrate epoch acceleration.",
+    "Four reused development seeds and a non-robust leave-one-seed-out ranking require independent confirmation.",
+    "V10 uses enriched @8, which must independently preserve intended population, splits, base geometry and GT; no @6/@8 equivalence is asserted."
+  ],
+  "execution_policy": "Freeze these GNN parameters across all current V10 controls/interventions, train from scratch with existing V10 seeds. Do not load V9f weights, choose a seed, alter held-out test or rewrite historical evidence.",
+  "excluded_from_update": [
+    "Historical wisdom_v10_legacy_confirmation.yaml.example; remains an explicitly superseded template."
+  ]
+}
